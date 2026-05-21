@@ -1,0 +1,256 @@
+import { tokenize, resolve } from '@/engine/parser';
+import { grammarFor } from './grammar';
+import {
+  type Session,
+  normaliseInterface,
+  fullInterfaceName,
+  isValidIpv4,
+  isValidMask,
+} from './state';
+
+/** A line of terminal output produced by executing a command. */
+export interface CommandOutput {
+  readonly kind: 'output' | 'error' | 'system';
+  readonly text: string;
+}
+
+export interface ApplyResult {
+  readonly session: Session;
+  readonly output: CommandOutput[];
+}
+
+const err = (text: string): CommandOutput[] => [{ kind: 'error', text }];
+const out = (...lines: string[]): CommandOutput[] =>
+  lines.map((text) => ({ kind: 'output', text }));
+
+/**
+ * Apply a raw command line to a session, returning a NEW session (the input is
+ * never mutated) plus the output to print. Fully deterministic.
+ */
+export function applyCommand(session: Session, raw: string): ApplyResult {
+  const { tokens, raw: trimmed } = tokenize(raw);
+  if (tokens.length === 0) return { session, output: [] };
+
+  const result = resolve(tokens, grammarFor(session.mode));
+
+  switch (result.kind) {
+    case 'empty':
+      return { session, output: [] };
+    case 'ambiguous':
+      return { session, output: err(`% Ambiguous command: "${result.token}"`) };
+    case 'invalid':
+      return { session, output: err(`% Invalid input detected at "${result.token}".`) };
+    case 'incomplete':
+      return { session, output: err('% Incomplete command.') };
+    case 'complete':
+      return dispatch(session, result.command, result.args, trimmed);
+  }
+}
+
+function dispatch(
+  prev: Session,
+  command: string[],
+  args: Record<string, string>,
+  raw: string,
+): ApplyResult {
+  const s: Session = structuredClone(prev);
+  s.history.push(raw);
+  const head = command[0];
+
+  switch (head) {
+    case 'enable':
+      if (s.mode === 'user') s.mode = 'priv';
+      return { session: s, output: [] };
+
+    case 'disable':
+      s.mode = 'user';
+      return { session: s, output: [] };
+
+    case 'configure':
+      s.mode = 'config';
+      return {
+        session: s,
+        output: out('Enter configuration commands, one per line. End with CNTL/Z.'),
+      };
+
+    case 'exit':
+      if (s.mode === 'config-if') {
+        s.mode = 'config';
+        s.currentInterface = null;
+      } else if (s.mode === 'config') {
+        s.mode = 'priv';
+      } else if (s.mode === 'priv') {
+        s.mode = 'user';
+      }
+      return { session: s, output: [] };
+
+    case 'end':
+      s.mode = 'priv';
+      s.currentInterface = null;
+      return { session: s, output: [] };
+
+    case 'hostname':
+      s.device.hostname = args.name;
+      return { session: s, output: [] };
+
+    case 'interface':
+      return enterInterface(s, args.iface);
+
+    case 'description':
+      if (s.currentInterface) s.device.interfaces[s.currentInterface].description = args.text;
+      return { session: s, output: [] };
+
+    case 'shutdown':
+      return setAdmin(s, false);
+
+    case 'no':
+      return negate(s, command);
+
+    case 'ip':
+      return setIpAddress(s, args.ip, args.mask);
+
+    case 'show':
+      return show(s, command);
+
+    case 'write':
+      return { session: s, output: out('Building configuration...', '[OK]') };
+
+    default:
+      return { session: s, output: err('% Unknown command.') };
+  }
+}
+
+function enterInterface(s: Session, token: string): ApplyResult {
+  const id = normaliseInterface(token);
+  if (!id) return { session: s, output: err(`% Invalid input detected at "${token}".`) };
+  if (!s.device.interfaces[id]) {
+    return { session: s, output: err(`% Invalid interface ${fullInterfaceName(id)}`) };
+  }
+  s.mode = 'config-if';
+  s.currentInterface = id;
+  return { session: s, output: [] };
+}
+
+function setIpAddress(s: Session, ip: string, mask: string): ApplyResult {
+  if (!isValidIpv4(ip)) return { session: s, output: err(`% Invalid input detected at "${ip}".`) };
+  if (!isValidMask(mask)) return { session: s, output: err('% Invalid subnet mask.') };
+  if (s.currentInterface) {
+    s.device.interfaces[s.currentInterface].ip = ip;
+    s.device.interfaces[s.currentInterface].mask = mask;
+  }
+  return { session: s, output: [] };
+}
+
+function setAdmin(s: Session, up: boolean): ApplyResult {
+  if (!s.currentInterface) return { session: s, output: [] };
+  const iface = s.device.interfaces[s.currentInterface];
+  const changed = iface.adminUp !== up;
+  iface.adminUp = up;
+  if (up && changed) {
+    const name = iface.name;
+    return {
+      session: s,
+      output: [
+        { kind: 'system', text: `%LINK-3-UPDOWN: Interface ${name}, changed state to up` },
+        {
+          kind: 'system',
+          text: `%LINEPROTO-5-UPDOWN: Line protocol on Interface ${name}, changed state to up`,
+        },
+      ],
+    };
+  }
+  return { session: s, output: [] };
+}
+
+function negate(s: Session, command: string[]): ApplyResult {
+  // command = ['no', ...]
+  switch (command[1]) {
+    case 'shutdown':
+      return setAdmin(s, true);
+    case 'hostname':
+      s.device.hostname = 'Router';
+      return { session: s, output: [] };
+    case 'ip':
+      if (s.currentInterface) {
+        s.device.interfaces[s.currentInterface].ip = null;
+        s.device.interfaces[s.currentInterface].mask = null;
+      }
+      return { session: s, output: [] };
+    default:
+      return { session: s, output: err('% Incomplete command.') };
+  }
+}
+
+function show(s: Session, command: string[]): ApplyResult {
+  // command = ['show', ...]
+  const what = command[1];
+  if (what === 'ip') return { session: s, output: out(...showIpIntBrief(s)) };
+  if (what === 'interfaces') return { session: s, output: out(...showInterfaces(s)) };
+  if (what === 'version') return { session: s, output: out(...showVersion(s)) };
+  if (what === 'running-config') return { session: s, output: out(...showRunningConfig(s)) };
+  return { session: s, output: err('% Incomplete command.') };
+}
+
+function showIpIntBrief(s: Session): string[] {
+  const header =
+    'Interface'.padEnd(23) +
+    'IP-Address'.padEnd(16) +
+    'OK?'.padEnd(4) +
+    'Method'.padEnd(7) +
+    'Status'.padEnd(22) +
+    'Protocol';
+  const rows = Object.values(s.device.interfaces).map((i) => {
+    const ip = i.ip ?? 'unassigned';
+    const method = i.ip ? 'manual' : 'unset';
+    const status = i.adminUp ? 'up' : 'administratively down';
+    const proto = i.adminUp ? 'up' : 'down';
+    return (
+      i.name.padEnd(23) +
+      ip.padEnd(16) +
+      'YES '.padEnd(4) +
+      method.padEnd(7) +
+      status.padEnd(22) +
+      proto
+    );
+  });
+  return [header, ...rows];
+}
+
+function maskToCidr(mask: string): number {
+  return mask
+    .split('.')
+    .reduce((bits, octet) => bits + ((parseInt(octet, 10).toString(2).match(/1/g) ?? []).length), 0);
+}
+
+function showInterfaces(s: Session): string[] {
+  return Object.values(s.device.interfaces).flatMap((i) => {
+    const state = i.adminUp ? 'up' : 'administratively down';
+    const proto = i.adminUp ? 'up' : 'down';
+    const lines = [`${i.name} is ${state}, line protocol is ${proto}`];
+    if (i.ip && i.mask) lines.push(`  Internet address is ${i.ip}/${maskToCidr(i.mask)}`);
+    else lines.push('  Internet protocol processing disabled');
+    return lines;
+  });
+}
+
+function showVersion(s: Session): string[] {
+  return [
+    `Cisco IOS Software, ${s.device.platform} Software`,
+    `${s.device.hostname} uptime is 0 minutes`,
+    'System image simulated by CertHead Labs',
+  ];
+}
+
+function showRunningConfig(s: Session): string[] {
+  const lines = ['Building configuration...', '', '!', `hostname ${s.device.hostname}`, '!'];
+  for (const i of Object.values(s.device.interfaces)) {
+    lines.push(`interface ${i.name}`);
+    if (i.description) lines.push(` description ${i.description}`);
+    if (i.ip && i.mask) lines.push(` ip address ${i.ip} ${i.mask}`);
+    else lines.push(' no ip address');
+    if (!i.adminUp) lines.push(' shutdown');
+    lines.push('!');
+  }
+  lines.push('end');
+  return lines;
+}
