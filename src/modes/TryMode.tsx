@@ -1,27 +1,47 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Layout } from '@/components/Layout';
 import { Terminal } from '@/components/Terminal';
 import { TopologyPanel } from '@/components/TopologyPanel';
 import { ObjectivesPanel } from '@/components/ObjectivesPanel';
 import { useLabSession } from '@/engine/terminal/useLabSession';
 import { lab01InterfaceIp } from '@/labs/ccna/lab-01-interface-ip';
+import { initAnalytics, track } from '@/analytics/posthog';
 
 const REGISTER_URL = 'https://certhead.com/register?source=free-lab';
 
 /**
  * Public free-lab route (`/try`). No auth, hardcoded to the single free lab.
  * On completion, shows the upgrade CTA — AFTER completion, never during
- * (CLAUDE.md free-lab design principle). No CertHead API calls.
+ * (CLAUDE.md free-lab design principle). No CertHead API calls. Anonymous
+ * PostHog funnel events only: viewed -> started -> completed -> cta_clicked.
  */
 export function TryMode() {
   const lab = lab01InterfaceIp;
   const session = useLabSession(lab);
 
+  // Funnel top: one view event on mount.
+  useEffect(() => {
+    initAnalytics();
+    track('lab_viewed', { labId: lab.id });
+  }, [lab.id]);
+
+  // Engagement: fire once when the learner runs their first command.
+  const startedRef = useRef(false);
+  useEffect(() => {
+    if (!startedRef.current && session.commandCount > 0) {
+      startedRef.current = true;
+      track('lab_started', { labId: lab.id });
+    }
+  }, [session.commandCount, lab.id]);
+
   // Latch completion so the CTA persists even if the learner keeps typing.
   const [completed, setCompleted] = useState(false);
   useEffect(() => {
-    if (session.allMet) setCompleted(true);
-  }, [session.allMet]);
+    if (session.allMet && !completed) {
+      setCompleted(true);
+      track('lab_completed', { labId: lab.id, commandCount: session.commandCount });
+    }
+  }, [session.allMet, completed, session.commandCount, lab.id]);
 
   return (
     <Layout
@@ -32,14 +52,14 @@ export function TryMode() {
       terminal={
         <div className="relative h-full">
           <Terminal term={session} />
-          {completed && <CompletionCard />}
+          {completed && <CompletionCard labId={lab.id} />}
         </div>
       }
     />
   );
 }
 
-function CompletionCard() {
+function CompletionCard({ labId }: { labId: string }) {
   return (
     <div className="absolute inset-x-0 bottom-0 border-t border-terminal-prompt/30 bg-panel-header/95 p-5 backdrop-blur">
       <div className="mx-auto flex max-w-2xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -54,6 +74,7 @@ function CompletionCard() {
         </div>
         <a
           href={REGISTER_URL}
+          onClick={() => track('cta_clicked', { labId })}
           className="shrink-0 rounded-md bg-terminal-prompt px-4 py-2 text-center font-sans text-sm font-semibold text-[#06231d] transition hover:brightness-110"
         >
           Unlock with CertHead Pro

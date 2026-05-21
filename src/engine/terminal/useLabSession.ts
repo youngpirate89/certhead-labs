@@ -8,6 +8,8 @@ import type { Lab } from '@/engine/types';
 export interface UseLabSession extends UseTerminal {
   objectives: ObjectiveStatus[];
   allMet: boolean;
+  /** Number of successfully executed commands so far (for engagement signals). */
+  commandCount: number;
 }
 
 /**
@@ -41,5 +43,5 @@ export function useLabSession(lab: Lab): UseLabSession {
 
   const { objectives, allMet } = useMemo(() => grade(lab, session), [lab, session]);
 
-  return { ...term, objectives, allMet };
+  return { ...term, objectives, allMet, commandCount: session.history.length };
 }

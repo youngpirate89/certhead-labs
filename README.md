@@ -6,9 +6,11 @@ See `CLAUDE.md` for the product thesis, architecture decisions, and build order.
 
 ## Status
 
-**Weekend 1-2 — Foundation.** Vite + React + TS scaffold, three-panel layout,
-terminal primitive, and parser primitive (tokenizer + prefix-match resolution)
-with unit tests. The Cisco IOS adapter and the free lab are next (Weekend 3-4).
+**Ship Milestone 1 — public free lab.** Cisco IOS adapter (mode stack,
+interface state machine, ~30 commands), declarative grading, and the free
+interface-IP lab at the `/try` route, with anonymous PostHog funnel analytics.
+Deploy-ready for Cloudflare Pages — see `docs/DEPLOY.md`. The `/embed` Pro route
+(JWT) is Milestone 2, gated on 300+ CertHead subscribers.
 
 ## Develop
 
