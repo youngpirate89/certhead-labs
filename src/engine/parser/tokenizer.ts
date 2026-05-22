@@ -8,6 +8,10 @@
  * not to this shared primitive.
  *
  * Determinism guarantee (CLAUDE.md constraint #8): same input -> same output.
+ *
+ * Offsets: each entry in `offsets[i]` is the 0-based start index of `tokens[i]`
+ * within the ORIGINAL (untrimmed) input line. Adapters use this to position
+ * IOS-style `^` carets under the offending token in the echoed command.
  */
 
 export interface Tokenized {
@@ -15,16 +19,30 @@ export interface Tokenized {
   readonly raw: string;
   /** Non-empty tokens in order. */
   readonly tokens: readonly string[];
+  /** Start char-index of each token within the ORIGINAL untrimmed line. */
+  readonly offsets: readonly number[];
 }
 
 /**
  * Tokenize a raw command line.
  *
  * @example
- * tokenize('  show   ip int br ') // -> { raw: 'show   ip int br', tokens: ['show','ip','int','br'] }
+ * tokenize('  show   ip int br ')
+ *   // -> { raw: 'show   ip int br',
+ *   //      tokens: ['show','ip','int','br'],
+ *   //      offsets: [2, 9, 12, 16] }
  */
 export function tokenize(line: string): Tokenized {
-  const raw = line.trim();
-  const tokens = raw.length === 0 ? [] : raw.split(/\s+/);
-  return { raw, tokens };
+  const tokens: string[] = [];
+  const offsets: number[] = [];
+  let i = 0;
+  while (i < line.length) {
+    while (i < line.length && /\s/.test(line[i])) i++;
+    if (i >= line.length) break;
+    const start = i;
+    while (i < line.length && !/\s/.test(line[i])) i++;
+    tokens.push(line.slice(start, i));
+    offsets.push(start);
+  }
+  return { raw: line.trim(), tokens, offsets };
 }

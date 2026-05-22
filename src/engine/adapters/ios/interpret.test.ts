@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { applyCommand, contextHelp, tabComplete } from './interpret';
 import { createSession, buildDevice, prompt, type Session } from './state';
+import { grade } from '@/engine/grading';
+import { lab01InterfaceIp } from '@/labs/ccna/lab-01-interface-ip';
 
 function fresh(): Session {
   return createSession(buildDevice({ id: 'R1', platform: 'ISR4321', interfaces: ['Gi0/0', 'Gi0/1'] }));
@@ -86,7 +88,10 @@ describe('IOS interpreter — resolution errors and show', () => {
   it('reports ambiguous, invalid, and incomplete', () => {
     const priv = applyCommand(fresh(), 'enable').session;
     expect(applyCommand(priv, 'show i').output[0].text).toMatch(/Ambiguous/);
-    expect(applyCommand(priv, 'frobnicate').output[0].text).toMatch(/Invalid input/);
+    // Invalid input now renders as a caret line + message; the message lives on the second line.
+    const invalid = applyCommand(priv, 'frobnicate').output;
+    expect(invalid[0].text).toMatch(/^\s+\^$/);
+    expect(invalid[1].text).toMatch(/Invalid input/);
     expect(applyCommand(priv, 'show').output[0].text).toMatch(/Incomplete/);
   });
 
@@ -111,6 +116,102 @@ describe('IOS interpreter — resolution errors and show', () => {
     const before = structuredClone(s);
     applyCommand(s, 'configure terminal');
     expect(s).toEqual(before);
+  });
+});
+
+describe('IOS interpreter — `do` exec shortcut in config modes', () => {
+  function configIf(): Session {
+    return run(fresh(), ['enable', 'configure terminal', 'interface gi0/0']);
+  }
+
+  it('runs `do show ip interface brief` and stays in config-if', () => {
+    const s = configIf();
+    const { session: after, output } = applyCommand(s, 'do show ip interface brief');
+    expect(after.mode).toBe('config-if');
+    expect(after.currentInterface).toBe('Gi0/0');
+    expect(prompt(after)).toBe('R1(config-if)#');
+    const text = output.map((o) => o.text).join('\n');
+    expect(text).toMatch(/Interface\s+IP-Address/);
+    expect(text).toMatch(/GigabitEthernet0\/0/);
+  });
+
+  it('records `do` in raw + resolved history (canonical form preserves the prefix)', () => {
+    const s = configIf();
+    const after = applyCommand(s, 'do sh ip int br').session;
+    expect(after.history[after.history.length - 1]).toBe('do sh ip int br');
+    expect(after.resolvedHistory[after.resolvedHistory.length - 1]).toBe(
+      'do show ip interface brief',
+    );
+  });
+
+  it('credits the verify objective when run via `do` from config-if', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface gi0/0',
+      'ip address 192.168.1.1 255.255.255.0',
+      'no shutdown',
+      'do show ip int brief',
+    ]);
+    const verify = grade(lab01InterfaceIp, s).objectives.find((o) => o.id === 'verify');
+    expect(verify?.met).toBe(true);
+  });
+
+  it('rejects `do` alone with caret just past the token', () => {
+    const s = configIf();
+    const out = applyCommand(s, 'do').output;
+    expect(out).toHaveLength(2);
+    // promptLen = 'R1(config-if)#'.length + 1 (trailing space) = 15
+    // caret just past 'do' → spaces = 15 + 2 = 17
+    const expectedPromptLen = prompt(s).length + 1;
+    expect(out[0].text).toBe(' '.repeat(expectedPromptLen + 2) + '^');
+    expect(out[1].text).toBe("% Invalid input detected at '^' marker.");
+  });
+
+  it('positions caret under the failing token after `do <bad>`', () => {
+    const s = configIf();
+    const out = applyCommand(s, 'do frobnicate').output;
+    const promptLen = prompt(s).length + 1;
+    // 'frobnicate' starts at char-offset 3 in the typed line.
+    expect(out[0].text).toBe(' '.repeat(promptLen + 3) + '^');
+    expect(out[1].text).toBe("% Invalid input detected at '^' marker.");
+  });
+
+  it('positions caret deep on `do sh ip int xyz`', () => {
+    const s = configIf();
+    const out = applyCommand(s, 'do sh ip int xyz').output;
+    const promptLen = prompt(s).length + 1;
+    // 'xyz' starts at offset 13: 'do '(3) + 'sh '(3) + 'ip '(3) + 'int '(4)
+    expect(out[0].text).toBe(' '.repeat(promptLen + 13) + '^');
+  });
+
+  it('does NOT treat `do` as a keyword in user / priv modes', () => {
+    const user = fresh();
+    const userOut = applyCommand(user, 'do show version').output;
+    expect(userOut[1].text).toBe("% Invalid input detected at '^' marker.");
+
+    const priv = applyCommand(user, 'enable').session;
+    const privOut = applyCommand(priv, 'do show version').output;
+    expect(privOut[1].text).toBe("% Invalid input detected at '^' marker.");
+  });
+});
+
+describe('IOS interpreter — invalid-input `^` caret rendering', () => {
+  it('places the caret under the first failing token at column 0 of the input', () => {
+    const cfg = run(fresh(), ['enable', 'configure terminal']);
+    const out = applyCommand(cfg, 'frob').output;
+    const promptLen = prompt(cfg).length + 1;
+    // 'frob' starts at offset 0
+    expect(out[0].text).toBe(' '.repeat(promptLen + 0) + '^');
+    expect(out[1].text).toBe("% Invalid input detected at '^' marker.");
+  });
+
+  it('places the caret under the bad token when it follows valid keywords', () => {
+    const priv = applyCommand(fresh(), 'enable').session;
+    const out = applyCommand(priv, 'show frobnicate').output;
+    const promptLen = prompt(priv).length + 1;
+    // 'frobnicate' starts at offset 5: 'show '
+    expect(out[0].text).toBe(' '.repeat(promptLen + 5) + '^');
   });
 });
 

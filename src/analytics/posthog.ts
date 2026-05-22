@@ -17,7 +17,14 @@ type PostHog = typeof posthogType;
 let ph: PostHog | null = null;
 let loading = false;
 
-export type LabEvent = 'lab_viewed' | 'lab_started' | 'lab_completed' | 'cta_clicked';
+export type LabEvent =
+  | 'lab_viewed'
+  | 'lab_started'
+  | 'lab_brief_dismissed'
+  | 'lab_completed'
+  | 'lab_reset'
+  | 'hint_shown'
+  | 'cta_clicked';
 const queue: { event: LabEvent; props?: Record<string, unknown> }[] = [];
 
 export function initAnalytics(): void {

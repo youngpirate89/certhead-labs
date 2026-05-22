@@ -1,11 +1,13 @@
 import { tokenize, resolve, complete } from '@/engine/parser';
 import { grammarFor } from './grammar';
 import {
+  type Mode,
   type Session,
   normaliseInterface,
   fullInterfaceName,
   isValidIpv4,
   isValidMask,
+  prompt as promptFor,
 } from './state';
 
 /** A line of terminal output produced by executing a command. */
@@ -23,15 +25,65 @@ const err = (text: string): CommandOutput[] => [{ kind: 'error', text }];
 const out = (...lines: string[]): CommandOutput[] =>
   lines.map((text) => ({ kind: 'output', text }));
 
+/** Config-family modes — the contexts where `do <exec-cmd>` is accepted. */
+function isConfigFamily(mode: Mode): boolean {
+  return mode === 'config' || mode === 'config-if';
+}
+
+/**
+ * Render an IOS-authentic invalid-input error: a caret line aligned under the
+ * offending token in the echoed command, followed by the canonical message.
+ *
+ * The terminal renders an echoed input line as `${prompt} ${text}` (one literal
+ * space between prompt and text). The caret column therefore equals
+ * `promptStr.length + 1 + charOffset`, where `charOffset` is the offending
+ * token's start position within the user's typed line.
+ */
+function invalidInputOutput(promptStr: string, charOffset: number): CommandOutput[] {
+  const renderedPromptLen = promptStr.length + 1;
+  const caretLine = ' '.repeat(renderedPromptLen + charOffset) + '^';
+  return [
+    { kind: 'error', text: caretLine },
+    { kind: 'error', text: "% Invalid input detected at '^' marker." },
+  ];
+}
+
 /**
  * Apply a raw command line to a session, returning a NEW session (the input is
  * never mutated) plus the output to print. Fully deterministic.
+ *
+ * In config-family modes (config, config-if) a leading `do` token is treated
+ * as "run the rest as a privileged-EXEC command, then stay in this mode" —
+ * the IOS `do` shortcut. `do` in user/priv modes is itself invalid input.
  */
 export function applyCommand(session: Session, raw: string): ApplyResult {
-  const { tokens, raw: trimmed } = tokenize(raw);
+  const { tokens, offsets } = tokenize(raw);
   if (tokens.length === 0) return { session, output: [] };
 
-  const result = resolve(tokens, grammarFor(session.mode));
+  const promptStr = promptFor(session);
+
+  // `do <exec-cmd>` in config-family modes: resolve the remainder against the
+  // privileged-EXEC grammar without changing the mode or prompt.
+  let grammar = grammarFor(session.mode);
+  let activeTokens: readonly string[] = tokens;
+  let activeOffsets: readonly number[] = offsets;
+  let doForm = false;
+
+  if (isConfigFamily(session.mode) && tokens[0] === 'do') {
+    if (tokens.length === 1) {
+      // Caret just past the `do` token — no remainder to resolve.
+      return {
+        session,
+        output: invalidInputOutput(promptStr, offsets[0] + tokens[0].length),
+      };
+    }
+    doForm = true;
+    grammar = grammarFor('priv');
+    activeTokens = tokens.slice(1);
+    activeOffsets = offsets.slice(1);
+  }
+
+  const result = resolve(activeTokens, grammar);
 
   switch (result.kind) {
     case 'empty':
@@ -39,12 +91,44 @@ export function applyCommand(session: Session, raw: string): ApplyResult {
     case 'ambiguous':
       return { session, output: err(`% Ambiguous command: "${result.token}"`) };
     case 'invalid':
-      return { session, output: err(`% Invalid input detected at "${result.token}".`) };
+      return {
+        session,
+        output: invalidInputOutput(promptStr, activeOffsets[result.position]),
+      };
     case 'incomplete':
       return { session, output: err('% Incomplete command.') };
-    case 'complete':
-      return dispatch(session, result.command, result.args, trimmed);
+    case 'complete': {
+      if (doForm) return dispatchDo(session, result.command, result.args, raw);
+      return dispatch(session, result.command, result.args, raw.trim());
+    }
   }
+}
+
+/**
+ * Execute a `do <exec-cmd>` form: run the resolved command against the
+ * privileged-EXEC dispatcher, but DO NOT let it change the mode, current
+ * interface, or other "context" state. History is recorded with `do` preserved
+ * (raw as typed; canonical with `do` prefix in resolvedHistory).
+ */
+function dispatchDo(
+  prev: Session,
+  command: string[],
+  args: Record<string, string>,
+  raw: string,
+): ApplyResult {
+  const inner = dispatch(prev, command, args, raw.trim());
+  // Restore mode + currentInterface so the prompt stays in the config-family
+  // context. Replace the just-pushed resolvedHistory entry with the do-form.
+  const last = inner.session.resolvedHistory.length - 1;
+  const fixed: Session = {
+    ...inner.session,
+    mode: prev.mode,
+    currentInterface: prev.currentInterface,
+    resolvedHistory: inner.session.resolvedHistory.map((cmd, i) =>
+      i === last ? `do ${cmd}` : cmd,
+    ),
+  };
+  return { session: fixed, output: inner.output };
 }
 
 /**
