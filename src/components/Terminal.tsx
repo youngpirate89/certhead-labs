@@ -23,6 +23,13 @@ export function Terminal({ term }: TerminalProps) {
   }, [term.lines]);
 
   function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    // Intercept `?` BEFORE it lands in the input buffer: real IOS treats `?`
+    // as an interactive help trigger, not a literal character.
+    if (e.key === '?') {
+      e.preventDefault();
+      term.requestHelp();
+      return;
+    }
     switch (e.key) {
       case 'Enter':
         e.preventDefault();

@@ -13,3 +13,5 @@ export type {
   CommandContext,
   ResolveResult,
 } from './resolver';
+export { complete } from './completer';
+export type { Completion, CompleteResult } from './completer';

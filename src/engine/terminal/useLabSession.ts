@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { useTerminal, type ExecResult, type UseTerminal } from './useTerminal';
-import { applyCommand } from '@/engine/adapters/ios/interpret';
+import { useTerminal, type ExecResult, type OutputLine, type UseTerminal } from './useTerminal';
+import { applyCommand, contextHelp } from '@/engine/adapters/ios/interpret';
 import { createSession, buildDevice, prompt, type Session } from '@/engine/adapters/ios/state';
 import { grade, type ObjectiveStatus } from '@/engine/grading';
 import type { Lab } from '@/engine/types';
@@ -31,12 +31,19 @@ export function useLabSession(lab: Lab): UseLabSession {
     return { lines: output.map((o) => ({ kind: o.kind, text: o.text })) };
   }, []);
 
+  const help = useCallback(
+    (partialLine: string): OutputLine[] =>
+      contextHelp(sessionRef.current, partialLine).map((o) => ({ kind: o.kind, text: o.text })),
+    [],
+  );
+
   const term = useTerminal({
     execute,
+    help,
     prompt: prompt(session),
     banner: [
       { kind: 'system', text: `${lab.title} — ${lab.exam}` },
-      { kind: 'system', text: 'Type commands as you would on a real router. Abbreviations work.' },
+      { kind: 'system', text: 'Type commands as you would on a real router. Abbreviations work. Press ? for help.' },
       { kind: 'system', text: '' },
     ],
   });

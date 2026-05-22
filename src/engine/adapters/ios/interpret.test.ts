@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applyCommand } from './interpret';
+import { applyCommand, contextHelp } from './interpret';
 import { createSession, buildDevice, prompt, type Session } from './state';
 
 function fresh(): Session {
@@ -110,6 +110,84 @@ describe('IOS interpreter — resolution errors and show', () => {
     const s = applyCommand(fresh(), 'enable').session;
     const before = structuredClone(s);
     applyCommand(s, 'configure terminal');
+    expect(s).toEqual(before);
+  });
+});
+
+describe('IOS interpreter — ? context help', () => {
+  it('lists user-mode commands for `?` at the prompt', () => {
+    const lines = contextHelp(fresh(), '').map((o) => o.text);
+    const text = lines.join('\n');
+    expect(text).toMatch(/enable\s+Turn on privileged commands/);
+    expect(text).toMatch(/show\s+Display running system information/);
+    expect(text).toMatch(/exit\s+Exit from the EXEC/);
+  });
+
+  it('lists priv-mode commands including configure, show, write', () => {
+    const priv = applyCommand(fresh(), 'enable').session;
+    const text = contextHelp(priv, '').map((o) => o.text).join('\n');
+    expect(text).toMatch(/configure/);
+    expect(text).toMatch(/disable/);
+    expect(text).toMatch(/write/);
+  });
+
+  it('lists children of a partial line (`show ` with trailing space)', () => {
+    const priv = applyCommand(fresh(), 'enable').session;
+    const text = contextHelp(priv, 'show ').map((o) => o.text).join('\n');
+    expect(text).toMatch(/interfaces\s+Interface status and configuration/);
+    expect(text).toMatch(/ip/);
+    expect(text).toMatch(/running-config\s+Current operating configuration/);
+    expect(text).toMatch(/version\s+System hardware and software status/);
+  });
+
+  it('filters children by partial token (no trailing space)', () => {
+    const priv = applyCommand(fresh(), 'enable').session;
+    const text = contextHelp(priv, 'show i').map((o) => o.text).join('\n');
+    expect(text).toMatch(/interfaces/);
+    expect(text).toMatch(/ip/);
+    expect(text).not.toMatch(/version/);
+    expect(text).not.toMatch(/running-config/);
+  });
+
+  it('resolves abbreviated tokens before listing children (`sh ?` -> show children)', () => {
+    const priv = applyCommand(fresh(), 'enable').session;
+    const text = contextHelp(priv, 'sh ').map((o) => o.text).join('\n');
+    expect(text).toMatch(/interfaces/);
+    expect(text).toMatch(/running-config/);
+  });
+
+  it('shows <iface> when an argument is expected', () => {
+    const cfg = applyCommand(
+      applyCommand(fresh(), 'enable').session,
+      'configure terminal',
+    ).session;
+    const text = contextHelp(cfg, 'interface ').map((o) => o.text).join('\n');
+    expect(text).toMatch(/<iface>/);
+  });
+
+  it('shows <cr> when the line is a complete runnable command followed by a space', () => {
+    const priv = applyCommand(fresh(), 'enable').session;
+    const text = contextHelp(priv, 'show version ').map((o) => o.text).join('\n');
+    expect(text).toMatch(/<cr>/);
+  });
+
+  it('treats a no-space partial that matches a keyword exactly as a candidate, not <cr>', () => {
+    const priv = applyCommand(fresh(), 'enable').session;
+    const text = contextHelp(priv, 'show version').map((o) => o.text).join('\n');
+    expect(text).toMatch(/version\s+System hardware/);
+    expect(text).not.toMatch(/<cr>/);
+  });
+
+  it('rejects an unrecognized token with an error line', () => {
+    const out = contextHelp(fresh(), 'frobnicate ');
+    expect(out[0].kind).toBe('error');
+    expect(out[0].text).toMatch(/Unrecognized/);
+  });
+
+  it('does not mutate the session', () => {
+    const s = applyCommand(fresh(), 'enable').session;
+    const before = structuredClone(s);
+    contextHelp(s, 'show ');
     expect(s).toEqual(before);
   });
 });

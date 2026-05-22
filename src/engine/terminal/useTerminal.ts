@@ -52,6 +52,7 @@ type Action =
   | { type: 'recallPrev' }
   | { type: 'recallNext' }
   | { type: 'print'; lines: OutputLine[] }
+  | { type: 'inlineHelp'; prompt: string; raw: string; lines: OutputLine[] }
   | { type: 'clear' };
 
 function reducer(state: State, action: Action): State {
@@ -130,10 +131,35 @@ function reducer(state: State, action: Action): State {
       };
     }
 
+    case 'inlineHelp': {
+      // Echo the in-progress line with the `?` appended, print help below it,
+      // and PRESERVE the input buffer so the user can keep typing. Matches IOS:
+      // `?` is interactive feedback, not a submitted command.
+      const echo: TerminalLine = {
+        id: state.nextId,
+        kind: 'input',
+        text: `${action.raw}?`,
+        prompt: action.prompt,
+      };
+      const output = action.lines.map((l, i) => ({
+        id: state.nextId + 1 + i,
+        kind: l.kind,
+        text: l.text,
+      }));
+      return {
+        ...state,
+        lines: [...state.lines, echo, ...output],
+        nextId: state.nextId + 1 + output.length,
+      };
+    }
+
     case 'clear':
       return { ...state, lines: [] };
   }
 }
+
+/** Returns the help lines to print for an in-progress (pre-Enter) line. */
+export type HelpProvider = (partialLine: string) => OutputLine[];
 
 export interface UseTerminalOptions {
   /** Resolves a raw command line into output. */
@@ -142,6 +168,8 @@ export interface UseTerminalOptions {
   prompt: string;
   /** Optional banner lines printed on first render. */
   banner?: OutputLine[];
+  /** Returns context-help lines for the current input. Drives IOS-style `?`. */
+  help?: HelpProvider;
 }
 
 export interface UseTerminal {
@@ -154,9 +182,11 @@ export interface UseTerminal {
   recallNext: () => void;
   print: (lines: OutputLine[]) => void;
   clear: () => void;
+  /** Trigger inline context help for the current input (e.g. `?` keypress). */
+  requestHelp: () => void;
 }
 
-export function useTerminal({ execute, prompt, banner }: UseTerminalOptions): UseTerminal {
+export function useTerminal({ execute, prompt, banner, help }: UseTerminalOptions): UseTerminal {
   const [state, dispatch] = useReducer(
     reducer,
     banner,
@@ -181,6 +211,12 @@ export function useTerminal({ execute, prompt, banner }: UseTerminalOptions): Us
   const print = useCallback((lines: OutputLine[]) => dispatch({ type: 'print', lines }), []);
   const clear = useCallback(() => dispatch({ type: 'clear' }), []);
 
+  const requestHelp = useCallback(() => {
+    if (!help) return;
+    const lines = help(state.input);
+    dispatch({ type: 'inlineHelp', prompt, raw: state.input, lines });
+  }, [help, prompt, state.input]);
+
   return {
     lines: state.lines,
     input: state.input,
@@ -191,5 +227,6 @@ export function useTerminal({ execute, prompt, banner }: UseTerminalOptions): Us
     recallNext,
     print,
     clear,
+    requestHelp,
   };
 }

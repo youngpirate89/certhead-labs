@@ -1,4 +1,4 @@
-import { tokenize, resolve } from '@/engine/parser';
+import { tokenize, resolve, complete } from '@/engine/parser';
 import { grammarFor } from './grammar';
 import {
   type Session,
@@ -45,6 +45,62 @@ export function applyCommand(session: Session, raw: string): ApplyResult {
     case 'complete':
       return dispatch(session, result.command, result.args, trimmed);
   }
+}
+
+/**
+ * Render IOS-style `?` context help for an in-progress line (without the `?`).
+ *
+ * Mirrors real IOS formatting:
+ *   - children resolved at the current position, with help text
+ *   - `<arg-name>` when the position expects a free-form argument
+ *   - `<cr>` when the current line is itself a runnable command
+ *
+ * Pure: does not mutate the session. The terminal layer calls this on every
+ * `?` keypress and prints the result inline, preserving the input buffer.
+ */
+export function contextHelp(session: Session, partialLine: string): CommandOutput[] {
+  // Detect partial-vs-complete-token state. A trailing space means all visible
+  // tokens are resolved and we want the next-keyword list. No trailing space
+  // means the last token is being typed — it filters the candidate list.
+  const trimmed = partialLine.replace(/\s+$/, '');
+  const trailingSpace = partialLine !== trimmed || partialLine.length === 0;
+  const allTokens = trimmed.length === 0 ? [] : trimmed.split(/\s+/);
+
+  let resolved: string[];
+  let partial: string;
+  if (trailingSpace || allTokens.length === 0) {
+    resolved = allTokens;
+    partial = '';
+  } else {
+    resolved = allTokens.slice(0, -1);
+    partial = allTokens[allTokens.length - 1];
+  }
+
+  const result = complete(resolved, grammarFor(session.mode), partial);
+
+  if (result.kind === 'ambiguous') {
+    return err(`% Ambiguous command: "${result.token}"`);
+  }
+  if (result.kind === 'invalid') {
+    return err(`% Unrecognized command`);
+  }
+
+  const lines: string[] = [];
+  const maxLen = result.completions.reduce((m, c) => Math.max(m, c.keyword.length), 0);
+  for (const c of result.completions) {
+    const kw = c.keyword.padEnd(maxLen);
+    lines.push(c.help ? `  ${kw}  ${c.help}` : `  ${kw}`);
+  }
+  if (result.expectsArgument && result.argumentName) {
+    lines.push(`  <${result.argumentName}>`);
+  }
+  if (result.atTerminal) {
+    lines.push('  <cr>');
+  }
+  if (lines.length === 0) {
+    return err('% No help available');
+  }
+  return out(...lines);
 }
 
 function dispatch(
