@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applyCommand, contextHelp } from './interpret';
+import { applyCommand, contextHelp, tabComplete } from './interpret';
 import { createSession, buildDevice, prompt, type Session } from './state';
 
 function fresh(): Session {
@@ -112,7 +112,47 @@ describe('IOS interpreter — resolution errors and show', () => {
     applyCommand(s, 'configure terminal');
     expect(s).toEqual(before);
   });
+});
 
+describe('IOS interpreter — Tab completion', () => {
+  it('completes a unique prefix and appends a space', () => {
+    expect(tabComplete(fresh(), 'en')).toBe('enable ');
+  });
+
+  it('returns null on an ambiguous prefix (Tab does NOT dump candidates)', () => {
+    // user mode children include both `enable` and `exit` — `e` is ambiguous.
+    expect(tabComplete(fresh(), 'e')).toBeNull();
+  });
+
+  it('returns null when there is no partial (empty / trailing whitespace)', () => {
+    expect(tabComplete(fresh(), '')).toBeNull();
+    expect(tabComplete(fresh(), 'show ')).toBeNull();
+  });
+
+  it('completes deeper in the tree without expanding earlier tokens', () => {
+    const priv = applyCommand(fresh(), 'enable').session;
+    // `sh ip i` — last token `i` resolves uniquely to `interface` under `ip`.
+    // Earlier `sh` is left as the user typed it (not expanded to `show`).
+    expect(tabComplete(priv, 'sh ip i')).toBe('sh ip interface ');
+  });
+
+  it('appends a space when the partial is already the full keyword', () => {
+    const priv = applyCommand(fresh(), 'enable').session;
+    expect(tabComplete(priv, 'show')).toBe('show ');
+  });
+
+  it('returns null at an argument position (no keyword to complete)', () => {
+    const cfg = applyCommand(
+      applyCommand(fresh(), 'enable').session,
+      'configure terminal',
+    ).session;
+    // `interface ` would be at the arg slot; trailing space already handled.
+    // `interface g` — `g` is a partial in an arg slot, not a keyword.
+    expect(tabComplete(cfg, 'interface g')).toBeNull();
+  });
+});
+
+describe('IOS interpreter — resolvedHistory regression', () => {
   it('records canonical command form in resolvedHistory while keeping raw', () => {
     const s = run(fresh(), ['en', 'conf t', 'int gi0/0']);
     // Raw history preserves what the user typed.

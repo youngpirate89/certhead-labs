@@ -35,6 +35,11 @@ export function Terminal({ term }: TerminalProps) {
         e.preventDefault();
         term.submit();
         break;
+      case 'Tab':
+        // IOS Tab: complete unique prefix, do NOTHING on ambiguous (that's `?`).
+        e.preventDefault();
+        term.tabComplete();
+        break;
       case 'ArrowUp':
         e.preventDefault();
         term.recallPrev();

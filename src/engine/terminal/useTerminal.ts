@@ -161,6 +161,10 @@ function reducer(state: State, action: Action): State {
 /** Returns the help lines to print for an in-progress (pre-Enter) line. */
 export type HelpProvider = (partialLine: string) => OutputLine[];
 
+/** Returns the completed line on a unique match, or null to leave input alone.
+ *  Mirrors real IOS: ambiguous prefix → null (do NOTHING; `?` is for listing). */
+export type CompletionProvider = (partialLine: string) => string | null;
+
 export interface UseTerminalOptions {
   /** Resolves a raw command line into output. */
   execute: Executor;
@@ -170,6 +174,8 @@ export interface UseTerminalOptions {
   banner?: OutputLine[];
   /** Returns context-help lines for the current input. Drives IOS-style `?`. */
   help?: HelpProvider;
+  /** Tab-complete the current input. Returns null to leave it alone. */
+  complete?: CompletionProvider;
 }
 
 export interface UseTerminal {
@@ -184,9 +190,17 @@ export interface UseTerminal {
   clear: () => void;
   /** Trigger inline context help for the current input (e.g. `?` keypress). */
   requestHelp: () => void;
+  /** Tab-complete the current input. No-op on ambiguous / no-partial cases. */
+  tabComplete: () => void;
 }
 
-export function useTerminal({ execute, prompt, banner, help }: UseTerminalOptions): UseTerminal {
+export function useTerminal({
+  execute,
+  prompt,
+  banner,
+  help,
+  complete,
+}: UseTerminalOptions): UseTerminal {
   const [state, dispatch] = useReducer(
     reducer,
     banner,
@@ -217,6 +231,12 @@ export function useTerminal({ execute, prompt, banner, help }: UseTerminalOption
     dispatch({ type: 'inlineHelp', prompt, raw: state.input, lines });
   }, [help, prompt, state.input]);
 
+  const tabComplete = useCallback(() => {
+    if (!complete) return;
+    const next = complete(state.input);
+    if (next !== null) dispatch({ type: 'setInput', value: next });
+  }, [complete, state.input]);
+
   return {
     lines: state.lines,
     input: state.input,
@@ -228,5 +248,6 @@ export function useTerminal({ execute, prompt, banner, help }: UseTerminalOption
     print,
     clear,
     requestHelp,
+    tabComplete,
   };
 }

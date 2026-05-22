@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useTerminal, type ExecResult, type OutputLine, type UseTerminal } from './useTerminal';
-import { applyCommand, contextHelp } from '@/engine/adapters/ios/interpret';
+import { applyCommand, contextHelp, tabComplete as iosTabComplete } from '@/engine/adapters/ios/interpret';
 import {
   createSession,
   buildDevice,
@@ -66,9 +66,15 @@ export function useLabSession(lab: Lab): UseLabSession {
     [],
   );
 
+  const complete = useCallback(
+    (partialLine: string): string | null => iosTabComplete(sessionRef.current, partialLine),
+    [],
+  );
+
   const term = useTerminal({
     execute,
     help,
+    complete,
     prompt: prompt(session),
     banner: [
       { kind: 'system', text: `${lab.title} — ${lab.exam}` },

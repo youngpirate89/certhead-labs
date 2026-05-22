@@ -48,6 +48,36 @@ export function applyCommand(session: Session, raw: string): ApplyResult {
 }
 
 /**
+ * Tab-complete the last token of an in-progress line.
+ *
+ * Mirrors real IOS:
+ *   - unique prefix match → expand to the full keyword and append a space
+ *   - ambiguous prefix    → DO NOTHING (Tab is not for listing candidates;
+ *                            that's what `?` is for)
+ *   - no partial (empty line or trailing whitespace) → nothing to complete
+ *   - argument position   → nothing (Tab doesn't autocomplete arg values)
+ *
+ * Returns the replacement line on a unique completion, or null if the input
+ * should be left alone. Earlier tokens are preserved as-typed (we don't expand
+ * abbreviations the user didn't ask to expand).
+ */
+export function tabComplete(session: Session, line: string): string | null {
+  if (line.length === 0 || /\s$/.test(line)) return null;
+
+  const allTokens = line.split(/\s+/).filter(Boolean);
+  if (allTokens.length === 0) return null;
+
+  const partial = allTokens[allTokens.length - 1];
+  const resolved = allTokens.slice(0, -1);
+
+  const result = complete(resolved, grammarFor(session.mode), partial);
+  if (result.kind !== 'ok' || result.completions.length !== 1) return null;
+
+  const keyword = result.completions[0].keyword;
+  return [...resolved, keyword].join(' ') + ' ';
+}
+
+/**
  * Render IOS-style `?` context help for an in-progress line (without the `?`).
  *
  * Mirrors real IOS formatting:
