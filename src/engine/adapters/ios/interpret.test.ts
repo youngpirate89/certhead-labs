@@ -112,6 +112,19 @@ describe('IOS interpreter — resolution errors and show', () => {
     applyCommand(s, 'configure terminal');
     expect(s).toEqual(before);
   });
+
+  it('records canonical command form in resolvedHistory while keeping raw', () => {
+    const s = run(fresh(), ['en', 'conf t', 'int gi0/0']);
+    // Raw history preserves what the user typed.
+    expect(s.history).toEqual(['en', 'conf t', 'int gi0/0']);
+    // Resolved history has abbreviations expanded — interface arg keeps its
+    // raw token (it's an argument value, not a keyword).
+    expect(s.resolvedHistory).toEqual([
+      'enable',
+      'configure terminal',
+      'interface gi0/0',
+    ]);
+  });
 });
 
 describe('IOS interpreter — ? context help', () => {

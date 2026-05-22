@@ -18,10 +18,11 @@ export interface GradeResult {
  */
 export function grade(lab: Lab, session: Session): GradeResult {
   const state = { [session.device.id]: session.device };
+  const history = { raw: session.history, resolved: session.resolvedHistory };
   const objectives = lab.objectives.map((o) => ({
     id: o.id,
     text: o.text,
-    met: o.check(state, session.history),
+    met: o.check(state, history),
   }));
   return { objectives, allMet: objectives.every((o) => o.met) };
 }

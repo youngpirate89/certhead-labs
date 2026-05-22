@@ -111,6 +111,7 @@ function dispatch(
 ): ApplyResult {
   const s: Session = structuredClone(prev);
   s.history.push(raw);
+  s.resolvedHistory.push(command.join(' '));
   const head = command[0];
 
   switch (head) {

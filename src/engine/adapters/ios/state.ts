@@ -37,8 +37,14 @@ export interface Session {
   /** The interface currently selected in config-if mode. */
   currentInterface: string | null;
   device: DeviceState;
-  /** Every successfully entered command line, in order (for grading). */
+  /** Every successfully entered command line, in order, AS-TYPED by the user
+   *  (abbreviated, mixed-case, etc.). Used for display and command recall. */
   history: string[];
+  /** Same commands as {@link history}, but in CANONICAL form — abbreviations
+   *  expanded by the resolver (e.g. `sho ip int br` -> `show ip interface brief`).
+   *  Used by verification-style objectives so a check can match the canonical
+   *  command without enumerating every valid abbreviation in a regex. */
+  resolvedHistory: string[];
 }
 
 const FULL_NAMES: Record<string, string> = {
@@ -110,6 +116,7 @@ export function createSession(device: DeviceState): Session {
     currentInterface: null,
     device: structuredClone(device),
     history: [],
+    resolvedHistory: [],
   };
 }
 

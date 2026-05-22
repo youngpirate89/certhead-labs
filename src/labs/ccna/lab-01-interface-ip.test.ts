@@ -47,6 +47,31 @@ describe('free lab — pilot validation', () => {
     expect(grade(lab, s).allMet).toBe(true);
   });
 
+  // Regression: every valid abbreviation of `show ip interface brief` must
+  // satisfy the verify objective. Previously the objective regex only matched
+  // `sh`/`show`, `int`/`interface`, `br`/`brief`, so forms like `sho`, `inte`,
+  // `bri`, `brie` silently failed even though the resolver accepted them.
+  it.each([
+    'show ip interface brief',
+    'sho ip interface brief',
+    'sh ip interface brief',
+    'show ip int br',
+    'show ip int brie',
+    'sh ip inte bri',
+  ])('marks verify met for valid abbreviation: "%s"', (line) => {
+    const s = run(start(), [
+      'enable',
+      'configure terminal',
+      'interface gi0/0',
+      'ip address 192.168.1.1 255.255.255.0',
+      'no shutdown',
+      'end',
+      line,
+    ]);
+    const verify = grade(lab, s).objectives.find((o) => o.id === 'verify');
+    expect(verify?.met).toBe(true);
+  });
+
   it('leaves verify unmet until show ip interface brief is run', () => {
     const s = run(start(), [
       'enable',

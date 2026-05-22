@@ -12,11 +12,25 @@ import type { DeviceState } from './adapters/ios/state';
 /** Device-state map keyed by device id, passed to objective checks. */
 export type LabState = Record<string, DeviceState>;
 
+/** Command history passed to objective checks.
+ *
+ *  `raw`      — exactly as the user typed each command (abbreviated, etc.).
+ *  `resolved` — the canonical command the resolver produced (full keywords).
+ *
+ *  Verification-style objectives ("did the user run `show ip interface brief`?")
+ *  should match against `resolved` so any valid abbreviation counts without
+ *  the lab having to enumerate them in a regex.
+ */
+export interface CommandHistory {
+  readonly raw: readonly string[];
+  readonly resolved: readonly string[];
+}
+
 export interface LabObjective {
   readonly id: string;
   readonly text: string;
   /** True when this objective is satisfied by the current state / history. */
-  readonly check: (state: LabState, history: readonly string[]) => boolean;
+  readonly check: (state: LabState, history: CommandHistory) => boolean;
 }
 
 export interface LabHint {

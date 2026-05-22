@@ -34,8 +34,7 @@ export const lab01InterfaceIp: Lab = {
     {
       id: 'verify',
       text: 'Verify with show ip interface brief',
-      check: (_state, history) =>
-        history.some((cmd) => /^sh(?:ow)?\s+ip\s+int(?:erface)?\s+br(?:ief)?$/i.test(cmd)),
+      check: (_state, history) => history.resolved.includes('show ip interface brief'),
     },
   ],
   hints: [
