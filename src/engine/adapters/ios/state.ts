@@ -33,6 +33,8 @@ export interface DeviceState {
 }
 
 export interface Session {
+  /** Device-kind discriminator — every adapter's session carries one. */
+  readonly kind: 'router';
   mode: Mode;
   /** The interface currently selected in config-if mode. */
   currentInterface: string | null;
@@ -112,6 +114,7 @@ export function isValidMask(value: string): boolean {
 /** Build a fresh session from a lab's device + starting interface set. */
 export function createSession(device: DeviceState): Session {
   return {
+    kind: 'router',
     mode: 'user',
     currentInterface: null,
     device: structuredClone(device),

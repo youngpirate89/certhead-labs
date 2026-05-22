@@ -9,17 +9,13 @@ import {
   isValidMask,
   prompt as promptFor,
 } from './state';
+import type { CommandOutput, ApplyResult as GenericApplyResult } from '../types';
 
-/** A line of terminal output produced by executing a command. */
-export interface CommandOutput {
-  readonly kind: 'output' | 'error' | 'system';
-  readonly text: string;
-}
-
-export interface ApplyResult {
-  readonly session: Session;
-  readonly output: CommandOutput[];
-}
+// Re-exported from the shared adapter contracts; kept here as a named export so
+// existing call-sites (`import { CommandOutput } from '@/engine/adapters/ios/interpret'`)
+// keep working without churn while the canonical home is `../types`.
+export type { CommandOutput } from '../types';
+export type ApplyResult = GenericApplyResult<Session>;
 
 const err = (text: string): CommandOutput[] => [{ kind: 'error', text }];
 const out = (...lines: string[]): CommandOutput[] =>

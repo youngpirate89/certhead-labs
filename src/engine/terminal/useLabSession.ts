@@ -1,15 +1,10 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useTerminal, type ExecResult, type OutputLine, type UseTerminal } from './useTerminal';
 import { applyCommand, contextHelp, tabComplete as iosTabComplete } from '@/engine/adapters/ios/interpret';
-import {
-  createSession,
-  buildDevice,
-  prompt,
-  type DeviceState,
-  type Session,
-} from '@/engine/adapters/ios/state';
+import { prompt, type Session } from '@/engine/adapters/ios/state';
+import { routerAdapter } from '@/engine/adapters/router';
 import { grade, type ObjectiveStatus } from '@/engine/grading';
-import type { DeviceTopologyView } from '@/components/TopologyPanel';
+import type { DeviceTopologyView } from '@/engine/adapters/types';
 import type { Lab } from '@/engine/types';
 
 export interface UseLabSession extends UseTerminal {
@@ -49,27 +44,17 @@ function bootBanner(platform: string): OutputLine[] {
   ];
 }
 
-/** Derive the exam-agnostic topology view from live IOS device state. */
-function toTopologyView(d: DeviceState): DeviceTopologyView {
-  return {
-    id: d.id,
-    hostname: d.hostname,
-    platform: d.platform,
-    interfaces: Object.values(d.interfaces).map((i) => ({
-      id: i.id,
-      name: i.name,
-      status: !i.adminUp ? 'admin-down' : i.ip ? 'up' : 'no-ip',
-    })),
-  };
-}
-
 /**
  * Runs a single IOS lab: owns the device session, drives the terminal via the
  * engine interpreter, and grades objectives live after every command.
+ *
+ * The topology view comes from the router adapter — kept device-kind-agnostic
+ * so the multi-device LabSession refactor (3a-c2) can drop in switch/pc views
+ * the same way.
  */
 export function useLabSession(lab: Lab): UseLabSession {
   const [session, setSession] = useState<Session>(() =>
-    createSession(buildDevice(lab.topology.devices[0])),
+    routerAdapter.buildDevice(lab.topology.devices[0]),
   );
 
   // Executor reads the latest session via a ref to avoid stale closures.
@@ -108,11 +93,14 @@ export function useLabSession(lab: Lab): UseLabSession {
   // immediately without a click. setActiveDevice is wired for the multi-device
   // future even though the single-device path doesn't exercise it yet.
   const [activeDeviceId, setActiveDevice] = useState<string>(lab.topology.devices[0].id);
-  const devices = useMemo(() => [toTopologyView(session.device)], [session.device]);
+  const devices: DeviceTopologyView[] = useMemo(
+    () => [routerAdapter.toTopologyView(session)],
+    [session],
+  );
 
   const [resetToken, setResetToken] = useState(0);
   const reset = useCallback(() => {
-    setSession(createSession(buildDevice(initialDevice)));
+    setSession(routerAdapter.buildDevice(initialDevice));
     setActiveDevice(initialDevice.id);
     term.clear();
     term.print(bootBanner(initialDevice.platform));

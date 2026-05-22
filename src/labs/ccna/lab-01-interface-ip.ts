@@ -17,7 +17,9 @@ export const lab01InterfaceIp: Lab = {
   scenario:
     "You've just unboxed an ISR4321 router for a new branch office. The chassis is racked and powered, but every interface is administratively down — a fresh-from-the-box state. The network team has assigned 192.168.1.1/24 to GigabitEthernet0/0 for the WAN uplink, and they're waiting on you to bring the link up.\n\nConfigure the interface, bring it up, and verify it with show ip interface brief. The terminal behaves like a real Cisco router — abbreviations work, ? shows context help, and Tab completes unique prefixes.",
   topology: {
-    devices: [{ id: 'R1', platform: 'ISR4321', interfaces: ['Gi0/0', 'Gi0/1', 'Gi0/2'] }],
+    devices: [
+      { id: 'R1', kind: 'router', platform: 'ISR4321', interfaces: ['Gi0/0', 'Gi0/1', 'Gi0/2'] },
+    ],
     links: [],
   },
   objectives: [

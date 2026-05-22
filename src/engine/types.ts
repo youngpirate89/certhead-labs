@@ -8,6 +8,7 @@
  * lands (see docs/PARSER_ADAPTERS.md, created at that time).
  */
 import type { DeviceState } from './adapters/ios/state';
+import type { DeviceKind } from './adapters/types';
 
 /** Device-state map keyed by device id, passed to objective checks. */
 export type LabState = Record<string, DeviceState>;
@@ -40,6 +41,8 @@ export interface LabHint {
 
 export interface LabDevice {
   readonly id: string;
+  /** Device kind — selects the adapter (router/switch/pc). 3a: router only. */
+  readonly kind: DeviceKind;
   readonly platform: string;
   readonly interfaces: readonly string[];
 }

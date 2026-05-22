@@ -5,12 +5,13 @@ import { TopologyPanel, type DeviceTopologyView } from './TopologyPanel';
 function deviceR1(): DeviceTopologyView {
   return {
     id: 'R1',
+    kind: 'router',
     hostname: 'R1',
     platform: 'ISR4321',
     interfaces: [
-      { id: 'Gi0/0', name: 'GigabitEthernet0/0', status: 'up' },
-      { id: 'Gi0/1', name: 'GigabitEthernet0/1', status: 'no-ip' },
-      { id: 'Gi0/2', name: 'GigabitEthernet0/2', status: 'admin-down' },
+      { id: 'Gi0/0', name: 'GigabitEthernet0/0', status: 'up', ip: '192.168.1.1' },
+      { id: 'Gi0/1', name: 'GigabitEthernet0/1', status: 'no-ip', ip: null },
+      { id: 'Gi0/2', name: 'GigabitEthernet0/2', status: 'admin-down', ip: null },
     ],
   };
 }
@@ -18,9 +19,10 @@ function deviceR1(): DeviceTopologyView {
 function deviceR2(): DeviceTopologyView {
   return {
     id: 'R2',
+    kind: 'router',
     hostname: 'R2',
     platform: 'ISR4321',
-    interfaces: [{ id: 'Gi0/0', name: 'GigabitEthernet0/0', status: 'admin-down' }],
+    interfaces: [{ id: 'Gi0/0', name: 'GigabitEthernet0/0', status: 'admin-down', ip: null }],
   };
 }
 

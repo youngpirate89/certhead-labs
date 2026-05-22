@@ -13,23 +13,15 @@
  * and other adapters will derive the same view shape from their own state.
  */
 
-export type InterfaceStatus = 'up' | 'no-ip' | 'admin-down';
-
-export interface InterfaceTopologyView {
-  /** Short canonical id, e.g. `Gi0/0`. */
-  readonly id: string;
-  /** Full label for tooltip, e.g. `GigabitEthernet0/0`. */
-  readonly name: string;
-  readonly status: InterfaceStatus;
-}
-
-export interface DeviceTopologyView {
-  readonly id: string;
-  readonly hostname: string;
-  /** Short platform/model label (badge), e.g. `ISR4321`. */
-  readonly platform: string;
-  readonly interfaces: readonly InterfaceTopologyView[];
-}
+// View types now live in the adapter contracts so adapters can implement them
+// directly. Re-exported here so existing imports of these types from
+// `@/components/TopologyPanel` continue to work.
+import type {
+  DeviceTopologyView,
+  InterfaceTopologyView,
+  InterfaceStatus,
+} from '@/engine/adapters/types';
+export type { DeviceTopologyView, InterfaceTopologyView, InterfaceStatus };
 
 interface TopologyPanelProps {
   readonly devices: readonly DeviceTopologyView[];
