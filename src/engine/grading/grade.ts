@@ -47,11 +47,18 @@ export function grade(lab: Lab, source: Session | LabSession): GradeResult {
     }
   }
 
+  // History includes every kind that tracks it (router + pc both do).
+  for (const [id, sess] of Object.entries(lab1.devices)) {
+    if (sess.kind === 'pc' && !(id in history)) {
+      history[id] = { raw: sess.history, resolved: sess.resolvedHistory };
+    }
+  }
+
   const view: HistoryView = history;
   const objectives = lab.objectives.map((o) => ({
     id: o.id,
     text: o.text,
-    met: o.check(state, view),
+    met: o.check(state, view, lab1),
   }));
   return { objectives, allMet: objectives.every((o) => o.met) };
 }

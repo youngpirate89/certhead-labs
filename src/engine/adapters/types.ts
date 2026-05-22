@@ -54,9 +54,9 @@ export interface DeviceTopologyView {
 }
 
 /**
- * The DeviceAdapter interface. Implementations: router (3a), switch (3c), pc (3b).
- * For 3a only router exists; the LabSession refuses any device whose kind has
- * no registered adapter, so switch/pc can be added incrementally without
+ * The DeviceAdapter interface. Implementations: router (3a), pc (3b),
+ * switch (3c). For 3b router + pc exist; the LabSession refuses any device
+ * whose kind has no registered adapter, so switch can be added in 3c without
  * touching the loader.
  */
 export interface DeviceAdapter<S extends DeviceSessionBase> {
@@ -69,6 +69,11 @@ export interface DeviceAdapter<S extends DeviceSessionBase> {
   prompt(session: S): string;
   /** Active grammar tree at the session's current state — drives `?` + Tab. */
   grammarFor(session: S): CommandNode;
+  /** IOS-style `?` context help for an in-progress line (sans the `?`). */
+  contextHelp(session: S, partialLine: string): CommandOutput[];
+  /** Tab-complete the current input. Returns null to leave it untouched
+   *  (ambiguous prefix, no partial, argument position). */
+  tabComplete(session: S, partialLine: string): string | null;
   /** Device-kind-agnostic topology view for the canvas. */
   toTopologyView(session: S): DeviceTopologyView;
 }

@@ -1,7 +1,19 @@
 import { describe, it, expect } from 'vitest';
-import { initLabSession, applyToActive, setActive } from '@/engine/lab-session';
+import {
+  initLabSession,
+  applyToActive,
+  setActive,
+  type DeviceSession,
+} from '@/engine/lab-session';
 import { grade } from '@/engine/grading';
+import type { Session as RouterSession } from '@/engine/adapters/ios/state';
 import { pilot2Router as lab } from './pilot-2-router';
+
+/** Narrowing helper used by tests that need router internals. */
+function asRouter(s: DeviceSession): RouterSession {
+  if (s.kind !== 'router') throw new Error(`expected router, got ${s.kind}`);
+  return s;
+}
 
 describe('pilot 3a — 2-router lab', () => {
   it('instantiates two independent DeviceSessions + one link', () => {
@@ -24,10 +36,10 @@ describe('pilot 3a — 2-router lab', () => {
     ]) {
       ls = applyToActive(ls, line).session;
     }
-    expect(ls.devices.R1.device.interfaces['Gi0/0'].ip).toBe('10.0.0.1');
-    expect(ls.devices.R1.device.interfaces['Gi0/0'].adminUp).toBe(true);
-    expect(ls.devices.R2.device.interfaces['Gi0/0'].ip).toBeNull();
-    expect(ls.devices.R2.device.interfaces['Gi0/0'].adminUp).toBe(false);
+    expect(asRouter(ls.devices.R1).device.interfaces['Gi0/0'].ip).toBe('10.0.0.1');
+    expect(asRouter(ls.devices.R1).device.interfaces['Gi0/0'].adminUp).toBe(true);
+    expect(asRouter(ls.devices.R2).device.interfaces['Gi0/0'].ip).toBeNull();
+    expect(asRouter(ls.devices.R2).device.interfaces['Gi0/0'].adminUp).toBe(false);
   });
 
   it('grades complete after both devices configured (state-only, no reachability)', () => {

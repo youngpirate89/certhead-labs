@@ -9,8 +9,11 @@
  */
 import type { DeviceState } from './adapters/ios/state';
 import type { DeviceKind } from './adapters/types';
+import type { LabSession } from './lab-session';
 
-/** Device-state map keyed by device id, passed to objective checks. */
+/** Device-state map passed to objective checks. Keyed by device id. Only
+ *  router state appears here — PC/switch state is accessed via the `session`
+ *  argument so the shape stays predictable for router-centric checks. */
 export type LabState = Record<string, DeviceState>;
 
 /** Command history passed to objective checks.
@@ -34,8 +37,16 @@ export interface LabObjective {
   readonly id: string;
   readonly text: string;
   /** True when this objective is satisfied by the current state / histories.
-   *  `history` is keyed by device id — each device tracks its own commands. */
-  readonly check: (state: LabState, history: HistoryView) => boolean;
+   *
+   *  `state` exposes router device state (interfaces) only — most checks
+   *  read this. `history` is keyed by device id and includes every kind.
+   *  `session` is the full LabSession — reachability checks
+   *  (`canReach(session, …)`) and PC-state checks live here. */
+  readonly check: (
+    state: LabState,
+    history: HistoryView,
+    session: LabSession,
+  ) => boolean;
 }
 
 export interface LabHint {
@@ -45,10 +56,16 @@ export interface LabHint {
 
 export interface LabDevice {
   readonly id: string;
-  /** Device kind — selects the adapter (router/switch/pc). 3a: router only. */
+  /** Device kind — selects the adapter (router/switch/pc). */
   readonly kind: DeviceKind;
   readonly platform: string;
   readonly interfaces: readonly string[];
+  /** PC-only initial state. Routers/switches ignore this. */
+  readonly pc?: {
+    readonly ip?: string;
+    readonly mask?: string;
+    readonly gateway?: string;
+  };
 }
 
 /** One end of a cable: a (deviceId, iface) pair. */

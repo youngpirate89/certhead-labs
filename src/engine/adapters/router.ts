@@ -56,6 +56,14 @@ export const routerAdapter: DeviceAdapter<Session> = {
     return iosGrammarFor(session.mode);
   },
 
+  contextHelp(session, partialLine) {
+    return contextHelp(session, partialLine);
+  },
+
+  tabComplete(session, partialLine) {
+    return tabComplete(session, partialLine);
+  },
+
   toTopologyView(session): DeviceTopologyView {
     const d = session.device;
     return {
@@ -72,8 +80,3 @@ export const routerAdapter: DeviceAdapter<Session> = {
     };
   },
 };
-
-// Re-export the router-specific helpers the terminal layer needs for `?` + Tab.
-// These will land on the DeviceAdapter interface itself in a later commit when
-// switch/pc adapters need them — keeping the surface minimal for 3a.
-export { contextHelp as routerContextHelp, tabComplete as routerTabComplete };
