@@ -17,6 +17,9 @@ export interface ObjectiveView {
 interface ObjectivesPanelProps {
   title: string;
   objectives: ObjectiveView[];
+  /** Optional reset handler. When provided, a small reset button appears in
+   *  the header. Generic — no lab-specific assumptions. */
+  onReset?: () => void;
 }
 
 /** Detect objectives that just flipped to met; clears after the flash plays. */
@@ -41,23 +44,49 @@ function useJustMet(objectives: ObjectiveView[]): Set<string> {
   return justMet;
 }
 
-export function ObjectivesPanel({ title, objectives }: ObjectivesPanelProps) {
+export function ObjectivesPanel({ title, objectives, onReset }: ObjectivesPanelProps) {
   const justMet = useJustMet(objectives);
   const metCount = objectives.filter((o) => o.met).length;
   const allMet = metCount === objectives.length && objectives.length > 0;
 
   return (
     <div className="flex h-full flex-col bg-panel-bg">
-      <div className="flex items-center justify-between border-b border-panel-border px-4 py-3">
+      <div className="flex items-center justify-between gap-3 border-b border-panel-border px-4 py-3">
         <h2 className="font-sans text-sm font-semibold text-terminal-fg">{title}</h2>
-        <span
-          className={`font-mono text-xs tabular-nums transition-colors duration-300 ${
-            allMet ? 'text-terminal-prompt' : 'text-terminal-dim'
-          }`}
-          aria-live="polite"
-        >
-          {metCount}/{objectives.length}
-        </span>
+        <div className="flex items-center gap-3">
+          <span
+            className={`font-mono text-xs tabular-nums transition-colors duration-300 ${
+              allMet ? 'text-terminal-prompt' : 'text-terminal-dim'
+            }`}
+            aria-live="polite"
+          >
+            {metCount}/{objectives.length}
+          </span>
+          {onReset && (
+            <button
+              type="button"
+              onClick={onReset}
+              title="Reset lab"
+              aria-label="Reset lab"
+              className="grid h-6 w-6 place-items-center rounded text-terminal-dim transition-colors hover:bg-panel-border hover:text-terminal-fg focus:outline-none focus:ring-1 focus:ring-terminal-prompt"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="14"
+                height="14"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <path d="M3 12a9 9 0 1 0 3-6.7" />
+                <path d="M3 4v5h5" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
       <ul className="flex-1 space-y-1 overflow-y-auto p-2">
         {objectives.map((o) => {

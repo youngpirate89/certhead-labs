@@ -25,6 +25,12 @@ export interface UseLabSession extends UseTerminal {
   activeDeviceId: string;
   /** Switch the active console — used by multi-device labs. */
   setActiveDevice: (id: string) => void;
+  /** Restart the lab from a fresh device state. Wipes terminal lines and
+   *  re-prints the boot banner; objectives flip back to unmet as a result. */
+  reset: () => void;
+  /** Monotonic ID that changes on every reset — consumers (e.g. hint timers,
+   *  completion latches) reset their own state when it changes. */
+  resetToken: number;
 }
 
 /** Short, IOS-flavored boot output printed before the first prompt. Kept
@@ -104,6 +110,15 @@ export function useLabSession(lab: Lab): UseLabSession {
   const [activeDeviceId, setActiveDevice] = useState<string>(lab.topology.devices[0].id);
   const devices = useMemo(() => [toTopologyView(session.device)], [session.device]);
 
+  const [resetToken, setResetToken] = useState(0);
+  const reset = useCallback(() => {
+    setSession(createSession(buildDevice(initialDevice)));
+    setActiveDevice(initialDevice.id);
+    term.clear();
+    term.print(bootBanner(initialDevice.platform));
+    setResetToken((t) => t + 1);
+  }, [initialDevice, term]);
+
   return {
     ...term,
     objectives,
@@ -112,5 +127,7 @@ export function useLabSession(lab: Lab): UseLabSession {
     devices,
     activeDeviceId,
     setActiveDevice,
+    reset,
+    resetToken,
   };
 }

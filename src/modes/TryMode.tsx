@@ -47,6 +47,46 @@ export function TryMode() {
   // Brief gates the terminal on first load. Skippable in one click; topology
   // stays visible the whole time for spatial context.
   const [briefDismissed, setBriefDismissed] = useState(false);
+  const [labStartedAt, setLabStartedAt] = useState<number | null>(null);
+
+  function startLab() {
+    setBriefDismissed(true);
+    setLabStartedAt(Date.now());
+    track('lab_brief_dismissed', { labId: lab.id });
+  }
+
+  function resetLab() {
+    session.reset();
+    setLabStartedAt(Date.now());
+    setCompleted(false);
+    startedRef.current = false;
+    track('lab_reset', { labId: lab.id });
+  }
+
+  // Time-based hint surfacing. Hints fire as system lines in the terminal
+  // once `afterSeconds` elapses past lab start AND not all objectives are met.
+  // Ref-based bookkeeping so a hint doesn't surface twice per lab run;
+  // resetToken clears it so a reset re-arms the timers.
+  const shownHintsRef = useRef<Set<number>>(new Set());
+  const { print: termPrint, allMet, resetToken } = session;
+  useEffect(() => {
+    shownHintsRef.current = new Set();
+  }, [resetToken]);
+
+  useEffect(() => {
+    if (!labStartedAt || allMet || lab.hints.length === 0) return;
+    const id = setInterval(() => {
+      const elapsed = (Date.now() - labStartedAt) / 1000;
+      lab.hints.forEach((h, i) => {
+        if (elapsed >= h.afterSeconds && !shownHintsRef.current.has(i)) {
+          shownHintsRef.current.add(i);
+          termPrint([{ kind: 'system', text: `[Hint] ${h.text}` }]);
+          track('hint_shown', { labId: lab.id, hintIndex: i });
+        }
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [labStartedAt, allMet, lab.hints, lab.id, termPrint]);
 
   return (
     <Layout
@@ -60,7 +100,13 @@ export function TryMode() {
           onSelectDevice={session.setActiveDevice}
         />
       }
-      objectives={<ObjectivesPanel title="Objectives" objectives={session.objectives} />}
+      objectives={
+        <ObjectivesPanel
+          title="Objectives"
+          objectives={session.objectives}
+          onReset={briefDismissed ? resetLab : undefined}
+        />
+      }
       terminal={
         briefDismissed ? (
           <div className="relative h-full">
@@ -75,10 +121,7 @@ export function TryMode() {
             estimatedMinutes={lab.estimatedMinutes}
             scenario={lab.scenario}
             objectives={lab.objectives.map((o) => ({ id: o.id, text: o.text }))}
-            onStart={() => {
-              setBriefDismissed(true);
-              track('lab_brief_dismissed', { labId: lab.id });
-            }}
+            onStart={startLab}
           />
         )
       }
@@ -88,13 +131,16 @@ export function TryMode() {
 
 function CompletionCard({ labId }: { labId: string }) {
   return (
-    <div className="absolute inset-x-0 bottom-0 border-t border-terminal-prompt/30 bg-panel-header/95 p-5 backdrop-blur">
-      <div className="mx-auto flex max-w-2xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
+    <div className="animate-slide-up absolute inset-x-0 bottom-0 border-t border-terminal-prompt/40 bg-panel-header/95 p-5 backdrop-blur">
+      <div className="animate-celebrate mx-auto flex max-w-2xl items-center gap-4 rounded-md p-1 sm:flex-row">
+        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-terminal-prompt/70 bg-terminal-prompt/20 text-terminal-prompt">
+          <span className="animate-check-pop text-base font-bold">✓</span>
+        </div>
+        <div className="flex-1">
           <p className="font-sans text-sm font-semibold text-terminal-prompt">
-            Lab complete — interface is up. 🎉
+            Lab complete — interface is up.
           </p>
-          <p className="mt-1 font-sans text-sm text-terminal-fg/80">
+          <p className="mt-0.5 font-sans text-sm text-terminal-fg/80">
             Next: <span className="text-terminal-fg">Lab 04 — Static Routing</span>{' '}
             <span className="text-terminal-dim">(Pro)</span>, plus 20+ more CCNA labs.
           </p>

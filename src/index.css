@@ -35,6 +35,33 @@
     animation: objective-flash 1400ms ease-out 1;
   }
 
+  @keyframes slide-up-fade {
+    from {
+      transform: translateY(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+  .animate-slide-up {
+    animation: slide-up-fade 600ms cubic-bezier(0.16, 1, 0.3, 1) 1;
+  }
+
+  @keyframes celebrate-pulse {
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 rgba(94, 234, 212, 0);
+    }
+    50% {
+      box-shadow: 0 0 24px 4px rgba(94, 234, 212, 0.35);
+    }
+  }
+  .animate-celebrate {
+    animation: celebrate-pulse 1800ms ease-in-out 1;
+  }
+
   @keyframes check-pop {
     0% {
       transform: scale(0.4) rotate(-12deg);
