@@ -25,10 +25,11 @@ export interface UseLabSession extends UseTerminal {
    *  first device, set immediately on mount so the terminal is usable without
    *  any click (single-device labs = zero friction). */
   activeDeviceId: string;
-  /** Switch the active console — used by multi-device labs. */
+  /** Switch the active console — multi-device labs use this; the canvas wires
+   *  it up via TopologyPanel.onSelectDevice. */
   setActiveDevice: (id: string) => void;
-  /** Restart the lab from a fresh device state. Wipes terminal lines and
-   *  re-prints the boot banner; objectives flip back to unmet as a result. */
+  /** Restart the lab from a fresh device state. Wipes every device's scrollback
+   *  and re-prints each banner; objectives flip back to unmet as a result. */
   reset: () => void;
   /** Monotonic ID that changes on every reset — consumers (e.g. hint timers,
    *  completion latches) reset their own state when it changes. */
@@ -51,6 +52,14 @@ function bootBanner(platform: string): OutputLine[] {
   ];
 }
 
+/** Map of every device id → its boot banner. Stable across renders given the
+ *  same lab. */
+function bannersForLab(lab: Lab): Record<string, OutputLine[]> {
+  const banners: Record<string, OutputLine[]> = {};
+  for (const d of lab.topology.devices) banners[d.id] = bootBanner(d.platform);
+  return banners;
+}
+
 /** Compute the topology views for every device in the LabSession. */
 function topologyViewsFor(lab: LabSession): DeviceTopologyView[] {
   return Object.values(lab.devices).map((s) => {
@@ -65,9 +74,10 @@ function topologyViewsFor(lab: LabSession): DeviceTopologyView[] {
  * Runs a lab: owns the multi-device LabSession, drives the terminal against
  * the active device, and grades objectives live after every command.
  *
- * For an N=1 lab (the free lab) the LabSession has one entry and behavior
- * collapses to the original single-device flow. Each device's state is
- * independent — a command on R1 never mutates R2.
+ * For an N=1 lab (the free lab) behavior collapses to the original single-
+ * device flow. Each device's scrollback, command history, mode stack, and
+ * prompt are all per-device — switching the active console swaps the visible
+ * buffer + prompt and preserves every other device's state.
  */
 export function useLabSession(lab: Lab): UseLabSession {
   const [labSession, setLabSession] = useState<LabSession>(() => initLabSession(lab));
@@ -82,27 +92,26 @@ export function useLabSession(lab: Lab): UseLabSession {
     return { lines: output.map((o) => ({ kind: o.kind, text: o.text })) };
   }, []);
 
-  const help = useCallback(
-    (partialLine: string): OutputLine[] => {
-      const s = activeSession(labRef.current);
-      // 3a only routers — contextHelp is router/IOS-specific.
-      return contextHelp(s, partialLine).map((o) => ({ kind: o.kind, text: o.text }));
-    },
-    [],
-  );
+  const help = useCallback((partialLine: string): OutputLine[] => {
+    const s = activeSession(labRef.current);
+    return contextHelp(s, partialLine).map((o) => ({ kind: o.kind, text: o.text }));
+  }, []);
 
   const complete = useCallback((partialLine: string): string | null => {
     const s = activeSession(labRef.current);
     return iosTabComplete(s, partialLine);
   }, []);
 
-  const initialDevice = lab.topology.devices[0];
+  // Banners are stable for the life of this hook instance (lab doesn't change).
+  const bannersByDeviceId = useMemo(() => bannersForLab(lab), [lab]);
+
   const term = useTerminal({
+    activeId: labSession.activeDeviceId,
+    bannersByDeviceId,
     execute,
     help,
     complete,
     prompt: activePrompt(labSession),
-    banner: bootBanner(initialDevice.platform),
   });
 
   const { objectives, allMet } = useMemo(() => grade(lab, labSession), [lab, labSession]);
@@ -115,10 +124,9 @@ export function useLabSession(lab: Lab): UseLabSession {
   const [resetToken, setResetToken] = useState(0);
   const reset = useCallback(() => {
     setLabSession(initLabSession(lab));
-    term.clear();
-    term.print(bootBanner(initialDevice.platform));
+    term.resetAll(bannersByDeviceId);
     setResetToken((t) => t + 1);
-  }, [lab, initialDevice, term]);
+  }, [lab, bannersByDeviceId, term]);
 
   // commandCount = total commands across all devices (for engagement signals).
   const commandCount = useMemo(

@@ -1,15 +1,18 @@
 import { useCallback, useReducer } from 'react';
 
 /**
- * Terminal primitive (presentation layer).
+ * Multi-device terminal primitive (presentation layer).
  *
- * Owns terminal state — printed lines, the current input buffer, and command
- * history navigation — via a reducer (CLAUDE.md architecture: React state +
- * reducers, no Redux/Zustand until complexity demands).
+ * Holds one terminal slice per device — scrollback, input buffer, and command
+ * history are all per-device. The hook exposes the slice of whichever device
+ * is currently active; switching the active id swaps the visible buffer +
+ * prompt without losing any device's scrollback or history. For an N=1 lab
+ * (the free lab) this collapses to a single slice and behaves exactly like
+ * the previous single-device hook.
  *
  * It is intentionally decoupled from the parser: the caller supplies an
  * {@link Executor} that turns a raw line into output. The terminal does not
- * know about IOS, bash, or grading. That keeps the engine layers separable.
+ * know about IOS, bash, or grading.
  */
 
 export type LineKind = 'input' | 'output' | 'error' | 'system';
@@ -36,7 +39,8 @@ export interface ExecResult {
 
 export type Executor = (raw: string) => ExecResult;
 
-interface State {
+/** One device's terminal state. */
+interface DeviceTerminalState {
   lines: TerminalLine[];
   input: string;
   /** Submitted commands, newest last. Drives up/down recall. */
@@ -46,116 +50,146 @@ interface State {
   nextId: number;
 }
 
-type Action =
-  | { type: 'setInput'; value: string }
-  | { type: 'submit'; prompt: string; result: ExecResult }
-  | { type: 'recallPrev' }
-  | { type: 'recallNext' }
-  | { type: 'print'; lines: OutputLine[] }
-  | { type: 'inlineHelp'; prompt: string; raw: string; lines: OutputLine[] }
-  | { type: 'clear' };
+/** State is keyed by device id — one slice per device. */
+type State = Readonly<Record<string, DeviceTerminalState>>;
 
-function reducer(state: State, action: Action): State {
+type Action =
+  | { type: 'setInput'; id: string; value: string }
+  | { type: 'submit'; id: string; prompt: string; result: ExecResult }
+  | { type: 'recallPrev'; id: string }
+  | { type: 'recallNext'; id: string }
+  | { type: 'print'; id: string; lines: OutputLine[] }
+  | { type: 'inlineHelp'; id: string; prompt: string; raw: string; lines: OutputLine[] }
+  | { type: 'clear'; id: string }
+  /** Bulk-reset every device's slice — used on lab reset. */
+  | { type: 'resetAll'; bannersByDeviceId: Record<string, OutputLine[]> };
+
+function initSlice(banner: OutputLine[]): DeviceTerminalState {
+  return {
+    lines: banner.map((l, i) => ({ id: i, kind: l.kind, text: l.text })),
+    input: '',
+    commandHistory: [],
+    historyIndex: null,
+    nextId: banner.length,
+  };
+}
+
+function reduceSlice(slice: DeviceTerminalState, action: Action): DeviceTerminalState {
   switch (action.type) {
     case 'setInput':
-      return { ...state, input: action.value, historyIndex: null };
+      return { ...slice, input: action.value, historyIndex: null };
 
     case 'submit': {
-      const submitted = state.input.trim();
+      const submitted = slice.input.trim();
       const echo: TerminalLine = {
-        id: state.nextId,
+        id: slice.nextId,
         kind: 'input',
-        text: state.input,
+        text: slice.input,
         prompt: action.prompt,
       };
 
       if (action.result.clear) {
         return {
-          ...state,
           lines: [],
           input: '',
           historyIndex: null,
           commandHistory: submitted
-            ? [...state.commandHistory, submitted]
-            : state.commandHistory,
-          nextId: state.nextId + 1,
+            ? [...slice.commandHistory, submitted]
+            : slice.commandHistory,
+          nextId: slice.nextId + 1,
         };
       }
 
       const output = action.result.lines.map((l, i) => ({
-        id: state.nextId + 1 + i,
+        id: slice.nextId + 1 + i,
         kind: l.kind,
         text: l.text,
       }));
-
       return {
-        ...state,
-        lines: [...state.lines, echo, ...output],
+        lines: [...slice.lines, echo, ...output],
         input: '',
         historyIndex: null,
         commandHistory: submitted
-          ? [...state.commandHistory, submitted]
-          : state.commandHistory,
-        nextId: state.nextId + 1 + output.length,
+          ? [...slice.commandHistory, submitted]
+          : slice.commandHistory,
+        nextId: slice.nextId + 1 + output.length,
       };
     }
 
     case 'recallPrev': {
-      if (state.commandHistory.length === 0) return state;
+      if (slice.commandHistory.length === 0) return slice;
       const idx =
-        state.historyIndex === null
-          ? state.commandHistory.length - 1
-          : Math.max(0, state.historyIndex - 1);
-      return { ...state, historyIndex: idx, input: state.commandHistory[idx] };
+        slice.historyIndex === null
+          ? slice.commandHistory.length - 1
+          : Math.max(0, slice.historyIndex - 1);
+      return { ...slice, historyIndex: idx, input: slice.commandHistory[idx] };
     }
 
     case 'recallNext': {
-      if (state.historyIndex === null) return state;
-      const next = state.historyIndex + 1;
-      if (next >= state.commandHistory.length) {
-        return { ...state, historyIndex: null, input: '' };
+      if (slice.historyIndex === null) return slice;
+      const next = slice.historyIndex + 1;
+      if (next >= slice.commandHistory.length) {
+        return { ...slice, historyIndex: null, input: '' };
       }
-      return { ...state, historyIndex: next, input: state.commandHistory[next] };
+      return { ...slice, historyIndex: next, input: slice.commandHistory[next] };
     }
 
     case 'print': {
       const output = action.lines.map((l, i) => ({
-        id: state.nextId + i,
+        id: slice.nextId + i,
         kind: l.kind,
         text: l.text,
       }));
       return {
-        ...state,
-        lines: [...state.lines, ...output],
-        nextId: state.nextId + output.length,
+        ...slice,
+        lines: [...slice.lines, ...output],
+        nextId: slice.nextId + output.length,
       };
     }
 
     case 'inlineHelp': {
       // Echo the in-progress line with the `?` appended, print help below it,
-      // and PRESERVE the input buffer so the user can keep typing. Matches IOS:
-      // `?` is interactive feedback, not a submitted command.
+      // and PRESERVE the input buffer. Matches IOS: `?` is interactive
+      // feedback, not a submitted command.
       const echo: TerminalLine = {
-        id: state.nextId,
+        id: slice.nextId,
         kind: 'input',
         text: `${action.raw}?`,
         prompt: action.prompt,
       };
       const output = action.lines.map((l, i) => ({
-        id: state.nextId + 1 + i,
+        id: slice.nextId + 1 + i,
         kind: l.kind,
         text: l.text,
       }));
       return {
-        ...state,
-        lines: [...state.lines, echo, ...output],
-        nextId: state.nextId + 1 + output.length,
+        ...slice,
+        lines: [...slice.lines, echo, ...output],
+        nextId: slice.nextId + 1 + output.length,
       };
     }
 
     case 'clear':
-      return { ...state, lines: [] };
+      return { ...slice, lines: [] };
+
+    case 'resetAll':
+      // Handled at the top level, not per-slice.
+      return slice;
   }
+}
+
+function reducer(state: State, action: Action): State {
+  if (action.type === 'resetAll') {
+    const next: Record<string, DeviceTerminalState> = {};
+    for (const [id, banner] of Object.entries(action.bannersByDeviceId)) {
+      next[id] = initSlice(banner);
+    }
+    return next;
+  }
+  const cur = state[action.id];
+  if (!cur) return state;
+  const updated = reduceSlice(cur, action);
+  return { ...state, [action.id]: updated };
 }
 
 /** Returns the help lines to print for an in-progress (pre-Enter) line. */
@@ -166,12 +200,14 @@ export type HelpProvider = (partialLine: string) => OutputLine[];
 export type CompletionProvider = (partialLine: string) => string | null;
 
 export interface UseTerminalOptions {
-  /** Resolves a raw command line into output. */
+  /** The device whose slice is exposed by the hook. */
+  activeId: string;
+  /** Initial scrollback per device — built once on mount. */
+  bannersByDeviceId: Record<string, OutputLine[]>;
+  /** Resolves a raw command line into output (targets the active device). */
   execute: Executor;
-  /** The current prompt string, e.g. `R1#`. May change with mode later. */
+  /** The current prompt string for the active device, e.g. `R1#`. */
   prompt: string;
-  /** Optional banner lines printed on first render. */
-  banner?: OutputLine[];
   /** Returns context-help lines for the current input. Drives IOS-style `?`. */
   help?: HelpProvider;
   /** Tab-complete the current input. Returns null to leave it alone. */
@@ -192,54 +228,77 @@ export interface UseTerminal {
   requestHelp: () => void;
   /** Tab-complete the current input. No-op on ambiguous / no-partial cases. */
   tabComplete: () => void;
+  /** Reset every device's terminal slice — used by lab reset. */
+  resetAll: (bannersByDeviceId: Record<string, OutputLine[]>) => void;
 }
 
 export function useTerminal({
+  activeId,
+  bannersByDeviceId,
   execute,
   prompt,
-  banner,
   help,
   complete,
 }: UseTerminalOptions): UseTerminal {
-  const [state, dispatch] = useReducer(
-    reducer,
-    banner,
-    (b): State => ({
-      lines: (b ?? []).map((l, i) => ({ id: i, kind: l.kind, text: l.text })),
-      input: '',
-      commandHistory: [],
-      historyIndex: null,
-      nextId: (b ?? []).length,
-    }),
+  const [state, dispatch] = useReducer(reducer, bannersByDeviceId, (banners): State => {
+    const initial: Record<string, DeviceTerminalState> = {};
+    for (const [id, banner] of Object.entries(banners)) {
+      initial[id] = initSlice(banner);
+    }
+    return initial;
+  });
+
+  // Defensive fallback — should never happen for a well-formed LabSession.
+  const slice = state[activeId] ?? initSlice(bannersByDeviceId[activeId] ?? []);
+
+  const setInput = useCallback(
+    (value: string) => dispatch({ type: 'setInput', id: activeId, value }),
+    [activeId],
   );
 
-  const setInput = useCallback((value: string) => dispatch({ type: 'setInput', value }), []);
-
   const submit = useCallback(() => {
-    const result = execute(state.input);
-    dispatch({ type: 'submit', prompt, result });
-  }, [execute, prompt, state.input]);
+    const result = execute(slice.input);
+    dispatch({ type: 'submit', id: activeId, prompt, result });
+  }, [execute, prompt, slice.input, activeId]);
 
-  const recallPrev = useCallback(() => dispatch({ type: 'recallPrev' }), []);
-  const recallNext = useCallback(() => dispatch({ type: 'recallNext' }), []);
-  const print = useCallback((lines: OutputLine[]) => dispatch({ type: 'print', lines }), []);
-  const clear = useCallback(() => dispatch({ type: 'clear' }), []);
+  const recallPrev = useCallback(
+    () => dispatch({ type: 'recallPrev', id: activeId }),
+    [activeId],
+  );
+  const recallNext = useCallback(
+    () => dispatch({ type: 'recallNext', id: activeId }),
+    [activeId],
+  );
+  const print = useCallback(
+    (lines: OutputLine[]) => dispatch({ type: 'print', id: activeId, lines }),
+    [activeId],
+  );
+  const clear = useCallback(
+    () => dispatch({ type: 'clear', id: activeId }),
+    [activeId],
+  );
 
   const requestHelp = useCallback(() => {
     if (!help) return;
-    const lines = help(state.input);
-    dispatch({ type: 'inlineHelp', prompt, raw: state.input, lines });
-  }, [help, prompt, state.input]);
+    const lines = help(slice.input);
+    dispatch({ type: 'inlineHelp', id: activeId, prompt, raw: slice.input, lines });
+  }, [help, prompt, slice.input, activeId]);
 
   const tabComplete = useCallback(() => {
     if (!complete) return;
-    const next = complete(state.input);
-    if (next !== null) dispatch({ type: 'setInput', value: next });
-  }, [complete, state.input]);
+    const next = complete(slice.input);
+    if (next !== null) dispatch({ type: 'setInput', id: activeId, value: next });
+  }, [complete, slice.input, activeId]);
+
+  const resetAll = useCallback(
+    (banners: Record<string, OutputLine[]>) =>
+      dispatch({ type: 'resetAll', bannersByDeviceId: banners }),
+    [],
+  );
 
   return {
-    lines: state.lines,
-    input: state.input,
+    lines: slice.lines,
+    input: slice.input,
     prompt,
     setInput,
     submit,
@@ -249,5 +308,6 @@ export function useTerminal({
     clear,
     requestHelp,
     tabComplete,
+    resetAll,
   };
 }
