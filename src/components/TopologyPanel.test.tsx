@@ -42,8 +42,10 @@ describe('TopologyPanel', () => {
     render(
       <TopologyPanel devices={[deviceR1(), deviceR2()]} activeDeviceId="R1" />,
     );
-    const r1 = screen.getByRole('button', { name: /Console for R1/ });
-    const r2 = screen.getByRole('button', { name: /Console for R2/ });
+    // React Flow wraps custom nodes in role="group" containers; the chassis
+    // buttons sit inside. Find them via aria-label rather than role.
+    const r1 = screen.getByLabelText('Console for R1');
+    const r2 = screen.getByLabelText('Console for R2');
     expect(r1).toHaveAttribute('aria-pressed', 'true');
     expect(r2).toHaveAttribute('aria-pressed', 'false');
   });
@@ -81,7 +83,32 @@ describe('TopologyPanel', () => {
         onSelectDevice={onSelect}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: /Console for R2/ }));
+    fireEvent.click(screen.getByLabelText('Console for R2'));
     expect(onSelect).toHaveBeenCalledWith('R2');
+  });
+
+  it('renders an edges container when the lab has links', () => {
+    // jsdom can't measure node positions so React Flow's edge geometry
+    // calculation is partial; verify the edges container is present (the
+    // detailed rendering is verified end-to-end in the browser).
+    const { container } = render(
+      <TopologyPanel
+        devices={[deviceR1(), deviceR2()]}
+        activeDeviceId="R1"
+        links={[
+          { a: { deviceId: 'R1', iface: 'Gi0/0' }, b: { deviceId: 'R2', iface: 'Gi0/0' } },
+        ]}
+      />,
+    );
+    expect(container.querySelector('.react-flow__edges')).not.toBeNull();
+  });
+
+  it('renders an N=1 topology with no edges (free-lab path)', () => {
+    const { container } = render(
+      <TopologyPanel devices={[deviceR1()]} activeDeviceId="R1" />,
+    );
+    expect(screen.getByLabelText('Console for R1')).toBeInTheDocument();
+    const edges = container.querySelectorAll('.react-flow__edge');
+    expect(edges.length).toBe(0);
   });
 });
