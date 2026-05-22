@@ -14,3 +14,42 @@
     -webkit-font-smoothing: antialiased;
   }
 }
+
+@layer utilities {
+  /* Plays once when an objective transitions to met — a brief teal flash that
+     fades, plus a slight nudge. Coupled with check-pop on the check icon. */
+  @keyframes objective-flash {
+    0% {
+      background-color: rgba(94, 234, 212, 0.18);
+      transform: translateX(0);
+    }
+    20% {
+      transform: translateX(2px);
+    }
+    100% {
+      background-color: transparent;
+      transform: translateX(0);
+    }
+  }
+  .animate-objective-flash {
+    animation: objective-flash 1400ms ease-out 1;
+  }
+
+  @keyframes check-pop {
+    0% {
+      transform: scale(0.4) rotate(-12deg);
+      opacity: 0;
+    }
+    60% {
+      transform: scale(1.25) rotate(0deg);
+      opacity: 1;
+    }
+    100% {
+      transform: scale(1) rotate(0deg);
+      opacity: 1;
+    }
+  }
+  .animate-check-pop {
+    animation: check-pop 360ms cubic-bezier(0.34, 1.56, 0.64, 1) 1;
+  }
+}
