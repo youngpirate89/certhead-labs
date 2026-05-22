@@ -1,8 +1,15 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useTerminal, type ExecResult, type OutputLine, type UseTerminal } from './useTerminal';
-import { applyCommand, contextHelp, tabComplete as iosTabComplete } from '@/engine/adapters/ios/interpret';
-import { prompt, type Session } from '@/engine/adapters/ios/state';
+import { contextHelp, tabComplete as iosTabComplete } from '@/engine/adapters/ios/interpret';
 import { routerAdapter } from '@/engine/adapters/router';
+import {
+  initLabSession,
+  applyToActive,
+  setActive,
+  activeSession,
+  activePrompt,
+  type LabSession,
+} from '@/engine/lab-session';
 import { grade, type ObjectiveStatus } from '@/engine/grading';
 import type { DeviceTopologyView } from '@/engine/adapters/types';
 import type { Lab } from '@/engine/types';
@@ -12,7 +19,7 @@ export interface UseLabSession extends UseTerminal {
   allMet: boolean;
   /** Number of successfully executed commands so far (for engagement signals). */
   commandCount: number;
-  /** Device-topology view derived from live session state — drives TopologyPanel. */
+  /** Device-topology views — one per device, derived from live session state. */
   devices: DeviceTopologyView[];
   /** Id of the device the terminal currently targets. Defaults to the lab's
    *  first device, set immediately on mount so the terminal is usable without
@@ -44,76 +51,92 @@ function bootBanner(platform: string): OutputLine[] {
   ];
 }
 
+/** Compute the topology views for every device in the LabSession. */
+function topologyViewsFor(lab: LabSession): DeviceTopologyView[] {
+  return Object.values(lab.devices).map((s) => {
+    switch (s.kind) {
+      case 'router':
+        return routerAdapter.toTopologyView(s);
+    }
+  });
+}
+
 /**
- * Runs a single IOS lab: owns the device session, drives the terminal via the
- * engine interpreter, and grades objectives live after every command.
+ * Runs a lab: owns the multi-device LabSession, drives the terminal against
+ * the active device, and grades objectives live after every command.
  *
- * The topology view comes from the router adapter — kept device-kind-agnostic
- * so the multi-device LabSession refactor (3a-c2) can drop in switch/pc views
- * the same way.
+ * For an N=1 lab (the free lab) the LabSession has one entry and behavior
+ * collapses to the original single-device flow. Each device's state is
+ * independent — a command on R1 never mutates R2.
  */
 export function useLabSession(lab: Lab): UseLabSession {
-  const [session, setSession] = useState<Session>(() =>
-    routerAdapter.buildDevice(lab.topology.devices[0]),
-  );
+  const [labSession, setLabSession] = useState<LabSession>(() => initLabSession(lab));
 
   // Executor reads the latest session via a ref to avoid stale closures.
-  const sessionRef = useRef(session);
-  sessionRef.current = session;
+  const labRef = useRef(labSession);
+  labRef.current = labSession;
 
   const execute = useCallback((raw: string): ExecResult => {
-    const { session: next, output } = applyCommand(sessionRef.current, raw);
-    setSession(next);
+    const { session: next, output } = applyToActive(labRef.current, raw);
+    setLabSession(next);
     return { lines: output.map((o) => ({ kind: o.kind, text: o.text })) };
   }, []);
 
   const help = useCallback(
-    (partialLine: string): OutputLine[] =>
-      contextHelp(sessionRef.current, partialLine).map((o) => ({ kind: o.kind, text: o.text })),
+    (partialLine: string): OutputLine[] => {
+      const s = activeSession(labRef.current);
+      // 3a only routers — contextHelp is router/IOS-specific.
+      return contextHelp(s, partialLine).map((o) => ({ kind: o.kind, text: o.text }));
+    },
     [],
   );
 
-  const complete = useCallback(
-    (partialLine: string): string | null => iosTabComplete(sessionRef.current, partialLine),
-    [],
-  );
+  const complete = useCallback((partialLine: string): string | null => {
+    const s = activeSession(labRef.current);
+    return iosTabComplete(s, partialLine);
+  }, []);
 
   const initialDevice = lab.topology.devices[0];
   const term = useTerminal({
     execute,
     help,
     complete,
-    prompt: prompt(session),
+    prompt: activePrompt(labSession),
     banner: bootBanner(initialDevice.platform),
   });
 
-  const { objectives, allMet } = useMemo(() => grade(lab, session), [lab, session]);
+  const { objectives, allMet } = useMemo(() => grade(lab, labSession), [lab, labSession]);
+  const devices = useMemo(() => topologyViewsFor(labSession), [labSession]);
 
-  // The lab's first device is active from mount — terminal is usable
-  // immediately without a click. setActiveDevice is wired for the multi-device
-  // future even though the single-device path doesn't exercise it yet.
-  const [activeDeviceId, setActiveDevice] = useState<string>(lab.topology.devices[0].id);
-  const devices: DeviceTopologyView[] = useMemo(
-    () => [routerAdapter.toTopologyView(session)],
-    [session],
-  );
+  const setActiveDevice = useCallback((id: string) => {
+    setLabSession((cur) => setActive(cur, id));
+  }, []);
 
   const [resetToken, setResetToken] = useState(0);
   const reset = useCallback(() => {
-    setSession(routerAdapter.buildDevice(initialDevice));
-    setActiveDevice(initialDevice.id);
+    setLabSession(initLabSession(lab));
     term.clear();
     term.print(bootBanner(initialDevice.platform));
     setResetToken((t) => t + 1);
-  }, [initialDevice, term]);
+  }, [lab, initialDevice, term]);
+
+  // commandCount = total commands across all devices (for engagement signals).
+  const commandCount = useMemo(
+    () =>
+      Object.values(labSession.devices).reduce((sum, s) => {
+        if (s.kind === 'router') return sum + s.history.length;
+        return sum;
+      }, 0),
+    [labSession],
+  );
 
   return {
     ...term,
     objectives,
     allMet,
-    commandCount: session.history.length,
+    commandCount,
     devices,
-    activeDeviceId,
+    activeDeviceId: labSession.activeDeviceId,
     setActiveDevice,
     reset,
     resetToken,

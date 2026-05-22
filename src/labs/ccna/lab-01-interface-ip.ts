@@ -38,12 +38,13 @@ export const lab01InterfaceIp: Lab = {
     {
       id: 'verify',
       text: 'Verify with show ip interface brief',
-      // Accept the command from priv mode OR via `do` from config-family modes;
-      // both forms appear in resolvedHistory as canonical strings.
+      // History is per-device — lab-01 has one device, R1. Accept the command
+      // from priv mode OR via `do` from config-family modes; both forms appear
+      // in resolvedHistory as canonical strings.
       check: (_state, history) =>
-        history.resolved.some((cmd) =>
+        history.R1?.resolved.some((cmd) =>
           /^(do\s+)?show ip interface brief$/.test(cmd),
-        ),
+        ) ?? false,
     },
   ],
   hints: [

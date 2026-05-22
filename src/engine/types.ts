@@ -27,11 +27,15 @@ export interface CommandHistory {
   readonly resolved: readonly string[];
 }
 
+/** Per-device command-history map passed to objective checks. */
+export type HistoryView = Readonly<Record<string, CommandHistory>>;
+
 export interface LabObjective {
   readonly id: string;
   readonly text: string;
-  /** True when this objective is satisfied by the current state / history. */
-  readonly check: (state: LabState, history: CommandHistory) => boolean;
+  /** True when this objective is satisfied by the current state / histories.
+   *  `history` is keyed by device id — each device tracks its own commands. */
+  readonly check: (state: LabState, history: HistoryView) => boolean;
 }
 
 export interface LabHint {
@@ -47,6 +51,19 @@ export interface LabDevice {
   readonly interfaces: readonly string[];
 }
 
+/** One end of a cable: a (deviceId, iface) pair. */
+export interface LinkEndpoint {
+  readonly deviceId: string;
+  readonly iface: string;
+}
+
+/** A cable between two device interfaces. Authored by labs, not learners.
+ *  Reachability checks (3b+) traverse these — for 3a they're metadata + edges. */
+export interface Link {
+  readonly a: LinkEndpoint;
+  readonly b: LinkEndpoint;
+}
+
 export interface Lab {
   readonly id: string;
   readonly title: string;
@@ -59,7 +76,7 @@ export interface Lab {
   /** Real-world framing shown on the lab brief screen before the terminal —
    *  one or two short paragraphs that explain WHY a tech would do this. */
   readonly scenario: string;
-  readonly topology: { devices: readonly LabDevice[]; links: readonly never[] };
+  readonly topology: { devices: readonly LabDevice[]; links: readonly Link[] };
   readonly objectives: readonly LabObjective[];
   readonly hints: readonly LabHint[];
 }
