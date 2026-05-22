@@ -47,7 +47,14 @@ export function TryMode() {
     <Layout
       examLabel={lab.exam}
       labTitle={lab.title}
-      topology={<TopologyPanel deviceLabel={lab.topology.devices[0].id} />}
+      topology={
+        <TopologyPanel
+          devices={session.devices}
+          activeDeviceId={session.activeDeviceId}
+          activePrompt={session.prompt}
+          onSelectDevice={session.setActiveDevice}
+        />
+      }
       objectives={<ObjectivesPanel title="Objectives" objectives={session.objectives} />}
       terminal={
         <div className="relative h-full">
