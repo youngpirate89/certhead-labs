@@ -114,6 +114,28 @@ describe('IOS interpreter — resolution errors and show', () => {
   });
 });
 
+describe('IOS interpreter — prompt accuracy across all modes', () => {
+  it('renders the canonical IOS prompt for each mode', () => {
+    const user = fresh();
+    expect(prompt(user)).toBe('R1>');
+
+    const priv = applyCommand(user, 'enable').session;
+    expect(prompt(priv)).toBe('R1#');
+
+    const cfg = applyCommand(priv, 'configure terminal').session;
+    expect(prompt(cfg)).toBe('R1(config)#');
+
+    const cfgIf = applyCommand(cfg, 'interface gi0/0').session;
+    expect(prompt(cfgIf)).toBe('R1(config-if)#');
+  });
+
+  it('updates the prompt hostname when `hostname` is applied', () => {
+    const cfg = run(fresh(), ['enable', 'configure terminal']);
+    const renamed = applyCommand(cfg, 'hostname EDGE-R1').session;
+    expect(prompt(renamed)).toBe('EDGE-R1(config)#');
+  });
+});
+
 describe('IOS interpreter — Tab completion', () => {
   it('completes a unique prefix and appends a space', () => {
     expect(tabComplete(fresh(), 'en')).toBe('enable ');

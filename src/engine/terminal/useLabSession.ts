@@ -27,6 +27,22 @@ export interface UseLabSession extends UseTerminal {
   setActiveDevice: (id: string) => void;
 }
 
+/** Short, IOS-flavored boot output printed before the first prompt. Kept
+ *  recognizable (IOS XE banner + copyright + chassis line) without simulating
+ *  the full multi-page boot — and not gated on "Press RETURN" since the
+ *  prompt is immediately interactive. */
+function bootBanner(platform: string): OutputLine[] {
+  return [
+    { kind: 'system', text: 'Cisco IOS XE Software, Version 16.12.04' },
+    { kind: 'system', text: 'Copyright (c) 1986-2020 by Cisco Systems, Inc.' },
+    { kind: 'system', text: '' },
+    { kind: 'system', text: `${platform} (revision 1.0) with 4194304K bytes of memory.` },
+    { kind: 'system', text: '' },
+    { kind: 'system', text: 'Tab completes unique prefixes; ? shows context help.' },
+    { kind: 'system', text: '' },
+  ];
+}
+
 /** Derive the exam-agnostic topology view from live IOS device state. */
 function toTopologyView(d: DeviceState): DeviceTopologyView {
   return {
@@ -71,16 +87,13 @@ export function useLabSession(lab: Lab): UseLabSession {
     [],
   );
 
+  const initialDevice = lab.topology.devices[0];
   const term = useTerminal({
     execute,
     help,
     complete,
     prompt: prompt(session),
-    banner: [
-      { kind: 'system', text: `${lab.title} — ${lab.exam}` },
-      { kind: 'system', text: 'Type commands as you would on a real router. Abbreviations work. Press ? for help.' },
-      { kind: 'system', text: '' },
-    ],
+    banner: bootBanner(initialDevice.platform),
   });
 
   const { objectives, allMet } = useMemo(() => grade(lab, session), [lab, session]);
