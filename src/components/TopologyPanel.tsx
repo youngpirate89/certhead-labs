@@ -197,7 +197,9 @@ export function TopologyPanel({
         edges={[]}
         nodeTypes={NODE_TYPES}
         fitView
-        fitViewOptions={{ padding: 0.2, minZoom: 0.5, maxZoom: 1.2 }}
+        // Allow generous zoom-out: a 4-device row (PC + 2 routers + PC) needs
+        // ~1040px in flow space; at 340px rail width that's a ~0.3 fit.
+        fitViewOptions={{ padding: 0.15, minZoom: 0.3, maxZoom: 1.2 }}
         proOptions={{ hideAttribution: true }}
         nodesDraggable={false}
         nodesConnectable={false}
