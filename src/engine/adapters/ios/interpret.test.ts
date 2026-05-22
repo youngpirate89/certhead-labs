@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { applyCommand, contextHelp, tabComplete } from './interpret';
-import { createSession, buildDevice, prompt, type Session } from './state';
+import { createSession, buildDevice, prompt, routingTable, type Session } from './state';
 import { grade } from '@/engine/grading';
 import { lab01InterfaceIp } from '@/labs/ccna/lab-01-interface-ip';
 
@@ -116,6 +116,103 @@ describe('IOS interpreter — resolution errors and show', () => {
     const before = structuredClone(s);
     applyCommand(s, 'configure terminal');
     expect(s).toEqual(before);
+  });
+});
+
+describe('IOS interpreter — `ip route` static routes', () => {
+  function configMode(): Session {
+    return run(fresh(), ['enable', 'configure terminal']);
+  }
+
+  it('parses `ip route <prefix> <mask> <next-hop>` and adds a static route', () => {
+    const s = applyCommand(configMode(), 'ip route 10.0.0.0 255.255.255.0 192.168.1.2').session;
+    expect(s.staticRoutes).toEqual([
+      {
+        prefix: '10.0.0.0',
+        mask: '255.255.255.0',
+        nextHop: '192.168.1.2',
+        source: 'static',
+        adminDistance: 1,
+      },
+    ]);
+  });
+
+  it('parses `ip route <prefix> <mask> <egress-iface>` and stores the canonical iface id', () => {
+    const s = applyCommand(configMode(), 'ip route 10.0.0.0 255.255.255.0 gi0/1').session;
+    expect(s.staticRoutes).toEqual([
+      {
+        prefix: '10.0.0.0',
+        mask: '255.255.255.0',
+        egressIface: 'Gi0/1',
+        source: 'static',
+        adminDistance: 1,
+      },
+    ]);
+  });
+
+  it('normalizes the prefix to the network address (host bits cleared)', () => {
+    const s = applyCommand(configMode(), 'ip route 10.0.0.42 255.255.255.0 192.168.1.2').session;
+    expect(s.staticRoutes[0].prefix).toBe('10.0.0.0');
+  });
+
+  it('rejects an invalid prefix / mask / target with a clear error', () => {
+    const cfg = configMode();
+    expect(applyCommand(cfg, 'ip route bogus 255.255.255.0 192.168.1.2').output[0].kind).toBe('error');
+    expect(applyCommand(cfg, 'ip route 10.0.0.0 255.255.0.255 192.168.1.2').output[0].kind).toBe('error');
+    expect(applyCommand(cfg, 'ip route 10.0.0.0 255.255.255.0 nonsense').output[0].kind).toBe('error');
+  });
+
+  it('`no ip route ...` removes the matching entry', () => {
+    let s = configMode();
+    s = applyCommand(s, 'ip route 10.0.0.0 255.255.255.0 192.168.1.2').session;
+    s = applyCommand(s, 'ip route 10.1.0.0 255.255.255.0 192.168.1.3').session;
+    expect(s.staticRoutes).toHaveLength(2);
+    s = applyCommand(s, 'no ip route 10.0.0.0 255.255.255.0 192.168.1.2').session;
+    expect(s.staticRoutes).toHaveLength(1);
+    expect(s.staticRoutes[0].prefix).toBe('10.1.0.0');
+  });
+
+  it('deduplicates identical static-route entries (re-entering does not stack)', () => {
+    let s = configMode();
+    s = applyCommand(s, 'ip route 10.0.0.0 255.255.255.0 192.168.1.2').session;
+    s = applyCommand(s, 'ip route 10.0.0.0 255.255.255.0 192.168.1.2').session;
+    expect(s.staticRoutes).toHaveLength(1);
+  });
+
+  it('routingTable merges derived connecteds with stored statics', () => {
+    let s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface gi0/0',
+      'ip address 192.168.1.1 255.255.255.0',
+      'no shutdown',
+      'exit',
+    ]);
+    s = applyCommand(s, 'ip route 10.0.0.0 255.255.255.0 192.168.1.2').session;
+    const table = routingTable(s);
+    expect(table).toHaveLength(2);
+    expect(table[0].source).toBe('connected');
+    expect(table[0].prefix).toBe('192.168.1.0');
+    expect(table[1].source).toBe('static');
+    expect(table[1].prefix).toBe('10.0.0.0');
+  });
+
+  it('`show ip route` lists connected + static routes IOS-style', () => {
+    let s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface gi0/0',
+      'ip address 192.168.1.1 255.255.255.0',
+      'no shutdown',
+      'exit',
+    ]);
+    s = applyCommand(s, 'ip route 10.0.0.0 255.255.255.0 192.168.1.2').session;
+    const text = applyCommand(s, 'do show ip route')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/Codes:.*C - connected.*S - static/);
+    expect(text).toMatch(/C\s+192\.168\.1\.0\/24 is directly connected, GigabitEthernet0\/0/);
+    expect(text).toMatch(/S\s+10\.0\.0\.0\/24 \[1\/0\] via 192\.168\.1\.2/);
   });
 });
 

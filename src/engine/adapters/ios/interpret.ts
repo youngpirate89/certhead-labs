@@ -8,7 +8,9 @@ import {
   isValidIpv4,
   isValidMask,
   prompt as promptFor,
+  routingTable,
 } from './state';
+import { type Route, maskLength, networkAddress } from './routing';
 import type { CommandOutput, ApplyResult as GenericApplyResult } from '../types';
 
 // Re-exported from the shared adapter contracts; kept here as a named export so
@@ -271,10 +273,13 @@ function dispatch(
       return setAdmin(s, false);
 
     case 'no':
-      return negate(s, command);
+      return negate(s, command, args);
 
     case 'ip':
-      return setIpAddress(s, args.ip, args.mask);
+      // command[1] differentiates ip address (config-if) from ip route (config).
+      if (command[1] === 'address') return setIpAddress(s, args.ip, args.mask);
+      if (command[1] === 'route') return addStaticRoute(s, args.prefix, args.mask, args.target);
+      return { session: s, output: err('% Incomplete command.') };
 
     case 'show':
       return show(s, command);
@@ -329,7 +334,7 @@ function setAdmin(s: Session, up: boolean): ApplyResult {
   return { session: s, output: [] };
 }
 
-function negate(s: Session, command: string[]): ApplyResult {
+function negate(s: Session, command: string[], args: Record<string, string>): ApplyResult {
   // command = ['no', ...]
   switch (command[1]) {
     case 'shutdown':
@@ -338,6 +343,10 @@ function negate(s: Session, command: string[]): ApplyResult {
       s.device.hostname = 'Router';
       return { session: s, output: [] };
     case 'ip':
+      if (command[2] === 'route') {
+        return removeStaticRoute(s, args.prefix, args.mask, args.target);
+      }
+      // `no ip address` (config-if): clear the interface's IP.
       if (s.currentInterface) {
         s.device.interfaces[s.currentInterface].ip = null;
         s.device.interfaces[s.currentInterface].mask = null;
@@ -348,15 +357,124 @@ function negate(s: Session, command: string[]): ApplyResult {
   }
 }
 
+/** Parse the `ip route <prefix> <mask> <target>` target as either a next-hop
+ *  IP or an egress-interface id. Returns null if it parses as neither. */
+function parseRouteTarget(
+  s: Session,
+  target: string,
+): { nextHop: string } | { egressIface: string } | null {
+  if (isValidIpv4(target)) return { nextHop: target };
+  const ifaceId = normaliseInterface(target);
+  if (ifaceId && s.device.interfaces[ifaceId]) return { egressIface: ifaceId };
+  return null;
+}
+
+function addStaticRoute(
+  s: Session,
+  prefix: string,
+  mask: string,
+  target: string,
+): ApplyResult {
+  if (!isValidIpv4(prefix)) {
+    return { session: s, output: err(`% Invalid input detected at "${prefix}".`) };
+  }
+  if (!isValidMask(mask)) return { session: s, output: err('% Invalid subnet mask.') };
+  const t = parseRouteTarget(s, target);
+  if (!t) return { session: s, output: err(`% Invalid input detected at "${target}".`) };
+  // Normalize the prefix to the actual network address so longest-prefix-match
+  // works correctly even if the user typed a host bit set.
+  const network = networkAddress(prefix, mask);
+  const route: Route = {
+    prefix: network,
+    mask,
+    ...t,
+    source: 'static',
+    adminDistance: 1,
+  };
+  // Deduplicate: identical entries do not stack.
+  const dupe = s.staticRoutes.find(
+    (r) =>
+      r.prefix === route.prefix &&
+      r.mask === route.mask &&
+      r.nextHop === route.nextHop &&
+      r.egressIface === route.egressIface,
+  );
+  if (!dupe) s.staticRoutes.push(route);
+  return { session: s, output: [] };
+}
+
+function removeStaticRoute(
+  s: Session,
+  prefix: string,
+  mask: string,
+  target: string,
+): ApplyResult {
+  if (!isValidIpv4(prefix) || !isValidMask(mask)) {
+    return { session: s, output: err('% Invalid input.') };
+  }
+  const t = parseRouteTarget(s, target);
+  if (!t) return { session: s, output: err(`% Invalid input detected at "${target}".`) };
+  const network = networkAddress(prefix, mask);
+  const before = s.staticRoutes.length;
+  s.staticRoutes = s.staticRoutes.filter(
+    (r) =>
+      !(
+        r.prefix === network &&
+        r.mask === mask &&
+        r.nextHop === ('nextHop' in t ? t.nextHop : undefined) &&
+        r.egressIface === ('egressIface' in t ? t.egressIface : undefined)
+      ),
+  );
+  if (s.staticRoutes.length === before) {
+    return { session: s, output: err('% Not found.') };
+  }
+  return { session: s, output: [] };
+}
+
 function show(s: Session, command: string[]): ApplyResult {
   // command = ['show', ...]
   const what = command[1];
-  if (what === 'ip') return { session: s, output: out(...showIpIntBrief(s)) };
+  if (what === 'ip') {
+    // `show ip interface brief` vs `show ip route`.
+    if (command[2] === 'route') return { session: s, output: out(...showIpRoute(s)) };
+    return { session: s, output: out(...showIpIntBrief(s)) };
+  }
   if (what === 'interfaces') return { session: s, output: out(...showInterfaces(s)) };
   if (what === 'version') return { session: s, output: out(...showVersion(s)) };
   if (what === 'running-config') return { session: s, output: out(...showRunningConfig(s)) };
   return { session: s, output: err('% Incomplete command.') };
 }
+
+function showIpRoute(s: Session): string[] {
+  const lines: string[] = [
+    'Codes: C - connected, S - static',
+    '',
+  ];
+  const table = routingTable(s);
+  if (table.length === 0) {
+    lines.push('No routes installed.');
+    return lines;
+  }
+  // Group by classful network for an IOS-realistic header, but keep it
+  // simple — one line per route, no "is variably subnetted" verbiage.
+  for (const r of table) {
+    const cidr = maskLength(r.mask);
+    const code = r.source === 'connected' ? 'C' : 'S';
+    if (r.source === 'connected') {
+      const ifaceName = r.egressIface
+        ? fullInterfaceName(r.egressIface)
+        : 'unknown';
+      lines.push(`${code}    ${r.prefix}/${cidr} is directly connected, ${ifaceName}`);
+    } else if (r.nextHop) {
+      lines.push(`${code}    ${r.prefix}/${cidr} [${r.adminDistance}/0] via ${r.nextHop}`);
+    } else if (r.egressIface) {
+      const ifaceName = fullInterfaceName(r.egressIface);
+      lines.push(`${code}    ${r.prefix}/${cidr} [${r.adminDistance}/0] is directly connected, ${ifaceName}`);
+    }
+  }
+  return lines;
+}
+
 
 function showIpIntBrief(s: Session): string[] {
   const header =

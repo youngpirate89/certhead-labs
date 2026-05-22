@@ -19,6 +19,7 @@ const showSubtree: CommandNode = {
     ip: {
       children: {
         interface: { children: { brief: done('Brief interface summary') } },
+        route: done('IP routing table'),
       },
     },
     interfaces: done('Interface status and configuration'),
@@ -46,6 +47,15 @@ const privMode: CommandNode = {
   },
 };
 
+const ipRouteSubtree: CommandNode = {
+  help: 'Establish a static route',
+  argument: arg('prefix', {
+    argument: arg('mask', {
+      argument: arg('target', done('Add a static route')),
+    }),
+  }),
+};
+
 const configMode: CommandNode = {
   children: {
     interface: {
@@ -56,9 +66,16 @@ const configMode: CommandNode = {
       help: 'Set the device hostname',
       argument: arg('name', done('Apply hostname')),
     },
+    ip: {
+      help: 'IP configuration commands',
+      children: { route: ipRouteSubtree },
+    },
     no: {
       help: 'Negate a command',
-      children: { hostname: done('Reset hostname to default') },
+      children: {
+        hostname: done('Reset hostname to default'),
+        ip: { children: { route: ipRouteSubtree } },
+      },
     },
     exit: done('Exit from configuration mode'),
     end: done('Return to privileged EXEC'),

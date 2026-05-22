@@ -2,10 +2,11 @@
  * Cisco IOS device state — the per-device state machine's data model.
  *
  * State machines are per-device (CLAUDE.md): a multi-device lab is N of these
- * with explicit message passing. This single-device model backs the free lab.
- * Everything here is plain serialisable data so grading checks can query it
- * declaratively and so sessions can be cloned for deterministic transitions.
+ * with explicit message passing. Everything here is plain serialisable data so
+ * grading checks can query it declaratively and sessions can be cloned for
+ * deterministic transitions.
  */
+import { connectedRoutes, type Route } from './routing';
 
 /** CLI mode stack levels. */
 export type Mode = 'user' | 'priv' | 'config' | 'config-if';
@@ -47,6 +48,12 @@ export interface Session {
    *  Used by verification-style objectives so a check can match the canonical
    *  command without enumerating every valid abbreviation in a regex. */
   resolvedHistory: string[];
+  /** Static routes entered via `ip route` — adminDistance:1, source:'static'.
+   *  Connected routes are NOT stored here; they're derived from live interface
+   *  state at query time via {@link routingTable}. OSPF (3d) appends to this
+   *  same array with source:'ospf'. Insertion order is preserved for the §5
+   *  deterministic tiebreak. */
+  staticRoutes: Route[];
 }
 
 const FULL_NAMES: Record<string, string> = {
@@ -120,7 +127,18 @@ export function createSession(device: DeviceState): Session {
     device: structuredClone(device),
     history: [],
     resolvedHistory: [],
+    staticRoutes: [],
   };
+}
+
+/**
+ * Effective routing table: derived connected routes (from up interfaces with
+ * IP/mask) followed by statics (and OSPF later). Insertion order is preserved
+ * — connecteds first, statics in entry order — so the §5 tiebreak resolves
+ * deterministically. Reachability (canReach, 3b-c5) walks this view.
+ */
+export function routingTable(s: Session): Route[] {
+  return [...connectedRoutes(s.device), ...s.staticRoutes];
 }
 
 /**
