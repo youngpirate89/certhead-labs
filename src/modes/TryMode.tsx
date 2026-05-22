@@ -98,6 +98,7 @@ export function TryMode() {
           activeDeviceId={session.activeDeviceId}
           activePrompt={session.prompt}
           onSelectDevice={session.setActiveDevice}
+          links={lab.topology.links}
         />
       }
       objectives={

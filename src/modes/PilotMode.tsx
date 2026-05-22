@@ -25,6 +25,7 @@ export function PilotMode({ lab }: { lab: Lab }) {
           activeDeviceId={session.activeDeviceId}
           activePrompt={session.prompt}
           onSelectDevice={session.setActiveDevice}
+          links={lab.topology.links}
         />
       }
       objectives={
