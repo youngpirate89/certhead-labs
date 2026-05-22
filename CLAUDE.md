@@ -53,31 +53,21 @@ This project is **explicitly subordinate to CertHead's launch sequence.** Work o
 
 ## 🎨 CURRENT FOCUS — LAB FEEL (before scaling the catalog)
 
-Status: Free lab is built, tested, and LIVE at main.certhead-labs.pages.dev
-(Cloudflare Pages, deployed via Wrangler). One lab only; ~54 more are designed
-in docs/LAB_CATALOG.md but NOT built.
+Status: DONE. Single-device lab feel is complete and shipped to origin/main
+(71 tests passing). All feel items landed: viewport-filling layout, IOS `?`
+context help, Tab-completion (unique-only), boot banner + mode-accurate prompts,
+pre-terminal lab brief screen, reactive objectives panel (flash + check-pop),
+reset button, time-based hint surfacing, satisfying completion. Free lab is
+LIVE at main.certhead-labs.pages.dev (redeploy after any further change —
+Cloudflare is direct-upload via `npx wrangler pages deploy`, not auto-deploy-on-push).
 
-Deliberate pause before mass-producing labs: perfect the FEEL on the single
-free lab first, since the feel is shared UI that every future lab inherits.
-
-Principle: the chrome (layout, terminal behavior, panels, polish) is IDENTICAL
-across all exams and certs — that consistency IS the product. Only the terminal
-CONTENT differs per exam (IOS prompt vs bash vs kubectl), because that's the
-syntax adapter's data flowing through the same shared UI. Build the feel ONCE.
-
-"Feels like a lab, not a browser" work (all exam-agnostic, all shared):
-- Terminal authenticity: boot banner, `?` context help, tab-completion,
-  realistic prompts, command history already works
-- Lab brief / intro screen before the terminal
-- Objectives panel that reacts with feedback on completion
-- Topology that reads as equipment, not a flat diagram
-- Reset button, hint surfacing, completion polish
-
-Do NOT build new labs until the feel is locked. Lab definitions go in
-src/labs/ccna/. Engine in src/engine/. Free lab = TryMode.tsx.
-
-NOTE: Repo currently has only lab-01. Labs 02-04 were built but lost (zip never
-copied in); regenerate fresh when resuming catalog work.
+NEXT (the headline build): the multi-device topology engine + canvas, fully
+spec'd in docs/MULTI_DEVICE_TOPOLOGY.md. Start with phase 3a (multi-device
+foundation: multiple router sessions, active-device switching wired to a
+React Flow canvas, links model — no traffic sim yet), then 3b (PC device +
+L3 static reachability — the Packet-Tracer ping moment). Do NOT build new
+single-device labs; the next ~26 catalog labs are all multi-device and gated
+on this engine.
 
 **DECISION (pivot):** Finish the single-device lab FEEL first (current focus),
 keeping the live free lab excellent and shippable. THEN build the multi-device
