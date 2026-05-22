@@ -53,6 +53,9 @@ export interface Lab {
   readonly estimatedMinutes: number;
   /** Exactly one lab in the catalog has this set: the public free lab. */
   readonly isFree: boolean;
+  /** Real-world framing shown on the lab brief screen before the terminal —
+   *  one or two short paragraphs that explain WHY a tech would do this. */
+  readonly scenario: string;
   readonly topology: { devices: readonly LabDevice[]; links: readonly never[] };
   readonly objectives: readonly LabObjective[];
   readonly hints: readonly LabHint[];

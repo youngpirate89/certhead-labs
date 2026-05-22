@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Layout } from '@/components/Layout';
+import { LabBrief } from '@/components/LabBrief';
 import { Terminal } from '@/components/Terminal';
 import { TopologyPanel } from '@/components/TopologyPanel';
 import { ObjectivesPanel } from '@/components/ObjectivesPanel';
@@ -43,6 +44,10 @@ export function TryMode() {
     }
   }, [session.allMet, completed, session.commandCount, lab.id]);
 
+  // Brief gates the terminal on first load. Skippable in one click; topology
+  // stays visible the whole time for spatial context.
+  const [briefDismissed, setBriefDismissed] = useState(false);
+
   return (
     <Layout
       examLabel={lab.exam}
@@ -57,10 +62,25 @@ export function TryMode() {
       }
       objectives={<ObjectivesPanel title="Objectives" objectives={session.objectives} />}
       terminal={
-        <div className="relative h-full">
-          <Terminal term={session} />
-          {completed && <CompletionCard labId={lab.id} />}
-        </div>
+        briefDismissed ? (
+          <div className="relative h-full">
+            <Terminal term={session} />
+            {completed && <CompletionCard labId={lab.id} />}
+          </div>
+        ) : (
+          <LabBrief
+            title={lab.title}
+            examLabel={lab.exam}
+            difficulty={lab.difficulty}
+            estimatedMinutes={lab.estimatedMinutes}
+            scenario={lab.scenario}
+            objectives={lab.objectives.map((o) => ({ id: o.id, text: o.text }))}
+            onStart={() => {
+              setBriefDismissed(true);
+              track('lab_brief_dismissed', { labId: lab.id });
+            }}
+          />
+        )
       }
     />
   );
