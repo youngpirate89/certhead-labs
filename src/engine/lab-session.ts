@@ -70,6 +70,10 @@ export function initLabSession(lab: Lab): LabSession {
  * device's session replaced — all other devices are untouched (no global
  * state). PC nicUp is refreshed afterward, since a router interface going
  * admin-up/down on this turn can flip a PC's link state.
+ *
+ * Adapters receive the full LabSession via the `ctx` arg so cross-device
+ * commands (today: `ping` on the pc adapter, which calls canReach) can
+ * read the topology without leaking concerns into per-device state.
  */
 export function applyToActive(
   lab: LabSession,
@@ -77,7 +81,7 @@ export function applyToActive(
 ): { session: LabSession; output: CommandOutput[] } {
   const id = lab.activeDeviceId;
   const cur = lab.devices[id];
-  const result = dispatchByKind(cur, raw);
+  const result = dispatchByKind(cur, raw, lab);
   const next: LabSession = {
     ...lab,
     devices: { ...lab.devices, [id]: result.session },
@@ -89,14 +93,15 @@ export function applyToActive(
 function dispatchByKind(
   s: DeviceSession,
   raw: string,
+  lab: LabSession,
 ): { session: DeviceSession; output: CommandOutput[] } {
   switch (s.kind) {
     case 'router': {
-      const r = routerAdapter.applyCommand(s, raw);
+      const r = routerAdapter.applyCommand(s, raw, { lab });
       return { session: r.session, output: r.output };
     }
     case 'pc': {
-      const r = pcAdapter.applyCommand(s, raw);
+      const r = pcAdapter.applyCommand(s, raw, { lab });
       return { session: r.session, output: r.output };
     }
   }

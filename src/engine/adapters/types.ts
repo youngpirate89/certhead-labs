@@ -11,6 +11,11 @@
  */
 import type { CommandNode } from '@/engine/parser';
 import type { LabDevice } from '@/engine/types';
+// LabSession import deferred to type position only — avoids a runtime cycle
+// (lab-session.ts already pulls in adapters/types.ts for the DeviceAdapter
+// interface). The `AdapterContext` type below references it through `import`
+// in TypeScript's type-only position.
+import type { LabSession } from '@/engine/lab-session';
 
 /** Device kinds supported by the engine. Switch + pc land in 3b/3c (spec). */
 export type DeviceKind = 'router' | 'switch' | 'pc';
@@ -29,6 +34,14 @@ export interface CommandOutput {
 export interface ApplyResult<S extends DeviceSessionBase> {
   readonly session: S;
   readonly output: CommandOutput[];
+}
+
+/** Optional cross-device context passed to `applyCommand`. Today only the pc
+ *  adapter consumes it — `ping` needs the full LabSession so canReach can
+ *  walk the topology. Per-device adapter tests that don't exercise such
+ *  commands pass `undefined`. */
+export interface AdapterContext {
+  readonly lab: LabSession;
 }
 
 /** Operational status of a device's interface, derived from its state. */
@@ -63,8 +76,11 @@ export interface DeviceAdapter<S extends DeviceSessionBase> {
   readonly kind: DeviceKind;
   /** Build a fresh session from a lab's device spec. */
   buildDevice(spec: LabDevice): S;
-  /** Apply a raw command line — returns a NEW session (immutable) + output. */
-  applyCommand(session: S, raw: string): ApplyResult<S>;
+  /** Apply a raw command line — returns a NEW session (immutable) + output.
+   *  `ctx.lab` exposes the full LabSession for commands that read across
+   *  devices (today: `ping`). Stays optional; adapter-level unit tests can
+   *  omit it for commands that don't need it. */
+  applyCommand(session: S, raw: string, ctx?: AdapterContext): ApplyResult<S>;
   /** Current prompt string (mode-aware, where the device has modes). */
   prompt(session: S): string;
   /** Active grammar tree at the session's current state — drives `?` + Tab. */
