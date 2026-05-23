@@ -84,6 +84,17 @@ const configMode: CommandNode = {
 
 const configIfMode: CommandNode = {
   children: {
+    // Direct interface-to-interface hop — real IOS lets you type
+    // `interface <new>` from inside another interface's config-if without
+    // an intermediate `exit`. The dispatch's `enterInterface` is mode-agnostic
+    // and just re-points currentInterface, so a single grammar entry here is
+    // enough; mode stays `config-if`, prompt updates to the new interface,
+    // and a subsequent `exit` returns to `(config)#` (not to the previous
+    // interface — the engine doesn't track a nested interface stack).
+    interface: {
+      help: 'Select another interface to configure',
+      argument: arg('iface', done('Switch to interface configuration')),
+    },
     ip: {
       children: {
         address: {

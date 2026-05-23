@@ -38,6 +38,41 @@ describe('IOS interpreter — mode stack', () => {
     expect(s.mode).toBe('config-if');
     expect(s.device.interfaces['Gi0/0'].adminUp).toBe(true);
   });
+
+  it('hops directly between interfaces from config-if without an intermediate exit', () => {
+    // Real IOS lets you type `interface <new>` from inside another interface's
+    // config-if context — no `exit` back to (config)# required. Configure Gi0/0,
+    // then hop straight to Gi0/1 and configure it too.
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface gi0/0',
+      'ip address 192.168.1.1 255.255.255.0',
+      'no shutdown',
+      // Direct hop — no `exit` between the two interface lines.
+      'interface gi0/1',
+    ]);
+    expect(s.mode).toBe('config-if');
+    expect(s.currentInterface).toBe('Gi0/1');
+    expect(prompt(s)).toBe('R1(config-if)#');
+    // Commands after the hop must apply to the new interface, not the old one.
+    const after = applyCommand(s, 'ip address 192.168.2.1 255.255.255.0').session;
+    expect(after.device.interfaces['Gi0/1'].ip).toBe('192.168.2.1');
+    expect(after.device.interfaces['Gi0/0'].ip).toBe('192.168.1.1');
+  });
+
+  it('after an interface hop, `exit` lands at (config)# — engine has no nested interface stack', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface gi0/0',
+      'interface gi0/1',
+      'exit',
+    ]);
+    expect(s.mode).toBe('config');
+    expect(s.currentInterface).toBeNull();
+    expect(prompt(s)).toBe('R1(config)#');
+  });
 });
 
 describe('IOS interpreter — interface configuration', () => {
