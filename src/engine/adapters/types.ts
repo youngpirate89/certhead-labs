@@ -44,6 +44,17 @@ export interface AdapterContext {
   readonly lab: LabSession;
 }
 
+/** Per-call apply options.
+ *
+ *  `record` — when `false`, the command runs through the full pipeline (resolver,
+ *  mode transitions, side effects on device state) but is NOT pushed onto
+ *  the device's `history` / `resolvedHistory`. Used by `Lab.setup` seeding so
+ *  pre-configured starting state doesn't pre-satisfy verification objectives
+ *  that match on command history. Defaults to `true` (record). */
+export interface ApplyOptions {
+  readonly record?: boolean;
+}
+
 /** Operational status of a device's interface, derived from its state. */
 export type InterfaceStatus = 'up' | 'no-ip' | 'admin-down';
 
@@ -79,8 +90,15 @@ export interface DeviceAdapter<S extends DeviceSessionBase> {
   /** Apply a raw command line — returns a NEW session (immutable) + output.
    *  `ctx.lab` exposes the full LabSession for commands that read across
    *  devices (today: `ping`). Stays optional; adapter-level unit tests can
-   *  omit it for commands that don't need it. */
-  applyCommand(session: S, raw: string, ctx?: AdapterContext): ApplyResult<S>;
+   *  omit it for commands that don't need it.
+   *  `opts.record === false` suppresses history pushes — see {@link ApplyOptions}
+   *  and the `Lab.setup` seeding path in lab-session.ts. */
+  applyCommand(
+    session: S,
+    raw: string,
+    ctx?: AdapterContext,
+    opts?: ApplyOptions,
+  ): ApplyResult<S>;
   /** Current prompt string (mode-aware, where the device has modes). */
   prompt(session: S): string;
   /** Active grammar tree at the session's current state — drives `?` + Tab. */

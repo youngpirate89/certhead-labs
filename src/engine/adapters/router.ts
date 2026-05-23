@@ -20,6 +20,7 @@ import {
 import { grammarFor as iosGrammarFor } from './ios/grammar';
 import type { LabDevice } from '@/engine/types';
 import type {
+  ApplyOptions,
   DeviceAdapter,
   DeviceTopologyView,
   InterfaceStatus,
@@ -44,8 +45,8 @@ export const routerAdapter: DeviceAdapter<Session> = {
     );
   },
 
-  applyCommand(session, raw) {
-    return iosApply(session, raw);
+  applyCommand(session, raw, _ctx, opts?: ApplyOptions) {
+    return iosApply(session, raw, opts);
   },
 
   prompt(session) {

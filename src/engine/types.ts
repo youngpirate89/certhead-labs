@@ -94,6 +94,12 @@ export interface Lab {
    *  one or two short paragraphs that explain WHY a tech would do this. */
   readonly scenario: string;
   readonly topology: { devices: readonly LabDevice[]; links: readonly Link[] };
+  /** Per-device IOS commands run through applyCommand at session init,
+   *  BEFORE the learner gets control. Used to pre-configure a starting
+   *  state (e.g. troubleshooting labs that start partly broken).
+   *  Seed commands must NOT be recorded in command history — otherwise a
+   *  verification objective could be satisfied by setup, not by the learner. */
+  readonly setup?: Readonly<Record<string, readonly string[]>>;
   readonly objectives: readonly LabObjective[];
   readonly hints: readonly LabHint[];
 }

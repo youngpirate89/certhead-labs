@@ -15,6 +15,7 @@ import { tokenize, resolve } from '@/engine/parser';
 import type { LabDevice } from '@/engine/types';
 import type {
   AdapterContext,
+  ApplyOptions,
   ApplyResult,
   CommandOutput,
   DeviceAdapter,
@@ -77,7 +78,12 @@ export const pcAdapter: DeviceAdapter<PcSession> = {
     };
   },
 
-  applyCommand(prev, raw, ctx?: AdapterContext): ApplyResult<PcSession> {
+  applyCommand(
+    prev,
+    raw,
+    ctx?: AdapterContext,
+    opts?: ApplyOptions,
+  ): ApplyResult<PcSession> {
     const { tokens } = tokenize(raw);
     if (tokens.length === 0) return { session: prev, output: [] };
     const r = resolve(tokens, pcGrammar);
@@ -97,8 +103,10 @@ export const pcAdapter: DeviceAdapter<PcSession> = {
     }
 
     const s = structuredClone(prev) as PcSession;
-    s.history.push(raw.trim());
-    s.resolvedHistory.push(r.command.join(' '));
+    if (opts?.record !== false) {
+      s.history.push(raw.trim());
+      s.resolvedHistory.push(r.command.join(' '));
+    }
 
     const head = r.command[0];
     switch (head) {

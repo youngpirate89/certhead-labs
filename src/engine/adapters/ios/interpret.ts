@@ -11,7 +11,11 @@ import {
   routingTable,
 } from './state';
 import { type Route, maskLength, networkAddress } from './routing';
-import type { CommandOutput, ApplyResult as GenericApplyResult } from '../types';
+import type {
+  ApplyOptions,
+  CommandOutput,
+  ApplyResult as GenericApplyResult,
+} from '../types';
 
 // Re-exported from the shared adapter contracts; kept here as a named export so
 // existing call-sites (`import { CommandOutput } from '@/engine/adapters/ios/interpret'`)
@@ -53,8 +57,18 @@ function invalidInputOutput(promptStr: string, charOffset: number): CommandOutpu
  * In config-family modes (config, config-if) a leading `do` token is treated
  * as "run the rest as a privileged-EXEC command, then stay in this mode" —
  * the IOS `do` shortcut. `do` in user/priv modes is itself invalid input.
+ *
+ * `opts.record === false` runs the command for its side effects (mode
+ * transitions, device-state mutation) but suppresses the history pushes —
+ * used by `Lab.setup` seeding so pre-configured starting state doesn't show
+ * up in `history` / `resolvedHistory` and cannot satisfy verification-style
+ * objectives that match on command history.
  */
-export function applyCommand(session: Session, raw: string): ApplyResult {
+export function applyCommand(
+  session: Session,
+  raw: string,
+  opts?: ApplyOptions,
+): ApplyResult {
   const { tokens, offsets } = tokenize(raw);
   if (tokens.length === 0) return { session, output: [] };
 
@@ -96,8 +110,8 @@ export function applyCommand(session: Session, raw: string): ApplyResult {
     case 'incomplete':
       return { session, output: err('% Incomplete command.') };
     case 'complete': {
-      if (doForm) return dispatchDo(session, result.command, result.args, raw);
-      return dispatch(session, result.command, result.args, raw.trim());
+      if (doForm) return dispatchDo(session, result.command, result.args, raw, opts);
+      return dispatch(session, result.command, result.args, raw.trim(), opts);
     }
   }
 }
@@ -107,24 +121,30 @@ export function applyCommand(session: Session, raw: string): ApplyResult {
  * privileged-EXEC dispatcher, but DO NOT let it change the mode, current
  * interface, or other "context" state. History is recorded with `do` preserved
  * (raw as typed; canonical with `do` prefix in resolvedHistory).
+ *
+ * When `opts.record === false` the inner dispatch skipped its push entirely,
+ * so the resolvedHistory rewrite must also be skipped — otherwise it would
+ * corrupt a prior entry (the `last` index would point at unrelated history).
  */
 function dispatchDo(
   prev: Session,
   command: string[],
   args: Record<string, string>,
   raw: string,
+  opts: ApplyOptions | undefined,
 ): ApplyResult {
-  const inner = dispatch(prev, command, args, raw.trim());
-  // Restore mode + currentInterface so the prompt stays in the config-family
-  // context. Replace the just-pushed resolvedHistory entry with the do-form.
+  const inner = dispatch(prev, command, args, raw.trim(), opts);
+  const record = opts?.record !== false;
   const last = inner.session.resolvedHistory.length - 1;
   const fixed: Session = {
     ...inner.session,
     mode: prev.mode,
     currentInterface: prev.currentInterface,
-    resolvedHistory: inner.session.resolvedHistory.map((cmd, i) =>
-      i === last ? `do ${cmd}` : cmd,
-    ),
+    resolvedHistory: record
+      ? inner.session.resolvedHistory.map((cmd, i) =>
+          i === last ? `do ${cmd}` : cmd,
+        )
+      : inner.session.resolvedHistory,
   };
   return { session: fixed, output: inner.output };
 }
@@ -220,10 +240,13 @@ function dispatch(
   command: string[],
   args: Record<string, string>,
   raw: string,
+  opts: ApplyOptions | undefined,
 ): ApplyResult {
   const s: Session = structuredClone(prev);
-  s.history.push(raw);
-  s.resolvedHistory.push(command.join(' '));
+  if (opts?.record !== false) {
+    s.history.push(raw);
+    s.resolvedHistory.push(command.join(' '));
+  }
   const head = command[0];
 
   switch (head) {

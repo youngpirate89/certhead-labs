@@ -260,3 +260,131 @@ describe('lab-session — N=1 free lab path is unchanged', () => {
     expect(r1.device.interfaces['Gi0/0'].adminUp).toBe(true);
   });
 });
+
+describe('lab-session — Lab.setup seeds device state without recording history', () => {
+  function seededLab(setup: Record<string, readonly string[]>): Lab {
+    return {
+      id: 'test-setup',
+      title: 'setup fixture',
+      exam: 'TEST',
+      difficulty: 1,
+      estimatedMinutes: 1,
+      isFree: false,
+      scenario: 'fixture',
+      topology: {
+        devices: [
+          { id: 'R1', interfaces: ['Gi0/0', 'Gi0/1'], ...ROUTER },
+          { id: 'R2', interfaces: ['Gi0/0', 'Gi0/1'], ...ROUTER },
+        ],
+        links: [
+          { a: { deviceId: 'R1', iface: 'Gi0/0' }, b: { deviceId: 'R2', iface: 'Gi0/0' } },
+        ],
+      },
+      setup,
+      objectives: [],
+      hints: [],
+    };
+  }
+
+  it('seeded commands land in device state but NOT in command history', () => {
+    // Mix mode-transition + config-mode commands. The `ip route` line is the
+    // critical one — it exercises the dispatch push at interpret.ts (gated on
+    // record:false). If the gate leaks, the resolved history will pick it up.
+    const ls = initLabSession(
+      seededLab({
+        R1: [
+          'enable',
+          'configure terminal',
+          'interface gi0/0',
+          'ip address 192.168.12.1 255.255.255.252',
+          'no shutdown',
+          'exit',
+          'ip route 192.168.2.0 255.255.255.0 192.168.12.2',
+        ],
+      }),
+    );
+
+    const r1 = asRouter(ls.devices.R1);
+
+    // State landed: interface configured + admin-up, static route present.
+    const gi00 = r1.device.interfaces['Gi0/0'];
+    expect(gi00.ip).toBe('192.168.12.1');
+    expect(gi00.mask).toBe('255.255.255.252');
+    expect(gi00.adminUp).toBe(true);
+    expect(r1.staticRoutes).toHaveLength(1);
+    expect(r1.staticRoutes[0]).toMatchObject({
+      prefix: '192.168.2.0',
+      mask: '255.255.255.0',
+      nextHop: '192.168.12.2',
+      source: 'static',
+      adminDistance: 1,
+    });
+  });
+
+  it('seed: no leak in history.raw or history.resolved (config-mode commands included)', () => {
+    const ls = initLabSession(
+      seededLab({
+        R1: [
+          'enable',
+          'configure terminal',
+          'interface gi0/0',
+          'ip address 192.168.12.1 255.255.255.252',
+          'no shutdown',
+          'exit',
+          'ip route 192.168.2.0 255.255.255.0 192.168.12.2',
+        ],
+      }),
+    );
+
+    const r1 = asRouter(ls.devices.R1);
+    expect(r1.history).toEqual([]);
+    expect(r1.resolvedHistory).toEqual([]);
+  });
+
+  it('seed leaves the device at the user-mode prompt regardless of last seed command', () => {
+    const ls = initLabSession(
+      seededLab({
+        // Last seed line is a config-mode command — without the end/disable
+        // tail the session would otherwise be left in `config` mode.
+        R1: ['enable', 'configure terminal', 'ip route 10.0.0.0 255.0.0.0 192.168.12.2'],
+      }),
+    );
+
+    const r1 = asRouter(ls.devices.R1);
+    expect(r1.mode).toBe('user');
+    expect(r1.currentInterface).toBe(null);
+    // Verify the static route still landed (the tail must not undo state).
+    expect(r1.staticRoutes).toHaveLength(1);
+    expect(r1.staticRoutes[0].prefix).toBe('10.0.0.0');
+  });
+
+  it('only seeds devices listed in setup — unseeded devices stay fresh', () => {
+    const ls = initLabSession(
+      seededLab({
+        R1: ['enable', 'configure terminal', 'interface gi0/0', 'no shutdown'],
+      }),
+    );
+    const r1 = asRouter(ls.devices.R1);
+    const r2 = asRouter(ls.devices.R2);
+    expect(r1.device.interfaces['Gi0/0'].adminUp).toBe(true);
+    expect(r2.device.interfaces['Gi0/0'].adminUp).toBe(false);
+    expect(r2.staticRoutes).toEqual([]);
+    expect(r2.history).toEqual([]);
+  });
+
+  it('throws when setup references an unknown device id', () => {
+    expect(() =>
+      initLabSession(seededLab({ R9: ['enable'] })),
+    ).toThrow(/unknown device 'R9'/);
+  });
+
+  it('learner-typed commands after seeding ARE recorded as normal', () => {
+    let ls: LabSession = initLabSession(
+      seededLab({ R1: ['enable', 'configure terminal', 'interface gi0/0', 'no shutdown'] }),
+    );
+    // Learner picks up at R1 user prompt; their commands get recorded.
+    ls = applyToActive(ls, 'enable').session;
+    expect(ls.devices.R1.history).toEqual(['enable']);
+    expect(ls.devices.R1.resolvedHistory).toEqual(['enable']);
+  });
+});

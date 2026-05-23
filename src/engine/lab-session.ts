@@ -48,7 +48,14 @@ export function adapterFor(
 }
 
 /** Build a fresh LabSession for a lab. The first authored device is active.
- *  Runs the nicUp pass once so pc views reflect cable state from the start. */
+ *  Runs the nicUp pass once so pc views reflect cable state from the start.
+ *
+ *  If `lab.setup` is set, each device's seed commands are run through the
+ *  real `applyCommand` pipeline (so mode transitions, validators, and
+ *  side effects behave identically to typed commands) with `record:false`
+ *  — the seeded commands do NOT appear in history, so verification-style
+ *  objectives can't be pre-satisfied by setup. Router seed runs are tailed
+ *  with `end`/`disable` so the learner lands at the `user>` prompt. */
 export function initLabSession(lab: Lab): LabSession {
   if (lab.topology.devices.length === 0) {
     throw new Error(`Lab '${lab.id}' has no devices`);
@@ -58,11 +65,47 @@ export function initLabSession(lab: Lab): LabSession {
     const adapter = adapterFor(spec.kind);
     devices[spec.id] = adapter.buildDevice(spec) as DeviceSession;
   }
+
+  if (lab.setup) {
+    for (const [deviceId, lines] of Object.entries(lab.setup)) {
+      if (!(deviceId in devices)) {
+        throw new Error(
+          `Lab '${lab.id}' setup references unknown device '${deviceId}'`,
+        );
+      }
+      devices[deviceId] = applySeed(devices[deviceId], lines);
+    }
+  }
+
   return refreshNicUp({
     devices,
     activeDeviceId: lab.topology.devices[0].id,
     links: lab.topology.links,
   });
+}
+
+/** Apply a list of seed commands to one device with `record:false`. Router
+ *  seeds are tailed with `end`/`disable` so the session lands at user mode
+ *  — the learner should arrive at the `user>` prompt regardless of which
+ *  config-mode command was last in the seed. PCs have no mode stack so the
+ *  tail is a router-only concern. */
+function applySeed(session: DeviceSession, lines: readonly string[]): DeviceSession {
+  let cur = session;
+  for (const raw of lines) cur = applySeedLine(cur, raw);
+  if (cur.kind === 'router') {
+    cur = applySeedLine(cur, 'end');
+    cur = applySeedLine(cur, 'disable');
+  }
+  return cur;
+}
+
+function applySeedLine(s: DeviceSession, raw: string): DeviceSession {
+  switch (s.kind) {
+    case 'router':
+      return routerAdapter.applyCommand(s, raw, undefined, { record: false }).session;
+    case 'pc':
+      return pcAdapter.applyCommand(s, raw, undefined, { record: false }).session;
+  }
 }
 
 /**
