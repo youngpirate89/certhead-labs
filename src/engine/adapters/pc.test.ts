@@ -250,6 +250,29 @@ describe('pcAdapter — ping (calls canReach)', () => {
     expect(out[0].kind).toBe('error');
     expect(out[0].text).toMatch(/not a valid IPv4/);
   });
+
+  it('records lastPing.ok=true on a successful ping with the right target', () => {
+    const ls = fullyConfigured();
+    expect((ls.devices['PC-A'] as PcSession).lastPing).toBeNull();
+    const after = pingFrom(ls, 'PC-A', '192.168.2.10').session;
+    const pc = after.devices['PC-A'] as PcSession;
+    expect(pc.lastPing).toEqual({ target: '192.168.2.10', ok: true });
+  });
+
+  it('records lastPing.ok=false when the ping fails', () => {
+    let ls = fullyConfigured();
+    ls = configure(ls, 'R2', ['no ip route 192.168.1.0 255.255.255.0 192.168.12.1']);
+    const after = pingFrom(ls, 'PC-A', '192.168.2.10').session;
+    const pc = after.devices['PC-A'] as PcSession;
+    expect(pc.lastPing).toEqual({ target: '192.168.2.10', ok: false });
+  });
+
+  it('does NOT update lastPing on a non-IPv4 ping (early-rejected, never reached canReach)', () => {
+    const ls = fullyConfigured();
+    const after = pingFrom(ls, 'PC-A', 'google.com').session;
+    const pc = after.devices['PC-A'] as PcSession;
+    expect(pc.lastPing).toBeNull();
+  });
 });
 
 describe('pcAdapter — endpoint guarantee (never a transit hop)', () => {

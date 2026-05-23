@@ -38,6 +38,13 @@ export interface PcSession {
   nicUp: boolean;
   history: string[];
   resolvedHistory: string[];
+  /** Outcome of the most recent ping command run from this PC, or null if
+   *  the learner hasn't pinged yet. Written by the ping handler only,
+   *  never elsewhere. Reachability objectives MUST check this (not raw
+   *  canReach) so they require an actual learner-initiated ping — testing
+   *  state alone auto-completes the instant routes are correct, which
+   *  defeats the troubleshooting pedagogy. */
+  lastPing: { target: string; ok: boolean } | null;
 }
 
 const pcGrammar: CommandNode = {
@@ -75,6 +82,7 @@ export const pcAdapter: DeviceAdapter<PcSession> = {
       nicUp: false,
       history: [],
       resolvedHistory: [],
+      lastPing: null,
     };
   },
 
@@ -137,6 +145,13 @@ export const pcAdapter: DeviceAdapter<PcSession> = {
           return { session: s, output: errLine('Ping requires a lab context.') };
         }
         const result = canReach(ctx.lab, s.id, r.args.target);
+        // Record the ping outcome so reachability objectives can require an
+        // ACTUAL ping from the learner (not just state-permits-reachability).
+        // Gated on record:false so a seeded ping (Lab.setup) couldn't
+        // pre-satisfy a verification objective — same contract as history.
+        if (opts?.record !== false) {
+          s.lastPing = { target: r.args.target, ok: result.ok };
+        }
         return { session: s, output: renderPing(result, r.args.target) };
       }
       case 'clear':
