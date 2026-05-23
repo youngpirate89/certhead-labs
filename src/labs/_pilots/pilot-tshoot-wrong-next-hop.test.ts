@@ -77,9 +77,8 @@ describe('pilot tshoot-wrong-next-hop — bad static next-hop on R2', () => {
     expect(g.objectives.find((o) => o.id === 'reach-pc-a-to-pc-b')?.met).toBe(false);
   });
 
-  it('removing the bad static and adding the right one flips both objectives to met', () => {
+  it('after the fix, fix-r2-next-hop is met but reach is STILL UNMET until the learner pings', () => {
     let ls = initLabSession(lab);
-
     ls = configure(ls, 'R2', [
       'enable',
       'configure terminal',
@@ -91,12 +90,34 @@ describe('pilot tshoot-wrong-next-hop — bad static next-hop on R2', () => {
     if (r2.kind !== 'router') throw new Error('shape');
     expect(r2.staticRoutes).toHaveLength(1);
     expect(r2.staticRoutes[0].nextHop).toBe('192.168.12.1');
-
     expect(canReach(ls, 'PC-A', '192.168.2.10').ok).toBe(true);
+
+    const g = grade(lab, ls);
+    expect(g.objectives.find((o) => o.id === 'fix-r2-next-hop')?.met).toBe(true);
+    expect(g.objectives.find((o) => o.id === 'reach-pc-a-to-pc-b')?.met).toBe(false);
+    expect(g.allMet).toBe(false);
+  });
+
+  it('a successful ping from PC-A flips reach to met (full hand-completion contract)', () => {
+    let ls = initLabSession(lab);
+    ls = configure(ls, 'R2', [
+      'enable',
+      'configure terminal',
+      'no ip route 192.168.1.0 255.255.255.0 192.168.12.99',
+      'ip route 192.168.1.0 255.255.255.0 192.168.12.1',
+    ]);
+    ls = configure(ls, 'PC-A', ['ping 192.168.2.10']);
 
     const g = grade(lab, ls);
     expect(g.allMet).toBe(true);
     expect(g.objectives.find((o) => o.id === 'fix-r2-next-hop')?.met).toBe(true);
     expect(g.objectives.find((o) => o.id === 'reach-pc-a-to-pc-b')?.met).toBe(true);
+  });
+
+  it('a FAILED ping (still pointing at .99) does not satisfy the reach objective', () => {
+    let ls = initLabSession(lab);
+    ls = configure(ls, 'PC-A', ['ping 192.168.2.10']);
+    const g = grade(lab, ls);
+    expect(g.objectives.find((o) => o.id === 'reach-pc-a-to-pc-b')?.met).toBe(false);
   });
 });

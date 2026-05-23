@@ -83,7 +83,9 @@ Every troubleshooting pilot uses exactly two:
 
 1. **The fix** — checks the corrected state directly (e.g. R2 now has the return route,
    or R2's WAN interface is re-IP'd into R1's /30).
-2. **Reachability** — `canReach(session, '<sourcePC>', '<destIP>').ok`.
+2. **Reachability** — the learner has run a successful ping to the target. See §3.4 for
+   the exact check; **do not call `canReach` directly here** — that auto-completes the
+   instant routes are correct, defeating the troubleshooting loop.
 
 **Do not add a "diagnosis" objective** (e.g. "ran `show ip route` on R2"). That grades
 *"did you type a specific command,"* not *"did you reach the diagnosis"* — it makes the
@@ -95,6 +97,42 @@ decision across all three pilots — default it off.
 In a seed-then-break lab, the learner shouldn't have to redo working config. Grade only
 the broken thing and the resulting reachability. Everything `setup` configured is
 assumed correct and ungraded.
+
+### 3.4 Reachability objective — require an ACTUAL ping (`lastPing`, not `canReach`)
+The reachability objective MUST check that the learner ran a successful ping — not just
+that state permits reachability. Use the `lastPing` field on `PcSession`, which the
+ping handler writes after `canReach` runs. The check is uniform across labs:
+
+```ts
+{
+  id: 'reach-pc-a-to-pc-b',
+  text: 'PC-A can ping PC-B — run `ping 192.168.2.10` from PC-A and confirm a reply',
+  check: (_state, _history, session) => {
+    const pca = session.devices['PC-A'];
+    if (pca?.kind !== 'pc') return false;
+    return pca.lastPing?.target === '192.168.2.10' && pca.lastPing.ok === true;
+  },
+},
+```
+
+Three requirements together: (a) the learner pinged, (b) the target was the right
+destination, (c) the outcome was successful. Only a learner-initiated successful ping
+to the right IP can satisfy this.
+
+The objective **text** is also load-bearing — it tells the learner to ping and watch for
+a reply. Use this exact phrasing across all reachability objectives so the contract is
+consistent: *"PC-A can ping PC-B — run `ping <ip>` from PC-A and confirm a reply"*.
+
+**Why `lastPing`, not `canReach(...).ok`:** `canReach` recomputes from current state on
+every render, so `canReach(...).ok` flips true the instant routes are correct — the
+objective auto-completes without the learner ever pinging, defeating the
+observe → diagnose → fix → confirm-by-re-pinging loop. The original three pilots
+shipped this bug; the fix is the lastPing predicate above.
+
+**Un-meet semantics are correct:** `lastPing` stores the most recent attempt's outcome.
+If the learner fixes things, pings successfully (objective met), then breaks something
+and pings again, `lastPing.ok` becomes `false` and the objective un-meets. This matches
+the existing objective contract (reactive, no latch).
 
 ### 3.3 The `setup` primitive
 Pre-seeds device state by running real IOS commands through the **same** `applyCommand`
@@ -234,8 +272,14 @@ loading. Until then: **author labs as pilots.**
    --max-warnings 0`, full suite green, prod build emits **zero pilot-identifier leak**,
    and the **free lab is behaviorally untouched**.
 6. Verify the in-browser moment on the `?pilot=` route: ping → the specific failure
-   sentence → fix → ping replies → objectives flip green. If it doesn't *feel* like a
-   diagnosis, the failure reason is probably too generic — revisit §4.
+   sentence → fix → **confirm the reachability objective is STILL unmet at this point**
+   (no auto-completion on state alone) → ping again → reply renders and the objective
+   flips green. If it doesn't *feel* like a diagnosis, the failure reason is probably
+   too generic — revisit §4. If the reachability objective flipped green on the fix
+   alone (before the second ping), the objective is checking `canReach` directly —
+   replace with the `lastPing` predicate from §3.4. This bug shipped in the original
+   three pilots because the gate didn't include "confirm still-unmet after the fix";
+   it does now.
 
    **Use a real-coordinate canvas click to switch the active device. A programmatic
    `element.click()` (or `document.querySelector(...).click()`) does NOT satisfy this

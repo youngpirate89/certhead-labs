@@ -28,7 +28,7 @@ describe('pilot 3b — static routing (PC-A → PC-B)', () => {
     expect(metIds(ls)).toEqual([]);
   });
 
-  it('headline failure: forward statics only → reachability stays UNMET; adding the return route flips it to met', () => {
+  it('headline failure: forward statics only → reach UNMET; adding the return route alone is still NOT ENOUGH — learner must ping to satisfy reach', () => {
     let ls = initLabSession(lab);
 
     // Configure R1 fully (interfaces + forward static).
@@ -47,7 +47,6 @@ describe('pilot 3b — static routing (PC-A → PC-B)', () => {
     ]);
 
     // Configure R2 INTERFACES only — no return static yet (instructive bug).
-    // Exit back to config mode so the follow-up `ip route` command resolves.
     ls = configure(ls, 'R2', [
       'enable',
       'configure terminal',
@@ -61,24 +60,29 @@ describe('pilot 3b — static routing (PC-A → PC-B)', () => {
       'exit',
     ]);
 
-    // All four interface state checks pass + R1's forward static; but
-    // R2's return static is missing AND reachability is unmet.
     const intermediate = grade(lab, ls);
     expect(intermediate.objectives.find((o) => o.id === 'r1-static-forward')?.met).toBe(true);
     expect(intermediate.objectives.find((o) => o.id === 'r2-static-return')?.met).toBe(false);
     expect(intermediate.objectives.find((o) => o.id === 'reach-pc-a-to-pc-b')?.met).toBe(false);
     expect(intermediate.allMet).toBe(false);
 
-    // Add the return route on R2 — reachability flips to met.
+    // Add the return route on R2 — state now PERMITS reachability, but the
+    // learner hasn't pinged yet, so the reach objective stays unmet.
     ls = configure(ls, 'R2', ['ip route 192.168.1.0 255.255.255.0 192.168.12.1']);
+    const stateOk = grade(lab, ls);
+    expect(stateOk.objectives.find((o) => o.id === 'r2-static-return')?.met).toBe(true);
+    expect(stateOk.objectives.find((o) => o.id === 'reach-pc-a-to-pc-b')?.met).toBe(false);
+    expect(stateOk.allMet).toBe(false);
+
+    // The learner pings — only NOW does reach flip to met.
+    ls = configure(ls, 'PC-A', ['ping 192.168.2.10']);
     const final = grade(lab, ls);
-    expect(final.objectives.find((o) => o.id === 'r2-static-return')?.met).toBe(true);
     expect(final.objectives.find((o) => o.id === 'reach-pc-a-to-pc-b')?.met).toBe(true);
     expect(final.allMet).toBe(true);
   });
 
-  it('un-meets gracefully: shutting an interface flips reachability back to false', () => {
-    // Fully configured baseline.
+  it('un-meets gracefully: shutting an interface flips reachability back to false on the NEXT ping', () => {
+    // Fully configured + already-pinged baseline.
     let ls = initLabSession(lab);
     ls = configure(ls, 'R1', [
       'enable',
@@ -106,10 +110,13 @@ describe('pilot 3b — static routing (PC-A → PC-B)', () => {
       'exit',
       'ip route 192.168.1.0 255.255.255.0 192.168.12.1',
     ]);
+    ls = configure(ls, 'PC-A', ['ping 192.168.2.10']);
     expect(grade(lab, ls).allMet).toBe(true);
 
-    // Shut R1's WAN interface — reachability fails again.
+    // Shut R1's WAN interface — reach OBJECTIVE still met (lastPing.ok=true
+    // is sticky until the next ping). The next ping (now failing) un-meets it.
     ls = configure(ls, 'R1', ['interface gi0/0', 'shutdown']);
+    ls = configure(ls, 'PC-A', ['ping 192.168.2.10']);
     expect(grade(lab, ls).objectives.find((o) => o.id === 'reach-pc-a-to-pc-b')?.met).toBe(false);
   });
 });

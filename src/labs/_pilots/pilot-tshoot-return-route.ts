@@ -1,5 +1,4 @@
 import type { Lab } from '@/engine/types';
-import { canReach } from '@/engine/reachability';
 
 /**
  * Troubleshooting pilot — missing return route.
@@ -97,9 +96,12 @@ export const pilotTshootReturnRoute: Lab = {
     },
     {
       id: 'reach-pc-a-to-pc-b',
-      text: 'PC-A can ping PC-B (return path now works)',
-      check: (_state, _history, session) =>
-        canReach(session, 'PC-A', '192.168.2.10').ok,
+      text: 'PC-A can ping PC-B — run `ping 192.168.2.10` from PC-A and confirm a reply',
+      check: (_state, _history, session) => {
+        const pca = session.devices['PC-A'];
+        if (pca?.kind !== 'pc') return false;
+        return pca.lastPing?.target === '192.168.2.10' && pca.lastPing.ok === true;
+      },
     },
   ],
   hints: [

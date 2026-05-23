@@ -82,9 +82,8 @@ describe('pilot tshoot-wan-subnet-mismatch — R2 Gi0/0 lives in the wrong /30',
     expect(g.objectives.find((o) => o.id === 'reach-pc-a-to-pc-b')?.met).toBe(false);
   });
 
-  it('re-IPing R2.Gi0/0 into R1’s /30 flips both objectives to met', () => {
+  it('after the fix, fix-r2-wan is met but reach is STILL UNMET until the learner pings', () => {
     let ls = initLabSession(lab);
-
     ls = configure(ls, 'R2', [
       'enable',
       'configure terminal',
@@ -96,13 +95,35 @@ describe('pilot tshoot-wan-subnet-mismatch — R2 Gi0/0 lives in the wrong /30',
     const r2 = ls.devices.R2;
     if (r2.kind !== 'router') throw new Error('shape');
     expect(r2.device.interfaces['Gi0/0'].ip).toBe('192.168.12.2');
-    expect(r2.device.interfaces['Gi0/0'].adminUp).toBe(true);
-
     expect(canReach(ls, 'PC-A', '192.168.2.10').ok).toBe(true);
+
+    const g = grade(lab, ls);
+    expect(g.objectives.find((o) => o.id === 'fix-r2-wan')?.met).toBe(true);
+    expect(g.objectives.find((o) => o.id === 'reach-pc-a-to-pc-b')?.met).toBe(false);
+    expect(g.allMet).toBe(false);
+  });
+
+  it('a successful ping from PC-A flips reach to met (full hand-completion contract)', () => {
+    let ls = initLabSession(lab);
+    ls = configure(ls, 'R2', [
+      'enable',
+      'configure terminal',
+      'interface gi0/0',
+      'no ip address',
+      'ip address 192.168.12.2 255.255.255.252',
+    ]);
+    ls = configure(ls, 'PC-A', ['ping 192.168.2.10']);
 
     const g = grade(lab, ls);
     expect(g.allMet).toBe(true);
     expect(g.objectives.find((o) => o.id === 'fix-r2-wan')?.met).toBe(true);
     expect(g.objectives.find((o) => o.id === 'reach-pc-a-to-pc-b')?.met).toBe(true);
+  });
+
+  it('a FAILED ping (subnets still mismatched) does not satisfy the reach objective', () => {
+    let ls = initLabSession(lab);
+    ls = configure(ls, 'PC-A', ['ping 192.168.2.10']);
+    const g = grade(lab, ls);
+    expect(g.objectives.find((o) => o.id === 'reach-pc-a-to-pc-b')?.met).toBe(false);
   });
 });

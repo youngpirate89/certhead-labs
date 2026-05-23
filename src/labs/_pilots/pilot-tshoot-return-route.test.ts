@@ -85,21 +85,44 @@ describe('pilot tshoot-return-route — missing return route troubleshooting', (
     expect(g.objectives.find((o) => o.id === 'reach-pc-a-to-pc-b')?.met).toBe(false);
   });
 
-  it('adding the return route on R2 flips both objectives to met', () => {
+  it('after the fix, fix-r2-return is met but reach is STILL UNMET until the learner pings', () => {
     let ls = initLabSession(lab);
-
     ls = configure(ls, 'R2', [
       'enable',
       'configure terminal',
       'ip route 192.168.1.0 255.255.255.0 192.168.12.1',
     ]);
 
-    const result = canReach(ls, 'PC-A', '192.168.2.10');
-    expect(result.ok).toBe(true);
+    // canReach permits it now, but the learner hasn't actually pinged.
+    expect(canReach(ls, 'PC-A', '192.168.2.10').ok).toBe(true);
+
+    const g = grade(lab, ls);
+    expect(g.objectives.find((o) => o.id === 'fix-r2-return')?.met).toBe(true);
+    expect(g.objectives.find((o) => o.id === 'reach-pc-a-to-pc-b')?.met).toBe(false);
+    expect(g.allMet).toBe(false);
+  });
+
+  it('a successful ping from PC-A flips reach to met (full hand-completion contract)', () => {
+    let ls = initLabSession(lab);
+    ls = configure(ls, 'R2', [
+      'enable',
+      'configure terminal',
+      'ip route 192.168.1.0 255.255.255.0 192.168.12.1',
+    ]);
+    // Learner pings from PC-A — this is the action the objective requires.
+    ls = configure(ls, 'PC-A', ['ping 192.168.2.10']);
 
     const g = grade(lab, ls);
     expect(g.allMet).toBe(true);
     expect(g.objectives.find((o) => o.id === 'fix-r2-return')?.met).toBe(true);
     expect(g.objectives.find((o) => o.id === 'reach-pc-a-to-pc-b')?.met).toBe(true);
+  });
+
+  it('a FAILED ping (route not yet added) does not satisfy the reach objective', () => {
+    let ls = initLabSession(lab);
+    // Pre-fix ping — should fail and NOT meet the objective.
+    ls = configure(ls, 'PC-A', ['ping 192.168.2.10']);
+    const g = grade(lab, ls);
+    expect(g.objectives.find((o) => o.id === 'reach-pc-a-to-pc-b')?.met).toBe(false);
   });
 });
