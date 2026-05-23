@@ -51,33 +51,49 @@ This project is **explicitly subordinate to CertHead's launch sequence.** Work o
 
 ---
 
-## 🎨 CURRENT FOCUS — LAB FEEL (before scaling the catalog)
+## 🎯 CURRENT FOCUS — ENGINE COMPLETE; NEXT MOVE IS A SEQUENCING DECISION
 
-Status: DONE. Single-device lab feel is complete and shipped to origin/main
-(71 tests passing). All feel items landed: viewport-filling layout, IOS `?`
-context help, Tab-completion (unique-only), boot banner + mode-accurate prompts,
-pre-terminal lab brief screen, reactive objectives panel (flash + check-pop),
-reset button, time-based hint surfacing, satisfying completion. Free lab is
-LIVE at main.certhead-labs.pages.dev (redeploy after any further change —
+Status: The multi-device engine is STRUCTURALLY COMPLETE and shipped to origin/main.
+
+**DONE and pushed:**
+- Single-device lab FEEL (the original focus) — locked. Free lab LIVE and unchanged.
+- **Phase 3a — multi-device foundation:** DeviceAdapter seam (grammarFor / applyCommand
+  / prompt / buildDevice / toTopologyView); LabSession = N independent device state
+  machines, no global state; per-device terminal binding + active-device switching;
+  React Flow canvas (kind-agnostic, renders toTopologyView objects; click node →
+  active console).
+- **Phase 3b — L3-static reachability:** router routing table (connected/static,
+  `ip route`, `show ip route`, longest-prefix match); pc adapter (`ipconfig` / `ping`);
+  `canReach` (full round-trip, hop-granular `failedAt`, pure/deterministic, loop guard).
+  The Packet-Tracer ping moment works end-to-end — PC-A → PC-B across two routers, and
+  a missing return route teaches via a specific failure message.
+
+Free lab is LIVE at main.certhead-labs.pages.dev (redeploy after any change —
 Cloudflare is direct-upload via `npx wrangler pages deploy`, not auto-deploy-on-push).
+Pilot routes are tree-shaken out of the prod bundle; prod serves the free lab only.
 
-NEXT (the headline build): the multi-device topology engine + canvas, fully
-spec'd in docs/MULTI_DEVICE_TOPOLOGY.md. Start with phase 3a (multi-device
-foundation: multiple router sessions, active-device switching wired to a
-React Flow canvas, links model — no traffic sim yet), then 3b (PC device +
-L3 static reachability — the Packet-Tracer ping moment). Do NOT build new
-single-device labs; the next ~26 catalog labs are all multi-device and gated
-on this engine.
+Specs: engine algorithm in `docs/ENGINE_ARCHITECTURE.md`; topology in
+`docs/MULTI_DEVICE_TOPOLOGY.md`.
 
-**DECISION (pivot):** Finish the single-device lab FEEL first (current focus),
-keeping the live free lab excellent and shippable. THEN build the multi-device
-topology engine as the next major milestone — a Packet-Tracer-style canvas with
-multiple clickable device types (routers, switches, PCs/workstations), links
-between them, and traffic/ping simulation across the topology. This is the
-product's headline feature and the gate for ~26 catalog labs (all of Phase 3 +
-capstones C3/C4/C5). The current single-device "chassis card" topology panel is
-a stepping stone, not the destination. Do NOT lose this — multi-device topology
-is the committed next-major build after the feel is locked.
+**NEXT — a real fork, gated on CertHead revenue, NOT the spec's phase order:**
+
+Remaining engine phases are 3c (switch + L2 reachability), 3d (OSPF), 3e (ACLs +
+remaining L2). The architectural seams are in place — 3c/3d/3e are extensions against
+contracts that already held under real use (the routing-table seam absorbs OSPF as
+data; DeviceAdapter absorbs new device kinds; the FailReason contract feeds 3e).
+
+But the next move is **NOT automatically 3c.** The law (this file): labs follow
+revenue-validated question banks, and `/embed` Pro integration is gated on ≥300 paid
+CertHead subscribers. The open decision is:
+  (a) extend the engine into 3c, or
+  (b) consolidate — build more labs on the proven 3a/3b engine and let the question
+      bank catch up.
+This hinges on CertHead's live exams + paid-subscriber count vs the 300 bar. Decide
+with that number, not by defaulting into the next phase.
+
+**DO NOT LOSE:** the multi-device engine was the committed headline build and it
+landed. Phases 3c–3e unlock the full Phase 3 catalog + capstones C3/C4/C5 — but only
+when revenue signal justifies the next investment.
 
 ---
 
