@@ -51,49 +51,25 @@ This project is **explicitly subordinate to CertHead's launch sequence.** Work o
 
 ---
 
-## 🎯 CURRENT FOCUS — ENGINE COMPLETE; NEXT MOVE IS A SEQUENCING DECISION
+## 🎯 CURRENT FOCUS — TROUBLESHOOTING-LAB FACTORY PROVEN; NEXT MOVE STILL GATED ON CERTHEAD
 
-Status: The multi-device engine is STRUCTURALLY COMPLETE and shipped to origin/main.
+Status: The consolidate fork (path b) was taken — rather than extend the engine into 3c, we built catalog depth on the proven 3a/3b engine. A seed-then-break troubleshooting-lab pattern is now proven, documented, and human-verified.
 
-**DONE and pushed:**
-- Single-device lab FEEL (the original focus) — locked. Free lab LIVE and unchanged.
-- **Phase 3a — multi-device foundation:** DeviceAdapter seam (grammarFor / applyCommand
-  / prompt / buildDevice / toTopologyView); LabSession = N independent device state
-  machines, no global state; per-device terminal binding + active-device switching;
-  React Flow canvas (kind-agnostic, renders toTopologyView objects; click node →
-  active console).
-- **Phase 3b — L3-static reachability:** router routing table (connected/static,
-  `ip route`, `show ip route`, longest-prefix match); pc adapter (`ipconfig` / `ping`);
-  `canReach` (full round-trip, hop-granular `failedAt`, pure/deterministic, loop guard).
-  The Packet-Tracer ping moment works end-to-end — PC-A → PC-B across two routers, and
-  a missing return route teaches via a specific failure message.
+**DONE and pushed (this phase):**
+- **`setup` primitive** — optional per-device IOS command list on `Lab`, run through the existing `applyCommand` pipeline at session init (history NOT recorded; engine auto-tails `end`/`disable`). The ONLY engine change this phase — content-enablement, not 3c/3d/3e. Unlocks seed-then-break troubleshooting labs.
+- **3 troubleshooting pilots** (dev-only, `_pilots/`, tree-shaken from prod): `tshoot-return-route` (no-route/return), `tshoot-wrong-next-hop` (next-hop-unreachable), `tshoot-wan-subnet-mismatch` (link-subnet-mismatch). Each seeds a mostly-working topology, breaks one thing; learner diagnoses from the failure sentence and fixes. Two objectives only (fix + reachability).
+- **Canvas fix** — multi-device topology renders nodes at fixed clickable size with horizontal pan (was: fitView crushed N>1 nodes to unclickable ~60px). Real-mouse device-switching confirmed.
+- **IOS-fidelity fix** — `interface X` hops directly from `config-if` to another interface (no forced `exit`), matching real IOS. (Root cause: `interface` keyword missing from `configIfMode` children in grammar.ts.)
+- **Reachability-objective fix (important)** — reachability objectives now require a learner-initiated successful ping (`lastPing` on PcSession), not just `canReach(...).ok`. Previously they auto-completed the instant the fix was applied — the lab showed 2/2 without the learner ever pinging (tested capability, not action). Fixed across all 4 reachability labs (3 troubleshooting + 3b pilot).
+- **`docs/LAB_AUTHORING.md`** — created and current. Both archetypes (build-from-scratch / seed-then-break), the `setup` primitive, the full FailReason failure-mode menu with verbatim sentences + sharp/generic verdicts, and the lastPing reachability pattern.
 
-Free lab is LIVE at main.certhead-labs.pages.dev (redeploy after any change —
-Cloudflare is direct-upload via `npx wrangler pages deploy`, not auto-deploy-on-push).
-Pilot routes are tree-shaken out of the prod bundle; prod serves the free lab only.
+204 tests, free lab unchanged and live. All pilots human-verified end-to-end (cold run, real mouse + keyboard).
 
-Specs: engine algorithm in `docs/ENGINE_ARCHITECTURE.md`; topology in
-`docs/MULTI_DEVICE_TOPOLOGY.md`.
+**HARD-WON LESSON — verification:** Programmatic checks (`querySelector().click()`, value-setter typing) hid all 4 bugs this phase (unclickable canvas, forced interface-exit, auto-completing reachability, the input blind spot itself). Passing tests ≠ human-usable. The last gate on any lab is a COLD HUMAN RUN — real mouse, real keyboard, as a learner. Now in LAB_AUTHORING.md §7.
 
-**NEXT — a real fork, gated on CertHead revenue, NOT the spec's phase order:**
+**CertHead state (drives the next move):** Live exams: CCNA, N10-009 (SY0-701 shipping). Paid subscribers: 0 — and that's fine; building labs in private is the +4–12 week phase, fully in-bounds. Nothing deployed beyond the free lab; catalog registry, `/embed`, custom domain, and the landing-page link to `/try` all still gated on the ≥300-paid bar.
 
-Remaining engine phases are 3c (switch + L2 reachability), 3d (OSPF), 3e (ACLs +
-remaining L2). The architectural seams are in place — 3c/3d/3e are extensions against
-contracts that already held under real use (the routing-table seam absorbs OSPF as
-data; DeviceAdapter absorbs new device kinds; the FailReason contract feeds 3e).
-
-But the next move is **NOT automatically 3c.** The law (this file): labs follow
-revenue-validated question banks, and `/embed` Pro integration is gated on ≥300 paid
-CertHead subscribers. The open decision is:
-  (a) extend the engine into 3c, or
-  (b) consolidate — build more labs on the proven 3a/3b engine and let the question
-      bank catch up.
-This hinges on CertHead's live exams + paid-subscriber count vs the 300 bar. Decide
-with that number, not by defaulting into the next phase.
-
-**DO NOT LOSE:** the multi-device engine was the committed headline build and it
-landed. Phases 3c–3e unlock the full Phase 3 catalog + capstones C3/C4/C5 — but only
-when revenue signal justifies the next investment.
+**NEXT — author more labs OR pause for CertHead.** The factory works; the marginal next lab (`egress-down` is the natural pick off the FailReason menu — simplest, sharpest, unused) is near-free but doesn't change strategic position until the catalog can ship. Higher-leverage work right now is CertHead-side (shipping exams moves the subscriber bar; labs wait). Decide by the subscriber number, not by defaulting into the next lab. This project may sit fallow — that's by design.
 
 ---
 
