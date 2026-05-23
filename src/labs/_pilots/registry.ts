@@ -17,6 +17,7 @@
 import type { Lab } from '@/engine/types';
 import { pilot2Router } from './pilot-2-router';
 import { pilot3bStaticRouting } from './pilot-3b-static-routing';
+import { pilotTshootReturnRoute } from './pilot-tshoot-return-route';
 
 interface PilotRegistration {
   /** URL slug — accessed via `?pilot=<slug>` in dev. */
@@ -27,6 +28,7 @@ interface PilotRegistration {
 const PILOTS: readonly PilotRegistration[] = [
   { slug: '2-router', lab: pilot2Router },
   { slug: 'static-routing', lab: pilot3bStaticRouting },
+  { slug: 'tshoot-return-route', lab: pilotTshootReturnRoute },
 ];
 
 /** Resolve a pilot slug to its lab, or undefined if not registered. */
