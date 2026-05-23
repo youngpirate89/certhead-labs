@@ -19,6 +19,7 @@ import { pilot2Router } from './pilot-2-router';
 import { pilot3bStaticRouting } from './pilot-3b-static-routing';
 import { pilotTshootReturnRoute } from './pilot-tshoot-return-route';
 import { pilotTshootWrongNextHop } from './pilot-tshoot-wrong-next-hop';
+import { pilotTshootWanSubnetMismatch } from './pilot-tshoot-wan-subnet-mismatch';
 
 interface PilotRegistration {
   /** URL slug — accessed via `?pilot=<slug>` in dev. */
@@ -31,6 +32,7 @@ const PILOTS: readonly PilotRegistration[] = [
   { slug: 'static-routing', lab: pilot3bStaticRouting },
   { slug: 'tshoot-return-route', lab: pilotTshootReturnRoute },
   { slug: 'tshoot-wrong-next-hop', lab: pilotTshootWrongNextHop },
+  { slug: 'tshoot-wan-subnet-mismatch', lab: pilotTshootWanSubnetMismatch },
 ];
 
 /** Resolve a pilot slug to its lab, or undefined if not registered. */
