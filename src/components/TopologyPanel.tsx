@@ -59,6 +59,17 @@ const NODE_GAP = 80;
  *  topologies (3b+) will switch to a directed-graph layout via dagre. */
 const NODE_HEIGHT = 94;
 
+/** Canvas height — fits one row of real-sized nodes (NODE_HEIGHT=94) with
+ *  vertical breathing room, while leaving the rest of the rail to the
+ *  objectives panel. Held in JS so the viewport y-inset (which centers the
+ *  row) stays in sync with the container height. */
+const CANVAS_HEIGHT = 160;
+/** Left inset of the row from the canvas edge — gives nodes breathing room
+ *  against the panel border at the default viewport. */
+const ROW_INSET_X = 20;
+/** Vertical inset to center the node row inside the canvas. */
+const ROW_INSET_Y = Math.round((CANVAS_HEIGHT - NODE_HEIGHT) / 2);
+
 function layoutNodes(
   devices: readonly DeviceTopologyView[],
   activeId: string,
@@ -190,23 +201,36 @@ export function TopologyPanel({
   );
 
   return (
-    <div className="h-full min-h-[180px] w-full bg-panel-bg">
+    <div className="w-full bg-panel-bg" style={{ height: CANVAS_HEIGHT }}>
       <ReactFlowProvider>
       <ReactFlow
         nodes={nodes}
         edges={[]}
         nodeTypes={NODE_TYPES}
-        fitView
-        // Allow generous zoom-out: a 4-device row (PC + 2 routers + PC) needs
-        // ~1040px in flow space; at 340px rail width that's a ~0.3 fit.
-        fitViewOptions={{ padding: 0.15, minZoom: 0.3, maxZoom: 1.2 }}
+        // Real-sized nodes (zoom locked at 1.0) so click targets stay
+        // mouse-friendly. A wide topology (4+ devices, ~1040px+ in flow space)
+        // overflows the 340px rail — that's what panOnDrag is for. fitView
+        // is intentionally not used: it crushed nodes to ~60×28 px in the
+        // multi-device pilots, making them effectively unclickable.
+        defaultViewport={{ x: ROW_INSET_X, y: ROW_INSET_Y, zoom: 1 }}
+        minZoom={1}
+        maxZoom={1}
         proOptions={{ hideAttribution: true }}
         nodesDraggable={false}
         nodesConnectable={false}
+        // Stays false — enabling React Flow's selection caused its internal
+        // click handler to stopPropagation on node clicks, killing both our
+        // inner button onClick AND onNodeClick. With selectable=false the
+        // inner <button onClick> path works cleanly once the inline
+        // pointer-events:none on `.react-flow__node` is overridden in
+        // `src/index.css` (load-bearing — see the comment there).
         elementsSelectable={false}
         zoomOnScroll={false}
         zoomOnPinch={false}
         zoomOnDoubleClick={false}
+        // Pan when the row is wider than the rail. React Flow's panOnDrag
+        // captures drag on the background only — clicks on nodes (which
+        // bubble to the inner <button>) are unaffected.
         panOnDrag={devices.length > 1}
         panOnScroll={false}
         preventScrolling={false}

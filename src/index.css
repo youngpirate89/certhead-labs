@@ -15,6 +15,17 @@
   }
 }
 
+/* React Flow v12 hardcodes `pointer-events: none` inline on every node when
+   nodesDraggable+elementsSelectable are both false (the configuration we want
+   — read-only canvas, no drag-to-connect, no React Flow selection state).
+   The inline style beats any class-based override, so real-mouse clicks fall
+   through nodes to the pane and never reach our inner <button>. !important
+   beats the inline style and restores hand-clickability. The pane still gets
+   drag-on-background for panOnDrag. */
+.react-flow__node {
+  pointer-events: all !important;
+}
+
 @layer utilities {
   /* Plays once when an objective transitions to met — a brief teal flash that
      fades, plus a slight nudge. Coupled with check-pop on the check icon. */

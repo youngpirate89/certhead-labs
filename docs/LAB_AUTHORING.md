@@ -236,6 +236,18 @@ loading. Until then: **author labs as pilots.**
 6. Verify the in-browser moment on the `?pilot=` route: ping → the specific failure
    sentence → fix → ping replies → objectives flip green. If it doesn't *feel* like a
    diagnosis, the failure reason is probably too generic — revisit §4.
+
+   **Use a real-coordinate canvas click to switch the active device. A programmatic
+   `element.click()` (or `document.querySelector(...).click()`) does NOT satisfy this
+   gate.** Real-coordinate clicks exercise the React Flow geometry — node size, zoom,
+   pan, hit area — and only a real click can catch "canvas renders but nodes are
+   unclickable" regressions. We shipped that bug three times because every prior
+   in-browser check used a programmatic DOM `.click()` that bypassed canvas geometry
+   and always landed on the button regardless of where (or how small) it was on
+   screen. If you're driving the browser via tooling, use a real mouse-coordinate
+   click (e.g. `getBoundingClientRect()` → click the center); if you're driving by
+   hand, click with the mouse. Either way, the lab must be hand-completable end-to-end
+   by an actual mouse user.
 7. Commit (conventional commits, one per lab) and push.
 
 ---
