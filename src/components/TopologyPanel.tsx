@@ -367,8 +367,22 @@ export function TopologyPanel({
     [devices],
   );
 
+  // Center the canvas inside the (now full-width) topology band. The wrapper's
+  // max-width tracks the row's natural footprint: row width + ROW_INSET_X on
+  // each side. For a single-device free lab that's ~240px — too narrow to feel
+  // intentional in a wide band — so floor at 340px (the prior sidebar's width)
+  // so the node sits in a familiar-sized centered card. Multi-device labs grow
+  // past that automatically; when the band itself is narrower than the inner
+  // max-width (mobile portrait, ~520px embed iframe with 4 devices) the wrapper
+  // collapses to the band width and React Flow's panOnDrag handles the
+  // overflow exactly as it did pre-A1.6.
+  const rowWidth =
+    devices.length * NODE_WIDTH + Math.max(0, devices.length - 1) * NODE_GAP;
+  const canvasMaxWidth = Math.max(rowWidth + 2 * ROW_INSET_X, 340);
+
   return (
     <div className="w-full bg-panel-bg" style={{ height: CANVAS_HEIGHT }}>
+      <div className="mx-auto h-full" style={{ maxWidth: canvasMaxWidth }}>
       <ReactFlowProvider>
       <ReactFlow
         nodes={nodes}
@@ -410,6 +424,7 @@ export function TopologyPanel({
         />
       </ReactFlow>
       </ReactFlowProvider>
+      </div>
     </div>
   );
 }
