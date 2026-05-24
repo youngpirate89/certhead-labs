@@ -23,7 +23,14 @@ import {
 } from '@xyflow/react';
 import type { Node, NodeProps } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { useMemo, type MouseEvent, type PointerEvent, type ReactNode } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  type MouseEvent,
+  type PointerEvent,
+  type ReactNode,
+} from 'react';
 
 // View types now live in the adapter contracts so adapters can implement them
 // directly. Re-exported here so existing imports of these types from
@@ -77,16 +84,17 @@ const NODE_GAP = 80;
  *  topologies (3b+) will switch to a directed-graph layout via dagre. */
 const NODE_HEIGHT = 94;
 
-/** Canvas height — fits one row of real-sized nodes (NODE_HEIGHT=94) with
- *  vertical breathing room, while leaving the rest of the rail to the
- *  objectives panel. Held in JS so the viewport y-inset (which centers the
- *  row) stays in sync with the container height. */
-const CANVAS_HEIGHT = 160;
+/** Initial canvas height assumed by `defaultViewport`. The panel itself is
+ *  `h-full` and grows/shrinks with its parent (Layout owns the live height
+ *  via the resizable divider). This constant only feeds the row-inset that
+ *  vertically centers the node row at first paint — on resize the
+ *  CanvasAutoFit observer calls fitView to re-center against the new size. */
+const INITIAL_CANVAS_HEIGHT = 160;
 /** Left inset of the row from the canvas edge — gives nodes breathing room
  *  against the panel border at the default viewport. */
 const ROW_INSET_X = 20;
-/** Vertical inset to center the node row inside the canvas. */
-const ROW_INSET_Y = Math.round((CANVAS_HEIGHT - NODE_HEIGHT) / 2);
+/** Vertical inset to center the node row inside the canvas at first paint. */
+const ROW_INSET_Y = Math.round((INITIAL_CANVAS_HEIGHT - NODE_HEIGHT) / 2);
 
 function layoutNodes(
   devices: readonly DeviceTopologyView[],
@@ -443,6 +451,48 @@ function CanvasButton({
   );
 }
 
+/**
+ * Auto-refit on canvas resize. Mounted alongside ReactFlow so it can use
+ * useReactFlow(); observes the SHARED canvas container (passed by ref) and
+ * calls fitView whenever its size changes.
+ *
+ * Why this is necessary: the topology band's height is owned by Layout's
+ * resizable divider. When the user drags it, the React Flow canvas changes
+ * size — but React Flow keeps the same viewport transform, so a row that
+ * was centered at the old height ends up off-center (or clipped) at the
+ * new height. fitView re-centers; the call respects MIN_ZOOM=0.5 and
+ * maxZoom:1, so it can never reproduce the historical multi-node crush.
+ *
+ * The first ResizeObserver fire is the initial measurement — skipped so we
+ * don't auto-fit on mount (the "no auto-fit on mount" rule still stands;
+ * fit-on-mount was the original crush). Subsequent fires are real resizes.
+ */
+function CanvasAutoFit({
+  containerRef,
+}: {
+  readonly containerRef: React.RefObject<HTMLDivElement>;
+}) {
+  const { fitView } = useReactFlow();
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    let first = true;
+    const ro = new ResizeObserver(() => {
+      if (first) {
+        first = false;
+        return;
+      }
+      // maxZoom: 1 + padding: 0.1 + global MIN_ZOOM=0.5 = fit can never crush
+      // nodes below ~100px. If the topology can't actually fit at MIN_ZOOM,
+      // it's clamped at 0.5 and overflows (panOnDrag rescues), as designed.
+      fitView({ maxZoom: 1, padding: 0.1, duration: 150 });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [containerRef, fitView]);
+  return null;
+}
+
 export function TopologyPanel({
   devices,
   activeDeviceId,
@@ -489,15 +539,23 @@ export function TopologyPanel({
     devices.length * NODE_WIDTH + Math.max(0, devices.length - 1) * NODE_GAP;
   const canvasMaxWidth = Math.max(rowWidth + 2 * ROW_INSET_X, 340);
 
+  // Ref handed to CanvasAutoFit — observing this element catches both
+  // viewport resizes AND the Layout divider drag (which changes the parent
+  // band's height, which changes our h-full container).
+  const canvasWrapperRef = useRef<HTMLDivElement>(null);
+
   return (
     <ReactFlowProvider>
-      <div className="w-full bg-panel-bg" style={{ height: CANVAS_HEIGHT }}>
+      {/* Outer band is h-full so Layout's state-driven topologyHeight is
+          the source of truth (was a fixed CANVAS_HEIGHT pre-A1.8). */}
+      <div className="h-full w-full bg-panel-bg">
         {/* The centered wrapper has `relative` so CanvasControls absolute-
             positions against the VISIBLE canvas edge, not the full-band edge.
             (Before A1.7.1 the controls were a sibling of this wrapper — they
             rendered hundreds of px to the right of the centered canvas and
             were effectively invisible to a user looking at the topology.) */}
         <div
+          ref={canvasWrapperRef}
           className="relative mx-auto h-full"
           style={{ maxWidth: canvasMaxWidth }}
         >
@@ -552,6 +610,7 @@ export function TopologyPanel({
             />
           </ReactFlow>
           <CanvasControls />
+          <CanvasAutoFit containerRef={canvasWrapperRef} />
         </div>
       </div>
     </ReactFlowProvider>
