@@ -1,29 +1,28 @@
 import type { Lab } from '@/engine/types';
 
 /**
- * Troubleshooting pilot — wrong static next-hop.
+ * Troubleshooting lab — wrong static next-hop.
  *
- * Same topology as the return-route pilot: PC-A — R1 — R2 — PC-B. Both
- * routers are pre-configured, including R2's return static, but R2's
- * return route points at a next-hop OUTSIDE the WAN subnet
- * (192.168.12.99 against a 192.168.12.0/30 link, whose only valid host
- * pair is .1 / .2). The engine surfaces this as a `next-hop-unreachable`
+ * Topology: PC-A — R1 — R2 — PC-B. Both routers are pre-configured, including
+ * R2's return static, but R2's return route points at a next-hop OUTSIDE the
+ * WAN subnet (192.168.12.99 against a 192.168.12.0/30 link, whose only valid
+ * host pair is .1 / .2). The engine surfaces this as a `next-hop-unreachable`
  * failure on the return walk; the sentence names R2 and points at the
- * next-hop concept ("the next-hop on R2 is not in that interface's
- * subnet"). The scenario brief frames the /30 explicitly so the learner
- * arrives knowing the link's address space.
+ * next-hop concept ("the next-hop on R2 is not in that interface's subnet").
+ * The scenario brief frames the /30 explicitly so the learner arrives knowing
+ * the link's address space.
  *
- * Two objectives: replace the wrong static with the right one, then
- * confirm round-trip reachability. The failed ping is the teaching;
- * the fix is the completion.
+ * Two objectives: replace the wrong static with the right one, then confirm
+ * round-trip reachability. The failed ping is the teaching; the fix is the
+ * completion.
  *
- * LOCAL ONLY: registered as `?pilot=tshoot-wrong-next-hop`; not in the
- * deployed catalog.
+ * Catalog id is stable: `ccna-tshoot-wrong-next-hop`. Pro-tier (`isFree: false`);
+ * the embed catalog serves this through `getLabById`. Not in the `/try` bundle.
  */
-export const pilotTshootWrongNextHop: Lab = {
-  id: 'pilot-tshoot-wrong-next-hop',
+export const tshootWrongNextHop: Lab = {
+  id: 'ccna-tshoot-wrong-next-hop',
   title: 'Troubleshoot: R2 points at the wrong next-hop',
-  exam: 'Pilot · Troubleshoot',
+  exam: 'CCNA 200-301',
   difficulty: 3,
   estimatedMinutes: 8,
   isFree: false,

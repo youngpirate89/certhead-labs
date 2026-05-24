@@ -1,31 +1,30 @@
 import type { Lab } from '@/engine/types';
 
 /**
- * Troubleshooting pilot — mismatched WAN subnets on a point-to-point link.
+ * Troubleshooting lab — mismatched WAN subnets on a point-to-point link.
  *
- * Same topology as the return-route pilot: PC-A — R1 — R2 — PC-B. R1's
- * WAN interface sits at 192.168.12.1/30 (network 192.168.12.0/30). R2's
- * WAN interface was misconfigured at 192.168.12.6/30 (network
- * 192.168.12.4/30). The two ends of the link compute different networks
- * — the engine catches this on the forward walk as `link-subnet-mismatch`
- * and surfaces the verbatim sentence:
+ * Topology: PC-A — R1 — R2 — PC-B. R1's WAN interface sits at 192.168.12.1/30
+ * (network 192.168.12.0/30). R2's WAN interface was misconfigured at
+ * 192.168.12.6/30 (network 192.168.12.4/30). The two ends of the link compute
+ * different networks — the engine catches this on the forward walk as
+ * `link-subnet-mismatch` and surfaces the verbatim sentence:
  *   Request timed out — the subnets on the two ends of the link at R1 Gi0/0 do not match.
  *
- * This is a subnetting lesson, not a routing one — both routers have
- * sensible static routes, but the link itself is broken. The fix is to
- * re-IP R2's WAN interface so it lives in the same /30 as R1 (i.e.
- * 192.168.12.2/30).
+ * This is a subnetting lesson, not a routing one — both routers have sensible
+ * static routes, but the link itself is broken. The fix is to re-IP R2's WAN
+ * interface so it lives in the same /30 as R1 (i.e. 192.168.12.2/30).
  *
- * Two objectives: re-IP R2's WAN end and confirm round-trip reachability.
- * The failed ping is the teaching; the fix is the completion.
+ * Two objectives: re-IP R2's WAN end and confirm round-trip reachability. The
+ * failed ping is the teaching; the fix is the completion.
  *
- * LOCAL ONLY: registered as `?pilot=tshoot-wan-subnet-mismatch`; not in
- * the deployed catalog.
+ * Catalog id is stable: `ccna-tshoot-wan-subnet-mismatch`. Pro-tier
+ * (`isFree: false`); the embed catalog serves this through `getLabById`. Not
+ * in the `/try` bundle.
  */
-export const pilotTshootWanSubnetMismatch: Lab = {
-  id: 'pilot-tshoot-wan-subnet-mismatch',
+export const tshootWanSubnetMismatch: Lab = {
+  id: 'ccna-tshoot-wan-subnet-mismatch',
   title: 'Troubleshoot: Mismatched WAN subnet',
-  exam: 'Pilot · Troubleshoot',
+  exam: 'CCNA 200-301',
   difficulty: 3,
   estimatedMinutes: 8,
   isFree: false,

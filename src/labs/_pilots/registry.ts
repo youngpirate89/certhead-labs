@@ -13,13 +13,19 @@
  * its labs and the PilotMode view component all disappear from prod.
  *
  * Adding a new pilot = drop it into this array. No other wiring needed.
+ *
+ * The three `tshoot-*` slugs reference labs that have been promoted into
+ * `src/labs/ccna/` (real catalog members served via `getLabById` once the
+ * `/embed` route lands). Their dev access stays here because, until `/embed`
+ * exists, `?pilot=…` is the only way to hand-run them in dev — and the
+ * DEV gate keeps them out of the prod bundle either way.
  */
 import type { Lab } from '@/engine/types';
+import { tshootReturnRoute } from '@/labs/ccna/tshoot-return-route';
+import { tshootWrongNextHop } from '@/labs/ccna/tshoot-wrong-next-hop';
+import { tshootWanSubnetMismatch } from '@/labs/ccna/tshoot-wan-subnet-mismatch';
 import { pilot2Router } from './pilot-2-router';
 import { pilot3bStaticRouting } from './pilot-3b-static-routing';
-import { pilotTshootReturnRoute } from './pilot-tshoot-return-route';
-import { pilotTshootWrongNextHop } from './pilot-tshoot-wrong-next-hop';
-import { pilotTshootWanSubnetMismatch } from './pilot-tshoot-wan-subnet-mismatch';
 
 interface PilotRegistration {
   /** URL slug — accessed via `?pilot=<slug>` in dev. */
@@ -30,9 +36,9 @@ interface PilotRegistration {
 const PILOTS: readonly PilotRegistration[] = [
   { slug: '2-router', lab: pilot2Router },
   { slug: 'static-routing', lab: pilot3bStaticRouting },
-  { slug: 'tshoot-return-route', lab: pilotTshootReturnRoute },
-  { slug: 'tshoot-wrong-next-hop', lab: pilotTshootWrongNextHop },
-  { slug: 'tshoot-wan-subnet-mismatch', lab: pilotTshootWanSubnetMismatch },
+  { slug: 'tshoot-return-route', lab: tshootReturnRoute },
+  { slug: 'tshoot-wrong-next-hop', lab: tshootWrongNextHop },
+  { slug: 'tshoot-wan-subnet-mismatch', lab: tshootWanSubnetMismatch },
 ];
 
 /** Resolve a pilot slug to its lab, or undefined if not registered. */

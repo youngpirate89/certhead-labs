@@ -1,12 +1,12 @@
 import type { Lab } from '@/engine/types';
 
 /**
- * Troubleshooting pilot — missing return route.
+ * Troubleshooting lab — missing return route.
  *
- * Same topology as pilot 3b: PC-A — R1 — R2 — PC-B. Both routers and their
- * interfaces are pre-configured via `Lab.setup`; R1 has its forward static.
- * R2 is deliberately MISSING its return route to 192.168.1.0/24 — the one
- * thing the learner must add. The headline failure surfaces as
+ * Topology: PC-A — R1 — R2 — PC-B. Both routers and all four interfaces are
+ * pre-configured via `Lab.setup`; R1 has its forward static. R2 is deliberately
+ * MISSING its return route to 192.168.1.0/24 — the one thing the learner must
+ * add. The headline failure surfaces as
  *   Reply timed out — R2 has no return route to the source.
  * on the very first ping, naming R2 directly so the diagnosis is immediate.
  *
@@ -14,13 +14,13 @@ import type { Lab } from '@/engine/types';
  * failed ping is the teaching; the fix is the completion. No re-grading of
  * the seeded config.
  *
- * LOCAL ONLY: registered as a pilot (`?pilot=tshoot-return-route`); not in
- * the deployed catalog.
+ * Catalog id is stable: `ccna-tshoot-return-route`. Pro-tier (`isFree: false`);
+ * the embed catalog serves this through `getLabById`. Not in the `/try` bundle.
  */
-export const pilotTshootReturnRoute: Lab = {
-  id: 'pilot-tshoot-return-route',
+export const tshootReturnRoute: Lab = {
+  id: 'ccna-tshoot-return-route',
   title: 'Troubleshoot: PC-A can\'t reach PC-B',
-  exam: 'Pilot · Troubleshoot',
+  exam: 'CCNA 200-301',
   difficulty: 3,
   estimatedMinutes: 8,
   isFree: false,

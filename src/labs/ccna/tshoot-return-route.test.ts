@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { applyToActive, initLabSession, type LabSession } from '@/engine/lab-session';
 import { canReach } from '@/engine/reachability';
 import { grade } from '@/engine/grading';
-import { pilotTshootReturnRoute as lab } from './pilot-tshoot-return-route';
+import { tshootReturnRoute as lab } from './tshoot-return-route';
 
 function configure(ls: LabSession, id: string, lines: string[]): LabSession {
   let cur: LabSession = { ...ls, activeDeviceId: id };
@@ -10,7 +10,7 @@ function configure(ls: LabSession, id: string, lines: string[]): LabSession {
   return cur;
 }
 
-describe('pilot tshoot-return-route — missing return route troubleshooting', () => {
+describe('tshoot-return-route — missing return route troubleshooting', () => {
   it('declares the right topology shape (2 PCs, 2 routers, 3 links) and is not free', () => {
     expect(lab.topology.devices).toHaveLength(4);
     expect(lab.topology.links).toHaveLength(3);
