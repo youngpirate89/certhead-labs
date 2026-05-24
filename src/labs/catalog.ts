@@ -17,12 +17,14 @@ import { lab01InterfaceIp } from './ccna/lab-01-interface-ip';
 import { tshootReturnRoute } from './ccna/tshoot-return-route';
 import { tshootWrongNextHop } from './ccna/tshoot-wrong-next-hop';
 import { tshootWanSubnetMismatch } from './ccna/tshoot-wan-subnet-mismatch';
+import { tshootEgressDown } from './ccna/tshoot-egress-down';
 
 const CATALOG: readonly Lab[] = [
   lab01InterfaceIp,
   tshootReturnRoute,
   tshootWrongNextHop,
   tshootWanSubnetMismatch,
+  tshootEgressDown,
 ];
 
 const BY_ID: ReadonlyMap<string, Lab> = new Map(CATALOG.map((lab) => [lab.id, lab]));

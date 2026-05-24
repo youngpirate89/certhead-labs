@@ -10,6 +10,7 @@ const CATALOG_IDS = [
   'ccna-tshoot-return-route',
   'ccna-tshoot-wrong-next-hop',
   'ccna-tshoot-wan-subnet-mismatch',
+  'ccna-tshoot-egress-down',
 ] as const;
 
 describe('lab catalog — getLabById', () => {

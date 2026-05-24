@@ -24,6 +24,7 @@ import type { Lab } from '@/engine/types';
 import { tshootReturnRoute } from '@/labs/ccna/tshoot-return-route';
 import { tshootWrongNextHop } from '@/labs/ccna/tshoot-wrong-next-hop';
 import { tshootWanSubnetMismatch } from '@/labs/ccna/tshoot-wan-subnet-mismatch';
+import { tshootEgressDown } from '@/labs/ccna/tshoot-egress-down';
 import { pilot2Router } from './pilot-2-router';
 import { pilot3bStaticRouting } from './pilot-3b-static-routing';
 
@@ -39,6 +40,7 @@ const PILOTS: readonly PilotRegistration[] = [
   { slug: 'tshoot-return-route', lab: tshootReturnRoute },
   { slug: 'tshoot-wrong-next-hop', lab: tshootWrongNextHop },
   { slug: 'tshoot-wan-subnet-mismatch', lab: tshootWanSubnetMismatch },
+  { slug: 'tshoot-egress-down', lab: tshootEgressDown },
 ];
 
 /** Resolve a pilot slug to its lab, or undefined if not registered. */
