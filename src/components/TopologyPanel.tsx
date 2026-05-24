@@ -491,11 +491,16 @@ export function TopologyPanel({
 
   return (
     <ReactFlowProvider>
-      <div
-        className="relative w-full bg-panel-bg"
-        style={{ height: CANVAS_HEIGHT }}
-      >
-        <div className="mx-auto h-full" style={{ maxWidth: canvasMaxWidth }}>
+      <div className="w-full bg-panel-bg" style={{ height: CANVAS_HEIGHT }}>
+        {/* The centered wrapper has `relative` so CanvasControls absolute-
+            positions against the VISIBLE canvas edge, not the full-band edge.
+            (Before A1.7.1 the controls were a sibling of this wrapper — they
+            rendered hundreds of px to the right of the centered canvas and
+            were effectively invisible to a user looking at the topology.) */}
+        <div
+          className="relative mx-auto h-full"
+          style={{ maxWidth: canvasMaxWidth }}
+        >
           <ReactFlow
             nodes={nodes}
             edges={[]}
@@ -528,7 +533,16 @@ export function TopologyPanel({
             // panning. The Fit button rescues a panned-off topology.
             panOnDrag={true}
             panOnScroll={false}
-            preventScrolling={false}
+            // LOAD-BEARING: must be coupled to zoomOnScroll. In
+            // @xyflow/system v12 the wheel handler computes
+            //   preventZoom = !preventScrolling && isWheel && !event.ctrlKey
+            // and bails out when preventZoom is true. So preventScrolling:false
+            // silently disables plain (non-ctrl) wheel-zoom while pinch — which
+            // synthesises ctrlKey — still works. A1.7's commit shipped that
+            // exact bug: zoomOnScroll was flipped to true but preventScrolling
+            // stayed hardcoded false, leaving wheel-zoom dead. Tying them
+            // together encodes the invariant in code.
+            preventScrolling={zoomOnScroll}
           >
             <Background gap={20} size={1} color="#1e2733" />
             <EdgeOverlay
@@ -537,8 +551,8 @@ export function TopologyPanel({
               links={links ?? []}
             />
           </ReactFlow>
+          <CanvasControls />
         </div>
-        <CanvasControls />
       </div>
     </ReactFlowProvider>
   );
