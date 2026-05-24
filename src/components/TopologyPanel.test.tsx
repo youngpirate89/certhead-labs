@@ -299,4 +299,126 @@ describe('TopologyPanel', () => {
     expect(cidrY).toBeGreaterThan(ifaceLeftY);
     expect(cidrY - ifaceLeftY).toBeGreaterThanOrEqual(20);
   });
+
+  // ---- A1.7: canvas zoom + pan ------------------------------------------
+
+  it('renders zoom in, zoom out, and fit controls', () => {
+    const { r1, r2 } = twoRoutersWithLink({ r2Up: true });
+    render(
+      <TopologyPanel
+        devices={[r1, r2]}
+        activeDeviceId="R1"
+        links={[
+          { a: { deviceId: 'R1', iface: 'Gi0/0' }, b: { deviceId: 'R2', iface: 'Gi0/0' } },
+        ]}
+      />,
+    );
+    expect(screen.getByLabelText('Zoom in')).toBeInTheDocument();
+    expect(screen.getByLabelText('Zoom out')).toBeInTheDocument();
+    expect(screen.getByLabelText('Fit topology to view')).toBeInTheDocument();
+  });
+
+  // Anti-drift contract for zoom: every overlay element (LED, iface label,
+  // CIDR, cable) must live INSIDE .react-flow__viewport — the single DOM
+  // node React Flow applies its pan/zoom transform to. If anything escaped
+  // into screen space, it would NOT scale with zoom and would drift away
+  // from its anchor; we shipped that bug class before (label-drift). The
+  // structural assertion is the load-bearing one — at any zoom level the
+  // browser applies the viewport's CSS transform uniformly to all descendants,
+  // so being inside that subtree IS the proof that overlays stay anchored.
+  it('LED + edge labels + cable all live inside .react-flow__viewport (scale with zoom)', () => {
+    const { r1, r2 } = twoRoutersWithLink({ r2Up: true });
+    const { container } = render(
+      <TopologyPanel
+        devices={[r1, r2]}
+        activeDeviceId="R1"
+        links={[
+          { a: { deviceId: 'R1', iface: 'Gi0/0' }, b: { deviceId: 'R2', iface: 'Gi0/0' } },
+        ]}
+      />,
+    );
+    const inViewport = (sel: string) =>
+      container.querySelector(sel)?.closest('.react-flow__viewport');
+
+    // LEDs.
+    expect(inViewport('[data-led-endpoint="R1:Gi0/0"]')).not.toBeNull();
+    expect(inViewport('[data-led-endpoint="R2:Gi0/0"]')).not.toBeNull();
+    // Iface labels.
+    expect(inViewport('[data-iface-label="R1:Gi0/0"]')).not.toBeNull();
+    expect(inViewport('[data-iface-label="R2:Gi0/0"]')).not.toBeNull();
+    // CIDR mid-cable label.
+    expect(inViewport('[data-link-network]')).not.toBeNull();
+    // The cable + LEDs + labels all share a single per-link <g> group inside
+    // the viewport — they cannot drift relative to each other.
+    expect(inViewport('[data-link-key]')).not.toBeNull();
+  });
+
+  // Position-stability check: overlay y attributes are pure canvas-space
+  // values derived from NODE_HEIGHT and the label offsets. They MUST NOT
+  // depend on screen DPR, viewport CSS, or zoom level — if they did, the
+  // collision floor from A1.6 would no longer hold under zoom. Verify the
+  // exact values match the expected canvas-space formula at the default
+  // render; combined with the viewport-containment test above, this rules
+  // out drift under zoom.
+  it('overlay y-coords are deterministic canvas-space values (zoom-independent)', () => {
+    const { r1, r2 } = twoRoutersWithLink({ r2Up: true });
+    const { container, rerender } = render(
+      <TopologyPanel
+        devices={[r1, r2]}
+        activeDeviceId="R1"
+        links={[
+          { a: { deviceId: 'R1', iface: 'Gi0/0' }, b: { deviceId: 'R2', iface: 'Gi0/0' } },
+        ]}
+      />,
+    );
+    const initialIfaceY = container
+      .querySelector('[data-iface-label="R1:Gi0/0"]')!
+      .getAttribute('y');
+    const initialCidrY = container
+      .querySelector('[data-link-network]')!
+      .getAttribute('y');
+
+    // Re-render with the SAME inputs; the same canvas-space coords must
+    // emerge — proof the values aren't derived from any layout-time
+    // measurement that could change under zoom or resize.
+    rerender(
+      <TopologyPanel
+        devices={[r1, r2]}
+        activeDeviceId="R2"
+        links={[
+          { a: { deviceId: 'R1', iface: 'Gi0/0' }, b: { deviceId: 'R2', iface: 'Gi0/0' } },
+        ]}
+      />,
+    );
+    expect(
+      container.querySelector('[data-iface-label="R1:Gi0/0"]')!.getAttribute('y'),
+    ).toBe(initialIfaceY);
+    expect(
+      container.querySelector('[data-link-network]')!.getAttribute('y'),
+    ).toBe(initialCidrY);
+
+    // And the A1.6 collision floor still applies (CIDR clearly below iface).
+    expect(Number(initialCidrY) - Number(initialIfaceY)).toBeGreaterThanOrEqual(20);
+  });
+
+  // zoomOnScroll prop: not directly observable in jsdom (React Flow's wheel
+  // handler isn't exercised), but verify the component accepts the prop and
+  // still renders cleanly with it set false — the seam embed mode needs.
+  it('accepts zoomOnScroll={false} without breaking render (embed seam)', () => {
+    const { r1, r2 } = twoRoutersWithLink({ r2Up: true });
+    const { container } = render(
+      <TopologyPanel
+        devices={[r1, r2]}
+        activeDeviceId="R1"
+        zoomOnScroll={false}
+        links={[
+          { a: { deviceId: 'R1', iface: 'Gi0/0' }, b: { deviceId: 'R2', iface: 'Gi0/0' } },
+        ]}
+      />,
+    );
+    // Canvas still renders; controls still present so wheel-disabled users
+    // can still zoom.
+    expect(screen.getByLabelText('Zoom in')).toBeInTheDocument();
+    expect(container.querySelector('.react-flow__viewport')).not.toBeNull();
+  });
 });

@@ -19,10 +19,11 @@ import {
   Handle,
   Position,
   ViewportPortal,
+  useReactFlow,
 } from '@xyflow/react';
 import type { Node, NodeProps } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { useMemo } from 'react';
+import { useMemo, type MouseEvent, type PointerEvent, type ReactNode } from 'react';
 
 // View types now live in the adapter contracts so adapters can implement them
 // directly. Re-exported here so existing imports of these types from
@@ -44,7 +45,23 @@ interface TopologyPanelProps {
   readonly onSelectDevice?: (id: string) => void;
   /** Links between device interfaces — drawn as edges in the canvas. */
   readonly links?: readonly Link[];
+  /** Allow plain mouse-wheel to zoom the canvas. Default true for /try and
+   *  pilot routes where the topology is the primary content. The /embed
+   *  surface (later commit) will pass false so scrolling inside the iframe
+   *  does NOT hijack the parent page's scroll; embed will layer on a
+   *  Ctrl/Cmd-modifier handler of its own. Touchpad pinch + the on-canvas
+   *  zoom buttons stay available regardless of this prop. */
+  readonly zoomOnScroll?: boolean;
 }
+
+/** Zoom bounds — see `CanvasControls` and the React Flow setup below.
+ *  - 0.5 floor: 200px nodes never shrink below 100px (the historical fitView
+ *    crash settled around 0.3 ⇒ ~60px and made nodes unclickable).
+ *  - 1.5 ceiling: 200px nodes never exceed ~300px; useful magnification for
+ *    accessibility without making the topology dominate the band.
+ */
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 1.5;
 
 interface DeviceNodeData extends Record<string, unknown> {
   view: DeviceTopologyView;
@@ -349,12 +366,90 @@ function PortLed({
   );
 }
 
+/**
+ * Canvas zoom controls — three small icon buttons (in / out / fit) rendered
+ * inside the topology band, top-right. Wheel-zoom isn't discoverable and
+ * fails on plain mice; the buttons are the always-available path.
+ *
+ * Fit uses `fitView({ maxZoom: 1 })` so it can never inflate a small
+ * topology past 1.0 and can never push the global zoom past MIN_ZOOM — this
+ * is the explicit safeguard against the historical fitView crush where an
+ * unclamped fit on a multi-device lab settled at ~0.3 and produced
+ * unclickable ~60px-wide nodes.
+ *
+ * `pointer-events:auto` + a stopPropagation guard on pointerdown/mousedown
+ * keeps a quick mouse-down on a button from also starting a canvas pan.
+ * Lives in screen space (outside ViewportPortal) so it doesn't pan/zoom
+ * with the canvas — controls stay anchored to the band's corner.
+ */
+function CanvasControls() {
+  const { zoomIn, zoomOut, fitView } = useReactFlow();
+  // Stop the event from bubbling to React Flow's pan handler — without this,
+  // a slow click on a button would also start dragging the canvas.
+  const stop = (e: MouseEvent | PointerEvent) => e.stopPropagation();
+  return (
+    <div
+      className="pointer-events-auto absolute right-3 top-3 z-10 flex flex-col gap-1"
+      onPointerDown={stop}
+      onMouseDown={stop}
+    >
+      <CanvasButton onClick={() => zoomIn({ duration: 150 })} label="Zoom in">
+        <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden>
+          <path d="M5 12h14M12 5v14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      </CanvasButton>
+      <CanvasButton onClick={() => zoomOut({ duration: 150 })} label="Zoom out">
+        <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden>
+          <path d="M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      </CanvasButton>
+      <CanvasButton
+        onClick={() => fitView({ maxZoom: 1, duration: 200, padding: 0.1 })}
+        label="Fit topology to view"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden fill="none">
+          <path
+            d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </CanvasButton>
+    </div>
+  );
+}
+
+function CanvasButton({
+  onClick,
+  label,
+  children,
+}: {
+  readonly onClick: () => void;
+  readonly label: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className="grid h-7 w-7 place-items-center rounded border border-panel-border bg-panel-header/90 text-terminal-dim transition-colors hover:border-terminal-dim/70 hover:text-terminal-fg focus:outline-none focus:ring-1 focus:ring-terminal-prompt"
+    >
+      {children}
+    </button>
+  );
+}
+
 export function TopologyPanel({
   devices,
   activeDeviceId,
   activePrompt,
   onSelectDevice,
   links,
+  zoomOnScroll = true,
 }: TopologyPanelProps) {
   const handleSelect = useMemo(
     () => (id: string) => onSelectDevice?.(id),
@@ -395,51 +490,57 @@ export function TopologyPanel({
   const canvasMaxWidth = Math.max(rowWidth + 2 * ROW_INSET_X, 340);
 
   return (
-    <div className="w-full bg-panel-bg" style={{ height: CANVAS_HEIGHT }}>
-      <div className="mx-auto h-full" style={{ maxWidth: canvasMaxWidth }}>
-      <ReactFlowProvider>
-      <ReactFlow
-        nodes={nodes}
-        edges={[]}
-        nodeTypes={NODE_TYPES}
-        // Real-sized nodes (zoom locked at 1.0) so click targets stay
-        // mouse-friendly. A wide topology (4+ devices, ~1040px+ in flow space)
-        // overflows the 340px rail — that's what panOnDrag is for. fitView
-        // is intentionally not used: it crushed nodes to ~60×28 px in the
-        // multi-device pilots, making them effectively unclickable.
-        defaultViewport={{ x: ROW_INSET_X, y: ROW_INSET_Y, zoom: 1 }}
-        minZoom={1}
-        maxZoom={1}
-        proOptions={{ hideAttribution: true }}
-        nodesDraggable={false}
-        nodesConnectable={false}
-        // Stays false — enabling React Flow's selection caused its internal
-        // click handler to stopPropagation on node clicks, killing both our
-        // inner button onClick AND onNodeClick. With selectable=false the
-        // inner <button onClick> path works cleanly once the inline
-        // pointer-events:none on `.react-flow__node` is overridden in
-        // `src/index.css` (load-bearing — see the comment there).
-        elementsSelectable={false}
-        zoomOnScroll={false}
-        zoomOnPinch={false}
-        zoomOnDoubleClick={false}
-        // Pan when the row is wider than the rail. React Flow's panOnDrag
-        // captures drag on the background only — clicks on nodes (which
-        // bubble to the inner <button>) are unaffected.
-        panOnDrag={devices.length > 1}
-        panOnScroll={false}
-        preventScrolling={false}
+    <ReactFlowProvider>
+      <div
+        className="relative w-full bg-panel-bg"
+        style={{ height: CANVAS_HEIGHT }}
       >
-        <Background gap={20} size={1} color="#1e2733" />
-        <EdgeOverlay
-          devices={positionedDevices}
-          deviceViews={devices}
-          links={links ?? []}
-        />
-      </ReactFlow>
-      </ReactFlowProvider>
+        <div className="mx-auto h-full" style={{ maxWidth: canvasMaxWidth }}>
+          <ReactFlow
+            nodes={nodes}
+            edges={[]}
+            nodeTypes={NODE_TYPES}
+            // Initial view: identity at zoom=1 with the row inset. Reset is
+            // explicit (the Fit button) — we deliberately don't auto-fit on
+            // mount because that's what produced the historical multi-node
+            // crush; user-initiated fitView in CanvasControls is bounded by
+            // `maxZoom: 1` and the global MIN_ZOOM so it can't reproduce it.
+            defaultViewport={{ x: ROW_INSET_X, y: ROW_INSET_Y, zoom: 1 }}
+            minZoom={MIN_ZOOM}
+            maxZoom={MAX_ZOOM}
+            proOptions={{ hideAttribution: true }}
+            nodesDraggable={false}
+            nodesConnectable={false}
+            // Stays false — enabling React Flow's selection caused its internal
+            // click handler to stopPropagation on node clicks, killing both our
+            // inner button onClick AND onNodeClick. With selectable=false the
+            // inner <button onClick> path works cleanly once the inline
+            // pointer-events:none on `.react-flow__node` is overridden in
+            // `src/index.css` (load-bearing — see the comment there).
+            elementsSelectable={false}
+            // Wheel-zoom behind a prop so embed mode (later) can turn it off
+            // without losing the on-canvas zoom buttons or pinch. Touchpad
+            // pinch + double-click stay independent of this prop.
+            zoomOnScroll={zoomOnScroll}
+            zoomOnPinch={true}
+            zoomOnDoubleClick={false}
+            // Always-on pan: even N=1 can be zoomed past the canvas and need
+            // panning. The Fit button rescues a panned-off topology.
+            panOnDrag={true}
+            panOnScroll={false}
+            preventScrolling={false}
+          >
+            <Background gap={20} size={1} color="#1e2733" />
+            <EdgeOverlay
+              devices={positionedDevices}
+              deviceViews={devices}
+              links={links ?? []}
+            />
+          </ReactFlow>
+        </div>
+        <CanvasControls />
       </div>
-    </div>
+    </ReactFlowProvider>
   );
 }
 
