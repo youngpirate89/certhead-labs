@@ -66,6 +66,10 @@ export interface InterfaceTopologyView {
   readonly status: InterfaceStatus;
   /** Configured IPv4 address (dotted-quad), or null if unassigned. */
   readonly ip: string | null;
+  /** Dotted-quad subnet mask, or null if unassigned. Exposed so the topology
+   *  canvas can derive the network label (CIDR) for a link without importing
+   *  adapter internals. Derived from existing state — no engine-state change. */
+  readonly mask: string | null;
 }
 
 export interface DeviceTopologyView {

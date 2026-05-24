@@ -77,6 +77,7 @@ export const routerAdapter: DeviceAdapter<Session> = {
         name: i.name,
         status: interfaceStatus(i.adminUp, i.ip),
         ip: i.ip,
+        mask: i.mask,
       })),
     };
   },

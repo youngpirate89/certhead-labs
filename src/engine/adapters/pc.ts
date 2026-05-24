@@ -190,6 +190,7 @@ export const pcAdapter: DeviceAdapter<PcSession> = {
           name: session.nic,
           status: !session.nicUp ? 'admin-down' : session.ip ? 'up' : 'no-ip',
           ip: session.ip,
+          mask: session.mask,
         },
       ],
     };

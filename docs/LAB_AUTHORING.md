@@ -54,9 +54,46 @@ shape):
   context the failure sentence doesn't (see §4's "generic-sentence" reasons).
 - `topology: { devices, links }` — `LabDevice[]` and `Link[]`. PCs may carry an initial
   `pc: { ip, mask, gateway }`; routers/switches start blank unless seeded via `setup`.
+  See §2.1 for the link schema and what the canvas does with it.
 - `objectives: LabObjective[]` — see §3.
 - `hints: LabHint[]` — see §5.
 - `setup?` — the seed primitive; see §3.3. Present only on seed-then-break labs.
+
+### 2.1 `Link` — endpoint-aware cables
+
+Each `Link` names the (device, interface) at both ends:
+
+```ts
+links: [
+  { a: { deviceId: 'PC-A', iface: 'Eth0'  }, b: { deviceId: 'R1', iface: 'Gi0/1' } },
+  { a: { deviceId: 'R1',   iface: 'Gi0/0' }, b: { deviceId: 'R2', iface: 'Gi0/0' } },
+  { a: { deviceId: 'R2',   iface: 'Gi0/1' }, b: { deviceId: 'PC-B', iface: 'Eth0' } },
+],
+```
+
+The canvas reads these and renders, per link: a cable between the two device edges, a
+ringed **port LED** at each end anchored at the named interface's side of its device,
+the iface name beside each LED, and the link's **network CIDR** (derived from endpoint
+IP+mask) centered above the cable.
+
+**LED color = pure function of interface state.** Authors don't author it, the engine
+doesn't store it. Both LEDs on a link are **green** iff *both* endpoint interfaces are
+`status: 'up'` (adminUp + IP'd, or — for PCs — `nicUp` + IP'd). If **either** endpoint
+isn't `'up'`, **both** LEDs go red. This is the Packet-Tracer "either-end-down ⇒
+both-ends-red" convention; it's simpler and more honest than amber-one-side, and it
+matches the canonical "lights tell you which cable is broken" diagnostic.
+
+What the LED does NOT cover: L3 correctness. Mismatched /30 subnets on a working L1
+link render with both LEDs green — the L3 break shows up via `canReach` and the ping
+output's failure sentence (§4), not the LED. Keep LED == port-state straight in your
+head: the LED tells you the wire is alive, the failure sentence tells you the packet
+got lost upstream.
+
+The network CIDR at mid-cable is descriptive only — derived from the first endpoint
+with an IP+mask, omitted if neither has one. Don't lean on it for grading.
+
+Free-lab note: the single-device free lab has `links: []`. With no links, the canvas
+emits no LEDs and no network labels — visually identical to its pre-A1.5 render.
 
 ---
 

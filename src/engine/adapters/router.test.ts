@@ -52,8 +52,8 @@ describe('routerAdapter', () => {
       hostname: 'R1',
       platform: 'ISR4321',
       interfaces: [
-        { id: 'Gi0/0', name: 'GigabitEthernet0/0', status: 'admin-down', ip: null },
-        { id: 'Gi0/1', name: 'GigabitEthernet0/1', status: 'admin-down', ip: null },
+        { id: 'Gi0/0', name: 'GigabitEthernet0/0', status: 'admin-down', ip: null, mask: null },
+        { id: 'Gi0/1', name: 'GigabitEthernet0/1', status: 'admin-down', ip: null, mask: null },
       ],
     });
   });
@@ -67,6 +67,7 @@ describe('routerAdapter', () => {
       name: 'GigabitEthernet0/0',
       status: 'up',
       ip: '192.168.1.1',
+      mask: '255.255.255.0',
     });
     // Gi0/1 untouched.
     expect(view.interfaces[1].status).toBe('admin-down');

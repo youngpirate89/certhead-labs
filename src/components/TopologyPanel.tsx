@@ -33,6 +33,7 @@ import type {
   InterfaceStatus,
 } from '@/engine/adapters/types';
 import type { Link } from '@/engine/types';
+import { maskLength, networkAddress } from '@/engine/adapters/ios/routing';
 export type { DeviceTopologyView, InterfaceTopologyView, InterfaceStatus };
 
 interface TopologyPanelProps {
@@ -98,43 +99,146 @@ function layoutNodes(
   }));
 }
 
+// Cable + LED palette. LED colors mirror PortIndicator's "up" (terminal-prompt
+// cyan) and a clear "down" red — the link LEDs are the canvas's primary
+// diagnostic signal so the contrast has to be unmistakable.
+const CABLE_STROKE = '#5a6675';
+const LED_GREEN = '#5eead4';
+const LED_RED = '#ef4444';
+const LED_RING = '#3a4655';
+const LABEL_COLOR = '#7c8a9c';
+
+const LED_OUTER_R = 5;
+const LED_INNER_R = 3;
+/** Vertical offset (above the LED) where the iface name renders. */
+const IFACE_LABEL_DY = 9;
+/** Vertical offset (above the cable midpoint) where the network CIDR renders. */
+const NETWORK_LABEL_DY = 9;
+
+interface RenderEndpoint {
+  readonly deviceId: string;
+  readonly ifaceId: string;
+  /** Pixel coords in flow space — LED center sits exactly here. */
+  readonly x: number;
+  readonly y: number;
+  /** Where the iface label anchors relative to the LED. */
+  readonly labelAnchor: 'start' | 'end';
+}
+
+interface RenderLink {
+  readonly key: string;
+  readonly left: RenderEndpoint;
+  readonly right: RenderEndpoint;
+  /** True iff BOTH endpoint interfaces have status 'up'. Drives LED color on
+   *  both ends — the "either-down ⇒ both red" rule reduces to a single bool. */
+  readonly linkUp: boolean;
+  /** CIDR network (e.g. `192.168.12.0/30`) derived from whichever endpoint has
+   *  an IP+mask, or null if neither does. Descriptive only — LED carries the
+   *  correctness signal. */
+  readonly network: string | null;
+}
+
+/** Derive the CIDR network from the first endpoint that has an IP+mask pair.
+ *  Returns null when neither endpoint is configured enough to compute one. */
+function deriveNetwork(
+  a: InterfaceTopologyView,
+  b: InterfaceTopologyView,
+): string | null {
+  const src = a.ip && a.mask ? a : b.ip && b.mask ? b : null;
+  if (!src || !src.ip || !src.mask) return null;
+  return `${networkAddress(src.ip, src.mask)}/${maskLength(src.mask)}`;
+}
+
 /**
- * EdgeOverlay — draws straight lines between authored device endpoints as an
- * SVG rendered inside ReactFlow's viewport portal. The portal inherits the
- * viewport transform, so the lines track node positions across fitView / pan /
- * zoom. Avoids React Flow v12's edge-rendering choreography (handle-bound
+ * EdgeOverlay — draws cables + port LEDs + labels for every authored link as
+ * an SVG rendered inside ReactFlow's viewport portal. The portal inherits the
+ * viewport transform, so geometry tracks node positions across pan / zoom.
+ *
+ * Each link is rendered as: a horizontal cable between the two device edges,
+ * a ringed LED at each end (anchored at the named interface's side of its
+ * device), the iface name above each LED, and the network CIDR (derived from
+ * endpoint state) centered above the cable. LED color is a pure function of
+ * endpoint interface status — never stored, always derived. The Packet-Tracer
+ * "either-end-down ⇒ both red" rule reduces to `aStatus === 'up' && bStatus === 'up'`.
+ *
+ * Avoids React Flow v12's edge-rendering choreography (handle-bound
  * measurement) which is sensitive to externally-controlled node arrays —
- * 3b can promote this to React Flow's edge system once we've moved nodes
- * into a useNodesState/applyNodeChanges-managed store.
+ * a later pass can promote this to React Flow's edge system once nodes
+ * are in a useNodesState/applyNodeChanges-managed store.
  */
 function EdgeOverlay({
   devices,
+  deviceViews,
   links,
 }: {
   devices: readonly { id: string; x: number; y: number }[];
+  deviceViews: readonly DeviceTopologyView[];
   links: readonly Link[];
 }) {
   if (links.length === 0) return null;
   const byId = new Map(devices.map((d) => [d.id, d]));
+  const viewById = new Map(deviceViews.map((v) => [v.id, v]));
 
-  // Compute the bounding box of all endpoints so we can absolutely-position the
-  // SVG inside the viewport portal at the right offset. ViewportPortal places
-  // children at flow-space coordinates already; we just need the SVG itself.
-  const lines = links
-    .map((l) => {
-      const a = byId.get(l.a.deviceId);
-      const b = byId.get(l.b.deviceId);
-      if (!a || !b) return null;
-      const yMid = a.y + NODE_HEIGHT / 2;
-      return { x1: a.x + NODE_WIDTH, y1: yMid, x2: b.x, y2: yMid };
-    })
-    .filter((v): v is { x1: number; y1: number; x2: number; y2: number } => v !== null);
-  if (lines.length === 0) return null;
+  const renderLinks: RenderLink[] = [];
+  for (let i = 0; i < links.length; i++) {
+    const link = links[i];
+    const aDev = byId.get(link.a.deviceId);
+    const bDev = byId.get(link.b.deviceId);
+    if (!aDev || !bDev) continue;
+    const aView = viewById.get(link.a.deviceId);
+    const bView = viewById.get(link.b.deviceId);
+    if (!aView || !bView) continue;
+    const aIface = aView.interfaces.find((iv) => iv.id === link.a.iface);
+    const bIface = bView.interfaces.find((iv) => iv.id === link.b.iface);
+    if (!aIface || !bIface) continue;
 
-  const minX = Math.min(...lines.flatMap((l) => [l.x1, l.x2]));
-  const maxX = Math.max(...lines.flatMap((l) => [l.x1, l.x2]));
-  const minY = Math.min(...lines.flatMap((l) => [l.y1, l.y2])) - 1;
-  const maxY = Math.max(...lines.flatMap((l) => [l.y1, l.y2])) + 1;
+    // Order endpoints by x so "left" is always the smaller-x device. Each LED
+    // anchors at its OWN device's facing edge: right edge of the left device,
+    // left edge of the right device.
+    const aIsLeft = aDev.x <= bDev.x;
+    const leftDev = aIsLeft ? aDev : bDev;
+    const rightDev = aIsLeft ? bDev : aDev;
+    const leftLink = aIsLeft ? link.a : link.b;
+    const rightLink = aIsLeft ? link.b : link.a;
+    const yMid = leftDev.y + NODE_HEIGHT / 2;
+    const left: RenderEndpoint = {
+      deviceId: leftLink.deviceId,
+      ifaceId: leftLink.iface,
+      x: leftDev.x + NODE_WIDTH,
+      y: yMid,
+      labelAnchor: 'start',
+    };
+    const right: RenderEndpoint = {
+      deviceId: rightLink.deviceId,
+      ifaceId: rightLink.iface,
+      x: rightDev.x,
+      y: yMid,
+      labelAnchor: 'end',
+    };
+    const linkUp = aIface.status === 'up' && bIface.status === 'up';
+    const network = deriveNetwork(aIface, bIface);
+    renderLinks.push({
+      key: `${left.deviceId}:${left.ifaceId}-${right.deviceId}:${right.ifaceId}-${i}`,
+      left,
+      right,
+      linkUp,
+      network,
+    });
+  }
+  if (renderLinks.length === 0) return null;
+
+  // Bounding box of all rendered geometry — LED centers + label headroom +
+  // the cable itself. The SVG is absolutely positioned at (minX, minY) inside
+  // the viewport portal, which already inherits the flow's transform.
+  const xs = renderLinks.flatMap((l) => [l.left.x, l.right.x]);
+  const ys = renderLinks.flatMap((l) => [l.left.y, l.right.y]);
+  const padTop = NETWORK_LABEL_DY + IFACE_LABEL_DY + 8;
+  const padBottom = LED_OUTER_R + 2;
+  const padX = LED_OUTER_R + 24; // room for iface label text past the LED
+  const minX = Math.min(...xs) - padX;
+  const maxX = Math.max(...xs) + padX;
+  const minY = Math.min(...ys) - padTop;
+  const maxY = Math.max(...ys) + padBottom;
   const w = maxX - minX;
   const h = maxY - minY;
 
@@ -152,19 +256,82 @@ function EdgeOverlay({
         }}
         aria-hidden
       >
-        {lines.map((l, i) => (
-          <line
-            key={i}
-            x1={l.x1 - minX}
-            y1={l.y1 - minY}
-            x2={l.x2 - minX}
-            y2={l.y2 - minY}
-            stroke="#5a6675"
-            strokeWidth={1.5}
-          />
-        ))}
+        {renderLinks.map((l) => {
+          const fill = l.linkUp ? LED_GREEN : LED_RED;
+          const midX = (l.left.x + l.right.x) / 2;
+          return (
+            <g key={l.key} data-link-key={l.key}>
+              <line
+                x1={l.left.x - minX}
+                y1={l.left.y - minY}
+                x2={l.right.x - minX}
+                y2={l.right.y - minY}
+                stroke={CABLE_STROKE}
+                strokeWidth={1.5}
+              />
+              <PortLed endpoint={l.left} linkUp={l.linkUp} fill={fill} ox={minX} oy={minY} />
+              <PortLed endpoint={l.right} linkUp={l.linkUp} fill={fill} ox={minX} oy={minY} />
+              {l.network ? (
+                <text
+                  x={midX - minX}
+                  y={l.left.y - minY - NETWORK_LABEL_DY}
+                  textAnchor="middle"
+                  fontSize={9}
+                  fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+                  fill={LABEL_COLOR}
+                  data-link-network={l.network}
+                >
+                  {l.network}
+                </text>
+              ) : null}
+            </g>
+          );
+        })}
       </svg>
     </ViewportPortal>
+  );
+}
+
+/** A single port LED + its iface name label. Pure presentational — color is
+ *  derived from the link's overall state by the caller. */
+function PortLed({
+  endpoint,
+  linkUp,
+  fill,
+  ox,
+  oy,
+}: {
+  readonly endpoint: RenderEndpoint;
+  readonly linkUp: boolean;
+  readonly fill: string;
+  readonly ox: number;
+  readonly oy: number;
+}) {
+  const cx = endpoint.x - ox;
+  const cy = endpoint.y - oy;
+  // Iface label sits just above the LED, anchored to the OUTSIDE so the text
+  // grows away from the cable rather than overlapping it.
+  const labelX =
+    endpoint.labelAnchor === 'start' ? cx + LED_OUTER_R + 3 : cx - LED_OUTER_R - 3;
+  const labelY = cy - IFACE_LABEL_DY;
+  return (
+    <g
+      data-led-endpoint={`${endpoint.deviceId}:${endpoint.ifaceId}`}
+      data-led-up={linkUp ? 'true' : 'false'}
+    >
+      <circle cx={cx} cy={cy} r={LED_OUTER_R} fill="none" stroke={LED_RING} strokeWidth={1.5} />
+      <circle cx={cx} cy={cy} r={LED_INNER_R} fill={fill} />
+      <text
+        x={labelX}
+        y={labelY}
+        textAnchor={endpoint.labelAnchor}
+        fontSize={9}
+        fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+        fill={LABEL_COLOR}
+      >
+        {endpoint.ifaceId}
+      </text>
+    </g>
   );
 }
 
@@ -236,7 +403,11 @@ export function TopologyPanel({
         preventScrolling={false}
       >
         <Background gap={20} size={1} color="#1e2733" />
-        <EdgeOverlay devices={positionedDevices} links={links ?? []} />
+        <EdgeOverlay
+          devices={positionedDevices}
+          deviceViews={devices}
+          links={links ?? []}
+        />
       </ReactFlow>
       </ReactFlowProvider>
     </div>
