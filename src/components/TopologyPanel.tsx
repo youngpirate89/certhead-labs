@@ -110,10 +110,17 @@ const LABEL_COLOR = '#7c8a9c';
 
 const LED_OUTER_R = 5;
 const LED_INNER_R = 3;
-/** Vertical offset (above the LED) where the iface name renders. */
-const IFACE_LABEL_DY = 9;
-/** Vertical offset (above the cable midpoint) where the network CIDR renders. */
-const NETWORK_LABEL_DY = 9;
+const LABEL_FONT_SIZE = 9;
+/** Vertical baseline offset for the iface name — ABOVE the cable. The LED
+ *  sits ON the cable, so the offset has to clear the LED's outer ring plus the
+ *  font's full ascent (LABEL_FONT_SIZE) for a visible gap. */
+const IFACE_LABEL_OFFSET = 12;
+/** Vertical baseline offset for the network CIDR — BELOW the cable. Offset is
+ *  intentionally larger than IFACE_LABEL_OFFSET because BELOW the cable the
+ *  baseline measures to the TOP of the glyph: we need LED_OUTER_R + ascent
+ *  clearance for the digits to clear the LED. The label sitting BELOW (rather
+ *  than ABOVE, alongside the iface labels) is the A1.6 fix — see commit. */
+const NETWORK_LABEL_OFFSET = 16;
 
 interface RenderEndpoint {
   readonly deviceId: string;
@@ -227,14 +234,17 @@ function EdgeOverlay({
   }
   if (renderLinks.length === 0) return null;
 
-  // Bounding box of all rendered geometry — LED centers + label headroom +
-  // the cable itself. The SVG is absolutely positioned at (minX, minY) inside
-  // the viewport portal, which already inherits the flow's transform.
+  // Bounding box of all rendered geometry — cable + LEDs + the iface labels
+  // ABOVE the cable + the CIDR label BELOW the cable. Allowances:
+  //   padTop    = iface label baseline above the cable + font ascent + slack
+  //   padBottom = CIDR label baseline below the cable + descender slack
+  //   padX      = LED + iface label runs inward but a CIDR centered on a short
+  //               link can extend a few px past the LEDs; allow for that here.
   const xs = renderLinks.flatMap((l) => [l.left.x, l.right.x]);
   const ys = renderLinks.flatMap((l) => [l.left.y, l.right.y]);
-  const padTop = NETWORK_LABEL_DY + IFACE_LABEL_DY + 8;
-  const padBottom = LED_OUTER_R + 2;
-  const padX = LED_OUTER_R + 24; // room for iface label text past the LED
+  const padTop = IFACE_LABEL_OFFSET + LABEL_FONT_SIZE + 4;
+  const padBottom = NETWORK_LABEL_OFFSET + 4;
+  const padX = LED_OUTER_R + 24;
   const minX = Math.min(...xs) - padX;
   const maxX = Math.max(...xs) + padX;
   const minY = Math.min(...ys) - padTop;
@@ -274,9 +284,9 @@ function EdgeOverlay({
               {l.network ? (
                 <text
                   x={midX - minX}
-                  y={l.left.y - minY - NETWORK_LABEL_DY}
+                  y={l.left.y - minY + NETWORK_LABEL_OFFSET}
                   textAnchor="middle"
-                  fontSize={9}
+                  fontSize={LABEL_FONT_SIZE}
                   fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
                   fill={LABEL_COLOR}
                   data-link-network={l.network}
@@ -309,11 +319,14 @@ function PortLed({
 }) {
   const cx = endpoint.x - ox;
   const cy = endpoint.y - oy;
-  // Iface label sits just above the LED, anchored to the OUTSIDE so the text
-  // grows away from the cable rather than overlapping it.
+  // Iface label sits ABOVE the cable (the CIDR sits BELOW — the two never
+  // share a vertical slot, the A1.6 collision fix). Horizontal anchor grows
+  // INWARD from the LED so the text stays inside the link span; for a 4-5
+  // char iface name and the 80px node-gap, this leaves a ~10px gap between
+  // the two iface labels at the smallest link width.
   const labelX =
     endpoint.labelAnchor === 'start' ? cx + LED_OUTER_R + 3 : cx - LED_OUTER_R - 3;
-  const labelY = cy - IFACE_LABEL_DY;
+  const labelY = cy - IFACE_LABEL_OFFSET;
   return (
     <g
       data-led-endpoint={`${endpoint.deviceId}:${endpoint.ifaceId}`}
@@ -325,9 +338,10 @@ function PortLed({
         x={labelX}
         y={labelY}
         textAnchor={endpoint.labelAnchor}
-        fontSize={9}
+        fontSize={LABEL_FONT_SIZE}
         fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
         fill={LABEL_COLOR}
+        data-iface-label={`${endpoint.deviceId}:${endpoint.ifaceId}`}
       >
         {endpoint.ifaceId}
       </text>

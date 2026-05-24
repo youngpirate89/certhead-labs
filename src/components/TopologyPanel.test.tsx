@@ -261,4 +261,42 @@ describe('TopologyPanel', () => {
     expect(container.querySelector('[data-link-network]')).toBeNull();
     expect(container.querySelector('[data-link-key]')).toBeNull();
   });
+
+  // A1.6: iface labels and CIDR must occupy DIFFERENT vertical slots.
+  // Regression test for the bug where both were anchored above the cable at
+  // the same y and visually stacked on top of each other on short links.
+  it('iface labels and CIDR label occupy separate vertical slots (iface above, CIDR below)', () => {
+    const { r1, r2 } = twoRoutersWithLink({ r2Up: true });
+    const { container } = render(
+      <TopologyPanel
+        devices={[r1, r2]}
+        activeDeviceId="R1"
+        links={[
+          { a: { deviceId: 'R1', iface: 'Gi0/0' }, b: { deviceId: 'R2', iface: 'Gi0/0' } },
+        ]}
+      />,
+    );
+
+    const ifaceLeft = container.querySelector('[data-iface-label="R1:Gi0/0"]');
+    const ifaceRight = container.querySelector('[data-iface-label="R2:Gi0/0"]');
+    const cidr = container.querySelector('[data-link-network="192.168.12.0/30"]');
+    expect(ifaceLeft).not.toBeNull();
+    expect(ifaceRight).not.toBeNull();
+    expect(cidr).not.toBeNull();
+
+    const yOf = (el: Element | null) => Number(el!.getAttribute('y'));
+    const ifaceLeftY = yOf(ifaceLeft);
+    const ifaceRightY = yOf(ifaceRight);
+    const cidrY = yOf(cidr);
+
+    // Both iface labels share the SAME y (they're on the same horizontal slot
+    // above the cable, just anchored at opposite ends).
+    expect(ifaceLeftY).toBe(ifaceRightY);
+    // The CIDR is BELOW the cable; iface is ABOVE — so CIDR y > iface y. Gap
+    // must be wide enough that the 9px font on each side doesn't visually
+    // touch. Both glyphs ~9px tall, so >= ~20px is the floor for "clearly
+    // separate slots."
+    expect(cidrY).toBeGreaterThan(ifaceLeftY);
+    expect(cidrY - ifaceLeftY).toBeGreaterThanOrEqual(20);
+  });
 });
