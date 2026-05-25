@@ -12,7 +12,7 @@
  */
 import type { DeviceState } from './state';
 
-export type RouteSource = 'connected' | 'static';
+export type RouteSource = 'connected' | 'static' | 'ospf';
 
 export interface Route {
   /** Network address (host bits cleared), dotted-quad. */
@@ -24,8 +24,11 @@ export interface Route {
    *  static routes that point at an interface rather than an IP. */
   readonly egressIface?: string;
   readonly source: RouteSource;
-  /** Per §3: connected=0, static=1 (ospf=110 in 3d). */
+  /** Per §3: connected=0, static=1, ospf=110. */
   readonly adminDistance: number;
+  /** OSPF cost — only present when source==='ospf'. Render in [AD/metric]
+   *  brackets so the show-ip-route line reads `[110/1]`. */
+  readonly metric?: number;
 }
 
 // ---------- IPv4 bit utilities ----------

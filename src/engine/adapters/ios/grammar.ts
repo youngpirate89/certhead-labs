@@ -20,6 +20,13 @@ const showSubtree: CommandNode = {
       children: {
         interface: { children: { brief: done('Brief interface summary') } },
         route: done('IP routing table'),
+        ospf: {
+          terminal: true,
+          help: 'OSPF process summary',
+          children: {
+            neighbor: done('OSPF neighbor table'),
+          },
+        },
       },
     },
     interfaces: done('Interface status and configuration'),
@@ -70,6 +77,15 @@ const configMode: CommandNode = {
       help: 'IP configuration commands',
       children: { route: ipRouteSubtree },
     },
+    router: {
+      help: 'Enable a routing process',
+      children: {
+        ospf: {
+          help: 'Open Shortest Path First (OSPF)',
+          argument: arg('pid', done('Enter OSPF process configuration')),
+        },
+      },
+    },
     no: {
       help: 'Negate a command',
       children: {
@@ -78,6 +94,33 @@ const configMode: CommandNode = {
       },
     },
     exit: done('Exit from configuration mode'),
+    end: done('Return to privileged EXEC'),
+  },
+};
+
+const networkSubtree: CommandNode = {
+  help: 'Enable OSPF on an interface and place it in an area',
+  argument: arg('prefix', {
+    argument: arg('wildcard', {
+      children: {
+        area: {
+          argument: arg('area', done('Apply network statement')),
+        },
+      },
+    }),
+  }),
+};
+
+const configRouterMode: CommandNode = {
+  children: {
+    network: networkSubtree,
+    no: {
+      help: 'Negate a command',
+      children: {
+        network: networkSubtree,
+      },
+    },
+    exit: done('Exit OSPF configuration'),
     end: done('Return to privileged EXEC'),
   },
 };
@@ -125,6 +168,7 @@ const GRAMMARS: Record<Mode, CommandNode> = {
   priv: privMode,
   config: configMode,
   'config-if': configIfMode,
+  'config-router': configRouterMode,
 };
 
 export function grammarFor(mode: Mode): CommandNode {

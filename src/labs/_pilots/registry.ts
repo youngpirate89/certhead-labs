@@ -21,6 +21,7 @@
  * DEV gate keeps them out of the prod bundle either way.
  */
 import type { Lab } from '@/engine/types';
+import { lab05OspfSingleArea } from '@/labs/ccna/lab-05-ospf-single-area';
 import { tshootReturnRoute } from '@/labs/ccna/tshoot-return-route';
 import { tshootWrongNextHop } from '@/labs/ccna/tshoot-wrong-next-hop';
 import { tshootWanSubnetMismatch } from '@/labs/ccna/tshoot-wan-subnet-mismatch';
@@ -41,6 +42,7 @@ const PILOTS: readonly PilotRegistration[] = [
   { slug: 'tshoot-wrong-next-hop', lab: tshootWrongNextHop },
   { slug: 'tshoot-wan-subnet-mismatch', lab: tshootWanSubnetMismatch },
   { slug: 'tshoot-egress-down', lab: tshootEgressDown },
+  { slug: 'ccna-lab05-ospf-single-area', lab: lab05OspfSingleArea },
 ];
 
 /** Resolve a pilot slug to its lab, or undefined if not registered. */

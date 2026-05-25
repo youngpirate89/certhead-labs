@@ -19,6 +19,7 @@ import { routerAdapter } from './adapters/router';
 import { pcAdapter, type PcSession } from './adapters/pc';
 import type { CommandOutput, DeviceAdapter, DeviceKind } from './adapters/types';
 import type { Session as RouterSession } from './adapters/ios/state';
+import { recomputeOspf } from './adapters/ios/ospf';
 import type { Lab, LabDevice, Link } from './types';
 
 /** Discriminated union of every adapter's session. 3b: router + pc. */
@@ -77,11 +78,20 @@ export function initLabSession(lab: Lab): LabSession {
     }
   }
 
-  return refreshNicUp({
+  return refreshDerivedState({
     devices,
     activeDeviceId: lab.topology.devices[0].id,
     links: lab.topology.links,
   });
+}
+
+/** Run every "derived-from-state" pass in dependency order: protocolUp/nicUp
+ *  first (interface link health), then OSPF adjacency (which depends on the
+ *  fresh adminUp + the just-updated peer adminUp), then a second nicUp pass
+ *  is unnecessary because OSPF doesn't change interface state. */
+function refreshDerivedState(lab: LabSession): LabSession {
+  const linkUp = refreshNicUp(lab);
+  return refreshOspf(linkUp);
 }
 
 /** Apply a list of seed commands to one device with `record:false`. Router
@@ -129,7 +139,7 @@ export function applyToActive(
     ...lab,
     devices: { ...lab.devices, [id]: result.session },
   };
-  return { session: refreshNicUp(next), output: result.output };
+  return { session: refreshDerivedState(next), output: result.output };
 }
 
 /** Kind-dispatch helper so TS narrows on the discriminator. */
@@ -189,26 +199,106 @@ export function activePrompt(lab: LabSession): string {
 }
 
 /**
- * Refresh `nicUp` on every PC in the LabSession.
+ * Refresh `nicUp` on every PC AND `protocolUp` on every router interface.
  *
- * A PC has a single NIC. Its NIC is up iff a link in the topology cables that
- * NIC to a router interface that is currently admin-up. This is read by
- * canReach (3b-c5) to short-circuit source-side delivery checks.
+ * A PC's NIC is up iff a link cables it to a router interface that is
+ * currently admin-up — canReach (§4) reads this to short-circuit source-side
+ * delivery.
  *
- * Pure: returns a new LabSession; mutates nothing.
+ * A router interface's `protocolUp` is the IOS "line protocol" state:
+ *   - admin-down → already false in practice; we set it explicitly anyway so
+ *                  show ip int brief reads the same field for both columns
+ *   - cabled to a router peer whose interface is admin-down → false
+ *     (this is the cold-audit Fix 4: real IOS shows up/down in that case)
+ *   - cabled to a PC → true (PCs don't admin-down their NICs in our model)
+ *   - uncabled → false (no carrier)
+ *
+ * Pure: returns a new LabSession; mutates nothing. Single pass per refresh.
  */
 function refreshNicUp(lab: LabSession): LabSession {
   let mutated = false;
   const devices: Record<string, DeviceSession> = { ...lab.devices };
   for (const [id, s] of Object.entries(lab.devices)) {
-    if (s.kind !== 'pc') continue;
-    const up = pcNicIsUp(lab, id, s.nic);
-    if (s.nicUp !== up) {
-      devices[id] = { ...s, nicUp: up };
+    if (s.kind === 'pc') {
+      const up = pcNicIsUp(lab, id, s.nic);
+      if (s.nicUp !== up) {
+        devices[id] = { ...s, nicUp: up };
+        mutated = true;
+      }
+    } else if (s.kind === 'router') {
+      const next = refreshRouterProtocolUp(lab, s);
+      if (next !== s) {
+        devices[id] = next;
+        mutated = true;
+      }
+    }
+  }
+  return mutated ? { ...lab, devices } : lab;
+}
+
+/** Recompute OSPF neighbors + injected routes across every router in the
+ *  topology, in one synchronous pass. Pure: returns the same LabSession if
+ *  nothing changed. Always runs AFTER the protocolUp/nicUp pass — adjacency
+ *  formation depends on the freshly-evaluated adminUp/peer state.
+ *
+ *  Failure mode: a topology with zero routers (PCs only) skips the recompute
+ *  early. The hot path for the common 1- or 2-router lab is two map walks. */
+function refreshOspf(lab: LabSession): LabSession {
+  const routers = new Map<string, RouterSession>();
+  for (const [id, s] of Object.entries(lab.devices)) {
+    if (s.kind === 'router') routers.set(id, s);
+  }
+  if (routers.size === 0) return lab;
+  const updated = recomputeOspf(routers, lab.links);
+  let mutated = false;
+  const devices: Record<string, DeviceSession> = { ...lab.devices };
+  for (const [id, prev] of routers) {
+    const next = updated.get(id);
+    if (next && next !== prev) {
+      devices[id] = next;
       mutated = true;
     }
   }
   return mutated ? { ...lab, devices } : lab;
+}
+
+/** Recompute `protocolUp` for every interface on one router. Returns the
+ *  same session if nothing changed (lets the outer refresh skip a clone). */
+function refreshRouterProtocolUp(lab: LabSession, s: RouterSession): RouterSession {
+  let mutated = false;
+  const interfaces: Record<string, RouterSession['device']['interfaces'][string]> = {
+    ...s.device.interfaces,
+  };
+  for (const [ifaceId, iface] of Object.entries(s.device.interfaces)) {
+    const up = ifaceProtocolUp(lab, s.device.id, ifaceId, iface.adminUp);
+    if (iface.protocolUp !== up) {
+      interfaces[ifaceId] = { ...iface, protocolUp: up };
+      mutated = true;
+    }
+  }
+  if (!mutated) return s;
+  return { ...s, device: { ...s.device, interfaces } };
+}
+
+/** True when the router interface's line protocol is up — admin-up locally,
+ *  cabled, and the peer's interface is admin-up (or the peer is a PC). */
+function ifaceProtocolUp(
+  lab: LabSession,
+  deviceId: string,
+  iface: string,
+  adminUp: boolean,
+): boolean {
+  if (!adminUp) return false;
+  for (const link of lab.links) {
+    const peer = matchEndpoint(link, deviceId, iface);
+    if (!peer) continue;
+    const neighbor = lab.devices[peer.deviceId];
+    if (!neighbor) return false;
+    if (neighbor.kind === 'pc') return true;
+    const peerIface = neighbor.device.interfaces[peer.iface];
+    return peerIface ? peerIface.adminUp : false;
+  }
+  return false; // uncabled
 }
 
 /** Resolve the neighbor of a PC's NIC and report whether the neighbor's

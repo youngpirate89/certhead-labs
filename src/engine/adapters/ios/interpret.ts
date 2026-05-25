@@ -9,6 +9,7 @@ import {
   isValidMask,
   prompt as promptFor,
   routingTable,
+  deriveRouterId,
 } from './state';
 import { type Route, maskLength, networkAddress } from './routing';
 import type {
@@ -29,7 +30,7 @@ const out = (...lines: string[]): CommandOutput[] =>
 
 /** Config-family modes — the contexts where `do <exec-cmd>` is accepted. */
 function isConfigFamily(mode: Mode): boolean {
-  return mode === 'config' || mode === 'config-if';
+  return mode === 'config' || mode === 'config-if' || mode === 'config-router';
 }
 
 /**
@@ -269,6 +270,8 @@ function dispatch(
       if (s.mode === 'config-if') {
         s.mode = 'config';
         s.currentInterface = null;
+      } else if (s.mode === 'config-router') {
+        s.mode = 'config';
       } else if (s.mode === 'config') {
         s.mode = 'priv';
       } else if (s.mode === 'priv') {
@@ -280,6 +283,14 @@ function dispatch(
       s.mode = 'priv';
       s.currentInterface = null;
       return { session: s, output: [] };
+
+    case 'router':
+      // command = ['router', 'ospf'], args.pid = process id
+      if (command[1] === 'ospf') return enterRouterOspf(s, args.pid);
+      return { session: s, output: err('% Unknown command.') };
+
+    case 'network':
+      return addOspfNetwork(s, args.prefix, args.wildcard, args.area);
 
     case 'hostname':
       s.device.hostname = args.name;
@@ -375,6 +386,8 @@ function negate(s: Session, command: string[], args: Record<string, string>): Ap
         s.device.interfaces[s.currentInterface].mask = null;
       }
       return { session: s, output: [] };
+    case 'network':
+      return removeOspfNetwork(s, args.prefix, args.wildcard, args.area);
     default:
       return { session: s, output: err('% Incomplete command.') };
   }
@@ -454,12 +467,104 @@ function removeStaticRoute(
   return { session: s, output: [] };
 }
 
+function enterRouterOspf(s: Session, pidArg: string): ApplyResult {
+  const pid = Number.parseInt(pidArg, 10);
+  if (!Number.isFinite(pid) || pid < 1 || pid > 65535 || String(pid) !== pidArg) {
+    return { session: s, output: err(`% Invalid input detected at "${pidArg}".`) };
+  }
+  s.mode = 'config-router';
+  // First entry into the process: stamp the process id and derive router-id.
+  // Re-entering with the same pid is idempotent. Re-entering with a
+  // DIFFERENT pid would replace it in real IOS; the engine matches that.
+  if (s.device.ospf.process !== pid) {
+    s.device.ospf.process = pid;
+    s.device.ospf.routerId = deriveRouterId(s.device);
+    // Changing process id clears any prior network statements + neighbors —
+    // real IOS would refuse to start a second process, but for the engine
+    // we keep the model simple: only one OSPF process at a time.
+    s.device.ospf.networks = [];
+    s.device.ospf.neighbors = new Map();
+  }
+  return { session: s, output: [] };
+}
+
+/** Validate a wildcard mask — bits set in `wildcard` are "match any" bits.
+ *  Accept any dotted-quad whose octets are 0-255; unlike subnet masks IOS
+ *  does not require a contiguous mask. */
+function isValidWildcard(value: string): boolean {
+  return isValidIpv4(value);
+}
+
+function addOspfNetwork(
+  s: Session,
+  prefix: string,
+  wildcard: string,
+  areaArg: string,
+): ApplyResult {
+  if (!isValidIpv4(prefix)) {
+    return { session: s, output: err(`% Invalid input detected at "${prefix}".`) };
+  }
+  if (!isValidWildcard(wildcard)) {
+    return { session: s, output: err(`% Invalid input detected at "${wildcard}".`) };
+  }
+  const area = Number.parseInt(areaArg, 10);
+  if (!Number.isFinite(area) || area < 0 || String(area) !== areaArg) {
+    return { session: s, output: err(`% Invalid input detected at "${areaArg}".`) };
+  }
+  // Dedup — identical entries collapse, matching IOS.
+  const dupe = s.device.ospf.networks.find(
+    (n) => n.prefix === prefix && n.wildcard === wildcard && n.area === area,
+  );
+  if (!dupe) {
+    s.device.ospf.networks = [
+      ...s.device.ospf.networks,
+      { prefix, wildcard, area },
+    ];
+    // Router-id may not have been derivable when the process was created (no
+    // IPs yet). Re-derive on each network statement so a topology that gets
+    // IPs after `router ospf` still ends up with a valid id.
+    if (s.device.ospf.routerId === null) {
+      s.device.ospf.routerId = deriveRouterId(s.device);
+    }
+  }
+  return { session: s, output: [] };
+}
+
+function removeOspfNetwork(
+  s: Session,
+  prefix: string,
+  wildcard: string,
+  areaArg: string,
+): ApplyResult {
+  if (!isValidIpv4(prefix) || !isValidWildcard(wildcard)) {
+    return { session: s, output: err('% Invalid input.') };
+  }
+  const area = Number.parseInt(areaArg, 10);
+  if (!Number.isFinite(area) || area < 0) {
+    return { session: s, output: err('% Invalid input.') };
+  }
+  const before = s.device.ospf.networks.length;
+  s.device.ospf.networks = s.device.ospf.networks.filter(
+    (n) => !(n.prefix === prefix && n.wildcard === wildcard && n.area === area),
+  );
+  if (s.device.ospf.networks.length === before) {
+    return { session: s, output: err('% Not found.') };
+  }
+  return { session: s, output: [] };
+}
+
 function show(s: Session, command: string[]): ApplyResult {
   // command = ['show', ...]
   const what = command[1];
   if (what === 'ip') {
-    // `show ip interface brief` vs `show ip route`.
+    // `show ip interface brief` vs `show ip route` vs `show ip ospf [neighbor]`.
     if (command[2] === 'route') return { session: s, output: out(...showIpRoute(s)) };
+    if (command[2] === 'ospf') {
+      if (command[3] === 'neighbor') {
+        return { session: s, output: out(...showIpOspfNeighbor(s)) };
+      }
+      return { session: s, output: out(...showIpOspf(s)) };
+    }
     return { session: s, output: out(...showIpIntBrief(s)) };
   }
   if (what === 'interfaces') return { session: s, output: out(...showInterfaces(s)) };
@@ -470,7 +575,7 @@ function show(s: Session, command: string[]): ApplyResult {
 
 function showIpRoute(s: Session): string[] {
   const lines: string[] = [
-    'Codes: C - connected, S - static',
+    'Codes: C - connected, S - static, O - OSPF',
     '',
   ];
   const table = routingTable(s);
@@ -482,12 +587,18 @@ function showIpRoute(s: Session): string[] {
   // simple — one line per route, no "is variably subnetted" verbiage.
   for (const r of table) {
     const cidr = maskLength(r.mask);
-    const code = r.source === 'connected' ? 'C' : 'S';
+    const code = routeCode(r.source);
     if (r.source === 'connected') {
       const ifaceName = r.egressIface
         ? fullInterfaceName(r.egressIface)
         : 'unknown';
       lines.push(`${code}    ${r.prefix}/${cidr} is directly connected, ${ifaceName}`);
+    } else if (r.source === 'ospf' && r.nextHop && r.egressIface) {
+      const ifaceName = fullInterfaceName(r.egressIface);
+      const metric = r.metric ?? 1;
+      lines.push(
+        `${code}    ${r.prefix}/${cidr} [${r.adminDistance}/${metric}] via ${r.nextHop}, ${ifaceName}`,
+      );
     } else if (r.nextHop) {
       lines.push(`${code}    ${r.prefix}/${cidr} [${r.adminDistance}/0] via ${r.nextHop}`);
     } else if (r.egressIface) {
@@ -498,6 +609,67 @@ function showIpRoute(s: Session): string[] {
   return lines;
 }
 
+function routeCode(source: 'connected' | 'static' | 'ospf'): string {
+  switch (source) {
+    case 'connected': return 'C';
+    case 'static': return 'S';
+    case 'ospf': return 'O';
+  }
+}
+
+
+/** Render `show ip ospf neighbor` — IOS-style table.
+ *
+ *  Columns: Neighbor ID, Pri, State, Dead Time, Address, Interface. We do not
+ *  model timers, so Dead Time is the static placeholder `00:00:38`. For p2p
+ *  links the DR/BDR election is skipped, so the State column omits the
+ *  `/ROLE` suffix (the spec example shows `FULL/  -` — a literal `-` to mean
+ *  "no DR election"; we keep that exact rendering). */
+function showIpOspfNeighbor(s: Session): string[] {
+  if (s.device.ospf.neighbors.size === 0) {
+    return ['No OSPF neighbors found.'];
+  }
+  const header =
+    'Neighbor ID'.padEnd(16) +
+    'Pri'.padEnd(6) +
+    'State'.padEnd(20) +
+    'Dead Time'.padEnd(12) +
+    'Address'.padEnd(16) +
+    'Interface';
+  const lines = [header];
+  for (const [neighborId, n] of s.device.ospf.neighbors) {
+    lines.push(
+      neighborId.padEnd(16) +
+        '1'.padEnd(6) +
+        `${n.state}/  -`.padEnd(20) +
+        '00:00:38'.padEnd(12) +
+        n.address.padEnd(16) +
+        fullInterfaceName(n.interface),
+    );
+  }
+  return lines;
+}
+
+/** Render `show ip ospf` — process summary. Minimal but standard-looking. */
+function showIpOspf(s: Session): string[] {
+  const o = s.device.ospf;
+  if (o.process === null) {
+    return ['% OSPF instance not configured.'];
+  }
+  const id = o.routerId ?? '0.0.0.0';
+  const areas = uniqueAreas(s).length;
+  return [
+    `Routing Process "ospf ${o.process}" with ID ${id}`,
+    'Supports only single TOS(TOS0) routes',
+    `Number of areas in this router is ${areas}. ${areas} normal 0 stub 0 nssa`,
+  ];
+}
+
+function uniqueAreas(s: Session): number[] {
+  const seen = new Set<number>();
+  for (const n of s.device.ospf.networks) seen.add(n.area);
+  return [...seen];
+}
 
 function showIpIntBrief(s: Session): string[] {
   const header =
@@ -511,7 +683,10 @@ function showIpIntBrief(s: Session): string[] {
     const ip = i.ip ?? 'unassigned';
     const method = i.ip ? 'manual' : 'unset';
     const status = i.adminUp ? 'up' : 'administratively down';
-    const proto = i.adminUp ? 'up' : 'down';
+    // Protocol column tracks line-protocol state. Admin-down forces it down;
+    // otherwise it follows the lab-session-refreshed protocolUp (false when
+    // the cabled peer is admin-down — real IOS shows up/down in that case).
+    const proto = i.adminUp && i.protocolUp ? 'up' : 'down';
     return (
       i.name.padEnd(23) +
       ip.padEnd(16) +
@@ -533,7 +708,7 @@ function maskToCidr(mask: string): number {
 function showInterfaces(s: Session): string[] {
   return Object.values(s.device.interfaces).flatMap((i) => {
     const state = i.adminUp ? 'up' : 'administratively down';
-    const proto = i.adminUp ? 'up' : 'down';
+    const proto = i.adminUp && i.protocolUp ? 'up' : 'down';
     const lines = [`${i.name} is ${state}, line protocol is ${proto}`];
     if (i.ip && i.mask) lines.push(`  Internet address is ${i.ip}/${maskToCidr(i.mask)}`);
     else lines.push('  Internet protocol processing disabled');
