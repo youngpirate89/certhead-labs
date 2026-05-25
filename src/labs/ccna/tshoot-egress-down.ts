@@ -28,7 +28,12 @@ import type { Lab } from '@/engine/types';
  */
 export const tshootEgressDown: Lab = {
   id: 'ccna-tshoot-egress-down',
-  title: 'Troubleshoot: interface administratively down',
+  // Title is deliberately about the SYMPTOM, not the cause. The cold-student
+  // audit (work-order Fix 6) found that "interface administratively down"
+  // names the diagnosis up front and removes the diagnostic step from the
+  // lab. The fix the learner ultimately applies is `no shutdown`, but
+  // arriving at that conclusion is the whole point.
+  title: 'Troubleshoot: WAN connectivity loss',
   exam: 'CCNA 200-301',
   difficulty: 2,
   estimatedMinutes: 5,
@@ -98,12 +103,19 @@ export const tshootEgressDown: Lab = {
   objectives: [
     {
       id: 'noshut-r1-wan',
-      text: 'Bring R1 Gi0/2 back up with no shutdown',
+      // Display text describes the OUTCOME, not the command. The check
+      // function still looks for R1 Gi0/2 adminUp (the seed has no other
+      // way to satisfy the symptom), so the grading is identical — only
+      // the learner-facing wording moves away from spoiling the fix.
+      text: 'Restore WAN connectivity between PC-A and PC-B',
       check: (state) => state.R1?.interfaces['Gi0/2'].adminUp === true,
     },
     {
       id: 'reach-pc-a-to-pc-b',
-      text: 'PC-A can ping PC-B — run `ping 192.168.2.10` from PC-A and confirm a reply',
+      // Objective label is a clean outcome line — the "how to" (run ping from
+      // PC-A) lives in the scenario + hints, not in the objective text. Keeps
+      // the panel scannable instead of restating the procedure.
+      text: 'Confirm end-to-end reachability from PC-A',
       check: (_state, _history, session) => {
         const pca = session.devices['PC-A'];
         if (pca?.kind !== 'pc') return false;
@@ -114,11 +126,17 @@ export const tshootEgressDown: Lab = {
   hints: [
     {
       afterSeconds: 90,
+      // Reveals the diagnostic path WITHOUT naming the device or command —
+      // the learner still has to read the show output and decide what to do.
+      text: 'Check interface states on each router with `show ip interface brief`',
+    },
+    {
+      afterSeconds: 180,
       text:
         'From PC-A run `ping 192.168.2.10` and read the failure line — it names the router and interface that\'s the problem. Click that router → `enable` → `show ip interface brief` and look at the Status column.',
     },
     {
-      afterSeconds: 240,
+      afterSeconds: 300,
       text:
         'R1\'s WAN interface is administratively down. Click R1 → `enable`, `configure terminal`, `interface gi0/2`, `no shutdown`. Re-run the ping from PC-A to confirm the round-trip works.',
     },

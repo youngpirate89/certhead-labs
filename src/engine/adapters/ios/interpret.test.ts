@@ -154,6 +154,138 @@ describe('IOS interpreter — resolution errors and show', () => {
   });
 });
 
+describe('IOS interpreter — `show interfaces <iface>`', () => {
+  function priv(): Session {
+    return applyCommand(fresh(), 'enable').session;
+  }
+
+  function configured(): Session {
+    return run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface gi0/0',
+      'ip address 192.168.1.1 255.255.255.0',
+      'no shutdown',
+      'end',
+    ]);
+  }
+
+  it('renders the per-interface block in admin-down state', () => {
+    const text = applyCommand(priv(), 'show interfaces gi0/0')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(
+      /GigabitEthernet0\/0 is administratively down, line protocol is down/,
+    );
+    expect(text).toMatch(/Hardware is ISR4321, address is 0000\.0000\.0000/);
+    expect(text).toMatch(/Internet protocol processing disabled/);
+    expect(text).toMatch(/MTU 1500 bytes/);
+  });
+
+  it('renders the per-interface block in admin-up state with IP', () => {
+    const text = applyCommand(configured(), 'show interfaces gi0/0')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/GigabitEthernet0\/0 is up, line protocol is up/);
+    expect(text).toMatch(/Internet address is 192\.168\.1\.1\/24/);
+    expect(text).not.toMatch(/administratively down/);
+  });
+
+  it('accepts the full name and abbreviated forms via prefix-match', () => {
+    const full = applyCommand(priv(), 'show interfaces GigabitEthernet0/0')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(full).toMatch(/GigabitEthernet0\/0 is administratively down/);
+
+    const abbrev = applyCommand(priv(), 'show int gi0/0')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(abbrev).toMatch(/GigabitEthernet0\/0 is administratively down/);
+  });
+
+  it('returns an error on an unknown interface', () => {
+    const out = applyCommand(priv(), 'show interfaces gi9/9').output;
+    expect(out[0].kind).toBe('error');
+    expect(out[0].text).toMatch(/Invalid interface/);
+  });
+
+  it('bare `show interfaces` still lists every interface', () => {
+    const text = applyCommand(priv(), 'show interfaces')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/GigabitEthernet0\/0/);
+    expect(text).toMatch(/GigabitEthernet0\/1/);
+  });
+});
+
+describe('IOS interpreter — `show running-config interface <iface>`', () => {
+  function priv(): Session {
+    return applyCommand(fresh(), 'enable').session;
+  }
+
+  function configured(): Session {
+    return run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface gi0/0',
+      'ip address 192.168.1.1 255.255.255.0',
+      'no shutdown',
+      'end',
+    ]);
+  }
+
+  it('renders the interface stanza with `shutdown` when admin-down', () => {
+    const text = applyCommand(priv(), 'show running-config interface gi0/0')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/^interface GigabitEthernet0\/0$/m);
+    expect(text).toMatch(/^ no ip address$/m);
+    expect(text).toMatch(/^ shutdown$/m);
+    expect(text).toMatch(/^!$/m);
+  });
+
+  it('omits `shutdown` and emits the IP line when admin-up with address', () => {
+    const text = applyCommand(configured(), 'show running-config interface gi0/0')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/^interface GigabitEthernet0\/0$/m);
+    expect(text).toMatch(/^ ip address 192\.168\.1\.1 255\.255\.255\.0$/m);
+    expect(text).not.toMatch(/shutdown/);
+  });
+
+  it('accepts the full name and abbreviated forms via prefix-match', () => {
+    const full = applyCommand(
+      priv(),
+      'show running-config interface GigabitEthernet0/0',
+    )
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(full).toMatch(/interface GigabitEthernet0\/0/);
+
+    const abbrev = applyCommand(priv(), 'show run int gi0/0')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(abbrev).toMatch(/interface GigabitEthernet0\/0/);
+  });
+
+  it('returns an error on an unknown interface', () => {
+    const out = applyCommand(priv(), 'show running-config interface gi9/9').output;
+    expect(out[0].kind).toBe('error');
+    expect(out[0].text).toMatch(/Invalid interface/);
+  });
+
+  it('bare `show running-config` still dumps the full configuration', () => {
+    const text = applyCommand(configured(), 'show running-config')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/Building configuration/);
+    expect(text).toMatch(/hostname R1/);
+    expect(text).toMatch(/interface GigabitEthernet0\/0/);
+    expect(text).toMatch(/interface GigabitEthernet0\/1/);
+    expect(text).toMatch(/^end$/m);
+  });
+});
+
 describe('IOS interpreter — `ip route` static routes', () => {
   function configMode(): Session {
     return run(fresh(), ['enable', 'configure terminal']);

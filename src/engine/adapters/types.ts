@@ -34,6 +34,12 @@ export interface CommandOutput {
 export interface ApplyResult<S extends DeviceSessionBase> {
   readonly session: S;
   readonly output: CommandOutput[];
+  /** Optional async tail: lines emitted after `output`, one at a time. The
+   *  terminal disables input while draining the stream so a long-running
+   *  command (today: streamed `tracert`) reads as a single user action even
+   *  though its output arrives over time. Session state is decided
+   *  synchronously up-front — the stream is presentation only. */
+  readonly stream?: AsyncIterable<CommandOutput>;
 }
 
 /** Optional cross-device context passed to `applyCommand`. Today only the pc
@@ -55,8 +61,14 @@ export interface ApplyOptions {
   readonly record?: boolean;
 }
 
-/** Operational status of a device's interface, derived from its state. */
-export type InterfaceStatus = 'up' | 'no-ip' | 'admin-down';
+/** Operational status of a device's interface, derived from its state.
+ *  - `up`             : admin-up, line protocol up, IP assigned.
+ *  - `no-ip`          : admin-up, no IP yet (won't route, but link works).
+ *  - `protocol-down`  : admin-up locally, but the cabled peer is admin-down
+ *                       (line protocol is down). LED renders red.
+ *  - `admin-down`     : `shutdown` was applied locally.
+ */
+export type InterfaceStatus = 'up' | 'no-ip' | 'protocol-down' | 'admin-down';
 
 export interface InterfaceTopologyView {
   /** Short canonical id, e.g. `Gi0/0`. */

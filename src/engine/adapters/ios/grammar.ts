@@ -29,9 +29,29 @@ const showSubtree: CommandNode = {
         },
       },
     },
-    interfaces: done('Interface status and configuration'),
+    // `show interfaces` either dumps every interface (terminal here) OR takes a
+    // single iface argument and prints just that one's IOS-style detail block.
+    // Both forms must be reachable; the resolver picks the argument slot when
+    // a trailing token doesn't match any keyword child.
+    interfaces: {
+      terminal: true,
+      help: 'Interface status and configuration',
+      argument: arg('iface', done('Per-interface status')),
+    },
     version: done('System hardware and software status'),
-    'running-config': done('Current operating configuration'),
+    // `show running-config` dumps the full config. `show running-config
+    // interface <iface>` returns just that interface's stanza — same display
+    // logic as the full dump's interface block, scoped to one interface.
+    'running-config': {
+      terminal: true,
+      help: 'Current operating configuration',
+      children: {
+        interface: {
+          help: 'Filter to a single interface stanza',
+          argument: arg('iface', done('Per-interface running config')),
+        },
+      },
+    },
   },
 };
 

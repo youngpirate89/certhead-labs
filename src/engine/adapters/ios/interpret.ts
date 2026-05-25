@@ -316,7 +316,7 @@ function dispatch(
       return { session: s, output: err('% Incomplete command.') };
 
     case 'show':
-      return show(s, command);
+      return show(s, command, args);
 
     case 'write':
       return { session: s, output: out('Building configuration...', '[OK]') };
@@ -553,7 +553,11 @@ function removeOspfNetwork(
   return { session: s, output: [] };
 }
 
-function show(s: Session, command: string[]): ApplyResult {
+function show(
+  s: Session,
+  command: string[],
+  args: Record<string, string>,
+): ApplyResult {
   // command = ['show', ...]
   const what = command[1];
   if (what === 'ip') {
@@ -567,9 +571,17 @@ function show(s: Session, command: string[]): ApplyResult {
     }
     return { session: s, output: out(...showIpIntBrief(s)) };
   }
-  if (what === 'interfaces') return { session: s, output: out(...showInterfaces(s)) };
+  if (what === 'interfaces') {
+    if (args.iface) return showInterfacesOne(s, args.iface);
+    return { session: s, output: out(...showInterfaces(s)) };
+  }
   if (what === 'version') return { session: s, output: out(...showVersion(s)) };
-  if (what === 'running-config') return { session: s, output: out(...showRunningConfig(s)) };
+  if (what === 'running-config') {
+    if (command[2] === 'interface' && args.iface) {
+      return showRunningConfigInterface(s, args.iface);
+    }
+    return { session: s, output: out(...showRunningConfig(s)) };
+  }
   return { session: s, output: err('% Incomplete command.') };
 }
 
@@ -716,6 +728,57 @@ function showInterfaces(s: Session): string[] {
   });
 }
 
+/** Deterministic synthetic MAC: last 4 hex digits from the iface's terminal
+ *  slot number, so Gi0/2 → `0000.0000.0002`. Stable per-iface for the lab's
+ *  lifetime; identifies the port in the output without requiring a real MAC
+ *  pool (this is a simulator, not a network — see CLAUDE.md constraint #2). */
+function syntheticMac(ifaceId: string): string {
+  const last = ifaceId.split('/').pop() ?? '0';
+  const n = Number.parseInt(last, 10);
+  const hex = (Number.isFinite(n) ? n : 0).toString(16).padStart(4, '0');
+  return `0000.0000.${hex}`;
+}
+
+function showInterfacesOne(s: Session, ifaceToken: string): ApplyResult {
+  const id = normaliseInterface(ifaceToken);
+  if (!id || !s.device.interfaces[id]) {
+    return { session: s, output: err(`% Invalid interface ${ifaceToken}`) };
+  }
+  const i = s.device.interfaces[id];
+  const state = i.adminUp ? 'up' : 'administratively down';
+  const proto = i.adminUp && i.protocolUp ? 'up' : 'down';
+  const lines: string[] = [
+    `${i.name} is ${state}, line protocol is ${proto}`,
+    `  Hardware is ${s.device.platform}, address is ${syntheticMac(id)}`,
+  ];
+  if (i.description) lines.push(`  Description: ${i.description}`);
+  if (i.ip && i.mask) {
+    lines.push(`  Internet address is ${i.ip}/${maskToCidr(i.mask)}`);
+  } else {
+    lines.push('  Internet protocol processing disabled');
+  }
+  lines.push('  MTU 1500 bytes, BW 1000000 Kbit/sec, DLY 10 usec');
+  lines.push('  Encapsulation ARPA, loopback not set');
+  lines.push('  Keepalive set (10 sec)');
+  lines.push('  Full-duplex, 1000Mb/s, link type is auto, media type is RJ45');
+  return { session: s, output: out(...lines) };
+}
+
+function showRunningConfigInterface(s: Session, ifaceToken: string): ApplyResult {
+  const id = normaliseInterface(ifaceToken);
+  if (!id || !s.device.interfaces[id]) {
+    return { session: s, output: err(`% Invalid interface ${ifaceToken}`) };
+  }
+  const i = s.device.interfaces[id];
+  const lines: string[] = [`interface ${i.name}`];
+  if (i.description) lines.push(` description ${i.description}`);
+  if (i.ip && i.mask) lines.push(` ip address ${i.ip} ${i.mask}`);
+  else lines.push(' no ip address');
+  if (!i.adminUp) lines.push(' shutdown');
+  lines.push('!');
+  return { session: s, output: out(...lines) };
+}
+
 function showVersion(s: Session): string[] {
   return [
     `Cisco IOS Software, ${s.device.platform} Software`,
@@ -732,6 +795,19 @@ function showRunningConfig(s: Session): string[] {
     if (i.ip && i.mask) lines.push(` ip address ${i.ip} ${i.mask}`);
     else lines.push(' no ip address');
     if (!i.adminUp) lines.push(' shutdown');
+    lines.push('!');
+  }
+  // Static routes appear between interface blocks and `end` — matches real
+  // IOS ordering and ensures a learner running `show running-config` after
+  // setup sees the seeded `ip route` lines (cold-audit Fix 5). Per-route
+  // target syntax: next-hop IP if set, otherwise the egress interface name.
+  for (const r of s.staticRoutes) {
+    if (r.source !== 'static') continue;
+    const target = r.nextHop ?? (r.egressIface ? fullInterfaceName(r.egressIface) : '');
+    if (!target) continue;
+    lines.push(`ip route ${r.prefix} ${r.mask} ${target}`);
+  }
+  if (s.staticRoutes.some((r) => r.source === 'static')) {
     lines.push('!');
   }
   lines.push('end');

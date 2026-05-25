@@ -452,44 +452,75 @@ function CanvasButton({
 }
 
 /**
- * Auto-refit on canvas resize. Mounted alongside ReactFlow so it can use
- * useReactFlow(); observes the SHARED canvas container (passed by ref) and
- * calls fitView whenever its size changes.
+ * Initial-fit + auto-refit on canvas resize. Mounted alongside ReactFlow so
+ * it can use useReactFlow(); observes the SHARED canvas container and sets
+ * the viewport on first measurement AND whenever its size changes (Layout's
+ * divider drag, window resize, etc.).
  *
- * Why this is necessary: the topology band's height is owned by Layout's
- * resizable divider. When the user drags it, the React Flow canvas changes
- * size — but React Flow keeps the same viewport transform, so a row that
- * was centered at the old height ends up off-center (or clipped) at the
- * new height. fitView re-centers; the call respects MIN_ZOOM=0.5 and
- * maxZoom:1, so it can never reproduce the historical multi-node crush.
+ * Custom-fit (not React Flow's built-in fitView) for one reason: when the
+ * canvas is narrower than the content at MIN_ZOOM (e.g. the ~520px embed
+ * iframe with the 4-device tshoot lab), fitView clamps zoom AND centers,
+ * which clips equal amounts off the LEFT and RIGHT — the cold-student
+ * audit caught PC-A's left half disappearing into the panel border with
+ * no scroll-affordance. The custom fit biases the LEFTMOST node into view
+ * in that overflow case (panOnDrag rescues the right overflow). When the
+ * canvas IS wide enough to fit everything, the row is centered with a
+ * comfortable padding — same visual result as fitView at desktop widths.
  *
- * The first ResizeObserver fire is the initial measurement — skipped so we
- * don't auto-fit on mount (the "no auto-fit on mount" rule still stands;
- * fit-on-mount was the original crush). Subsequent fires are real resizes.
+ * Bounded zoom — clamped to [MIN_ZOOM, 1] — so we can never reproduce the
+ * historical multi-node crush.
  */
 function CanvasAutoFit({
   containerRef,
+  contentWidth,
+  contentHeight,
 }: {
   readonly containerRef: React.RefObject<HTMLDivElement>;
+  readonly contentWidth: number;
+  readonly contentHeight: number;
 }) {
-  const { fitView } = useReactFlow();
+  const { setViewport } = useReactFlow();
   useEffect(() => {
     const el = containerRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    let first = true;
-    const ro = new ResizeObserver(() => {
-      if (first) {
-        first = false;
-        return;
-      }
-      // maxZoom: 1 + padding: 0.1 + global MIN_ZOOM=0.5 = fit can never crush
-      // nodes below ~100px. If the topology can't actually fit at MIN_ZOOM,
-      // it's clamped at 0.5 and overflows (panOnDrag rescues), as designed.
-      fitView({ maxZoom: 1, padding: 0.1, duration: 150 });
-    });
+    if (!el) return;
+
+    function fit() {
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const cw = rect.width;
+      const ch = rect.height;
+      if (!cw || !ch) return;
+
+      // 5% padding on each side gives small topologies breathing room while
+      // still letting the 4-node row use most of a desktop band.
+      const padX = Math.max(ROW_INSET_X, cw * 0.05);
+      const padY = Math.max(8, ch * 0.05);
+      const availW = Math.max(1, cw - 2 * padX);
+      const availH = Math.max(1, ch - 2 * padY);
+
+      const zX = availW / contentWidth;
+      const zY = availH / contentHeight;
+      const zoom = Math.min(1, Math.max(MIN_ZOOM, Math.min(zX, zY)));
+
+      const scaledW = contentWidth * zoom;
+      const scaledH = contentHeight * zoom;
+      // If content fits, center it. If it overflows (canvas too narrow even
+      // at MIN_ZOOM), anchor the leftmost node at the padding inset and let
+      // panOnDrag handle the right overflow — PC-A clipped on the left is
+      // jarring and breaks the diagnostic mental model.
+      const fitsHorizontally = scaledW <= cw - 2 * padX;
+      const x = fitsHorizontally ? (cw - scaledW) / 2 : padX;
+      const y = (ch - scaledH) / 2;
+
+      setViewport({ x, y, zoom });
+    }
+
+    fit();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => fit());
     ro.observe(el);
     return () => ro.disconnect();
-  }, [containerRef, fitView]);
+  }, [containerRef, contentWidth, contentHeight, setViewport]);
   return null;
 }
 
@@ -563,11 +594,11 @@ export function TopologyPanel({
             nodes={nodes}
             edges={[]}
             nodeTypes={NODE_TYPES}
-            // Initial view: identity at zoom=1 with the row inset. Reset is
-            // explicit (the Fit button) — we deliberately don't auto-fit on
-            // mount because that's what produced the historical multi-node
-            // crush; user-initiated fitView in CanvasControls is bounded by
-            // `maxZoom: 1` and the global MIN_ZOOM so it can't reproduce it.
+            // Initial viewport is set by CanvasAutoFit (below) on first paint
+            // — that controller measures the actual canvas and computes a
+            // zoom + translate that keeps every node within the visible area.
+            // We pass a sane fallback here so React Flow renders something
+            // sensible before the effect runs (one frame).
             defaultViewport={{ x: ROW_INSET_X, y: ROW_INSET_Y, zoom: 1 }}
             minZoom={MIN_ZOOM}
             maxZoom={MAX_ZOOM}
@@ -610,7 +641,11 @@ export function TopologyPanel({
             />
           </ReactFlow>
           <CanvasControls />
-          <CanvasAutoFit containerRef={canvasWrapperRef} />
+          <CanvasAutoFit
+            containerRef={canvasWrapperRef}
+            contentWidth={rowWidth}
+            contentHeight={NODE_HEIGHT}
+          />
         </div>
       </div>
     </ReactFlowProvider>
@@ -631,28 +666,28 @@ function DeviceNode({ data }: NodeProps<Node<DeviceNodeData>>) {
         type="source"
         position={Position.Left}
         isConnectable={false}
-        style={{ background: 'transparent', border: 'none', opacity: 0 }}
+        style={{ background: 'transparent', border: 'none', opacity: 0, pointerEvents: 'none' }}
       />
       <Handle
         id="left-t"
         type="target"
         position={Position.Left}
         isConnectable={false}
-        style={{ background: 'transparent', border: 'none', opacity: 0 }}
+        style={{ background: 'transparent', border: 'none', opacity: 0, pointerEvents: 'none' }}
       />
       <Handle
         id="right"
         type="source"
         position={Position.Right}
         isConnectable={false}
-        style={{ background: 'transparent', border: 'none', opacity: 0 }}
+        style={{ background: 'transparent', border: 'none', opacity: 0, pointerEvents: 'none' }}
       />
       <Handle
         id="right-t"
         type="target"
         position={Position.Right}
         isConnectable={false}
-        style={{ background: 'transparent', border: 'none', opacity: 0 }}
+        style={{ background: 'transparent', border: 'none', opacity: 0, pointerEvents: 'none' }}
       />
       <button
         type="button"
@@ -729,6 +764,13 @@ const STATUS_STYLE: Record<InterfaceStatus, { dot: string; label: string }> = {
     dot: 'bg-amber-400/80 shadow-[0_0_5px_rgba(251,191,36,0.55)]',
     label: 'text-terminal-fg/60',
   },
+  // Same red as admin-down so the LED check `status === 'up'` (link cable
+  // color) naturally renders red on a peer-down end too — line protocol
+  // being down is functionally as dead as the interface being shut.
+  'protocol-down': {
+    dot: 'bg-terminal-error/80 shadow-[0_0_5px_rgba(248,113,113,0.55)]',
+    label: 'text-terminal-fg/60',
+  },
   'admin-down': {
     dot: 'bg-terminal-dim/50',
     label: 'text-terminal-dim',
@@ -738,6 +780,7 @@ const STATUS_STYLE: Record<InterfaceStatus, { dot: string; label: string }> = {
 const STATUS_LABEL: Record<InterfaceStatus, string> = {
   up: 'up',
   'no-ip': 'admin up, no IP',
+  'protocol-down': 'line protocol down (peer is administratively down)',
   'admin-down': 'administratively down',
 };
 

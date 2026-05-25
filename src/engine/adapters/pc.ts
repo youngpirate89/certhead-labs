@@ -401,12 +401,20 @@ function handlePing(
  * tracert / traceroute — walk the forward path hop by hop, then per-hop
  * test reachability via canReach. A working path lists each hop IP and ends
  * with "Trace complete." A broken path shows the hops that succeed, the
- * hop where it dies, then timeouts up to MAX_HOPS, and a final "Trace did
- * not complete: <sentence>" line using the SAME sentence the ping handler
- * would print. The shared `failureSentence` keeps the two in lockstep.
+ * hop where it dies, then timeouts up to MAX_HOPS, and a final muted
+ * `[sim] ...` annotation that prints the SAME failure sentence the ping
+ * handler emits. The shared `failureSentence` keeps the two in lockstep.
+ *
+ * Output is split: the header (Tracing route…) is sync; hop rows + the
+ * trailing summary stream out one at a time with HOP_DELAY_MS between each
+ * so the trace reads as activity, not a wall of text. Discovery + grading
+ * are fully synchronous — the stream is presentation only, so the engine
+ * stays deterministic and testable.
  *
  * Deterministic: hop chain is derived from current routing tables (no
- * randomness, no real ICMP) and RTTs are always "<1 ms".
+ * randomness, no real ICMP) and RTTs are always "<1 ms". A single probe per
+ * hop, not three — the curated lab does not need the realism of three
+ * RTT columns and the extra width hurt the embedded terminal at 520px.
  *
  * MAX_HOPS = 8: large enough to convey "many timeouts after the dead hop"
  * for any pedagogical CCNA topology (largest in roadmap is ~6 routers),
@@ -415,6 +423,18 @@ function handlePing(
  * the embedded terminal, NOT a semantic change.
  */
 const MAX_HOPS = 8;
+let hopDelayMs = 150;
+
+/** Test-only: override the inter-hop streaming delay (default 150ms). The
+ *  cadence is presentation, not engine logic — running tests with delay=0
+ *  exercises the streaming path without paying ~150ms per hop. NEVER call
+ *  from production code; only the engine's adapter tests need this. */
+export function __setTracertDelayMs(ms: number): void {
+  hopDelayMs = ms;
+}
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((r) => setTimeout(r, ms));
 
 function handleTracert(
   s: PcSession,
@@ -433,16 +453,36 @@ function handleTracert(
     return { session: s, output: errLine('Tracert requires a lab context.') };
   }
 
-  const lines: CommandOutput[] = [
+  const header: CommandOutput[] = [
     { kind: 'output', text: '' },
     { kind: 'output', text: `Tracing route to ${target} over a maximum of ${MAX_HOPS} hops:` },
     { kind: 'output', text: '' },
   ];
 
-  const discovery = discoverHops(ctx.lab, s.id, target);
+  // Pre-compute the entire output tail synchronously. The session state is
+  // a snapshot at command-issue time; resolving hops lazily mid-stream
+  // would let an unrelated state change (e.g., user editing R1 in another
+  // tab) reshape an in-flight trace, which would be confusing.
+  const tail = computeTracertTail(ctx.lab, s.id, target);
+
+  return {
+    session: s,
+    output: header,
+    stream: streamLines(tail, hopDelayMs),
+  };
+}
+
+/** Walk the topology, render hops + summary + optional [sim] line. Pure. */
+function computeTracertTail(
+  lab: LabSession,
+  fromPcId: string,
+  target: string,
+): CommandOutput[] {
+  const discovery = discoverHops(lab, fromPcId, target);
   const hops = 'hops' in discovery ? discovery.hops : [];
   const walkFailedAt = 'failedAt' in discovery ? discovery.failedAt : null;
 
+  const out: CommandOutput[] = [];
   let traceCompleted = false;
   let firstFailedAt: FailPoint | null = null;
 
@@ -454,7 +494,7 @@ function handleTracert(
       // No topological hop at this position — either the walk failed
       // earlier (walkFailedAt set) or we've already exhausted the chain
       // without reaching the destination. Print a timeout row.
-      lines.push({ kind: 'error', text: formatTimeoutRow(hopNum) });
+      out.push({ kind: 'error', text: formatTimeoutRow(hopNum) });
       continue;
     }
 
@@ -462,41 +502,58 @@ function handleTracert(
     // return-side failures (the missing-return-route scenario won't show
     // up in the topological walk — the route exists going OUT — but the
     // ICMP reply can't get back, so canReach to that hop returns false).
-    const result = canReach(ctx.lab, s.id, hop.hopIp);
+    const result = canReach(lab, fromPcId, hop.hopIp);
     if (result.ok) {
-      lines.push({ kind: 'output', text: formatHopRow(hopNum, hop.hopIp) });
+      out.push({ kind: 'output', text: formatHopRow(hopNum, hop.hopIp) });
       if (hop.isDestination) {
         traceCompleted = true;
         break;
       }
     } else {
-      lines.push({ kind: 'error', text: formatTimeoutRow(hopNum) });
+      out.push({ kind: 'error', text: formatTimeoutRow(hopNum) });
       if (firstFailedAt === null) firstFailedAt = result.failedAt;
     }
   }
 
-  lines.push({ kind: 'output', text: '' });
+  out.push({ kind: 'output', text: '' });
   if (traceCompleted) {
-    lines.push({ kind: 'output', text: 'Trace complete.' });
+    out.push({ kind: 'output', text: 'Trace complete.' });
   } else {
+    out.push({ kind: 'error', text: 'Trace did not complete.' });
     // Prefer the walk's failedAt (earliest known failure on the forward
     // path) over per-hop firstFailedAt — they should agree for forward-only
     // breaks, but the walk's reason is canonical for cases like egress-down
-    // where canReach to the destination would report the same thing.
+    // where canReach to the destination would report the same thing. The
+    // sentence is rendered as a `[sim]` system line so the learner can tell
+    // the diagnosis apart from raw tool output — it's the simulator
+    // narrating, not Windows.
     const reason = walkFailedAt ?? firstFailedAt;
-    const tail = reason ? `Trace did not complete: ${failureSentence(reason, target)}` : 'Trace did not complete.';
-    lines.push({ kind: 'error', text: tail });
+    if (reason) {
+      out.push({ kind: 'system', text: `[sim] ${failureDetail(reason, target)}` });
+    }
   }
 
-  return { session: s, output: lines };
+  return out;
 }
 
+async function* streamLines(
+  lines: readonly CommandOutput[],
+  delayMs: number,
+): AsyncIterable<CommandOutput> {
+  for (const line of lines) {
+    await sleep(delayMs);
+    yield line;
+  }
+}
+
+/** Single probe column (`<1 ms`), not the Windows three-column default —
+ *  the lab terminal must stay readable at ~520px; three RTT columns wrap. */
 function formatHopRow(hopNum: number, ip: string): string {
-  return `${hopNum.toString().padStart(3)}    <1 ms    <1 ms    <1 ms  ${ip}`;
+  return `${hopNum.toString().padStart(3)}    <1 ms  ${ip}`;
 }
 
 function formatTimeoutRow(hopNum: number): string {
-  return `${hopNum.toString().padStart(3)}    *        *        *      Request timed out.`;
+  return `${hopNum.toString().padStart(3)}    *      Request timed out.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -737,12 +794,15 @@ function renderIpconfig(s: PcSession, all: boolean): CommandOutput[] {
 }
 
 /**
- * Render a `ping` result — IOS/Windows-flavored.
+ * Render a `ping` result — Windows-flavored.
  *
- * On success: short Reply/statistics block. On failure: a "Request/Reply
- * timed out" header followed by a learner-facing sentence derived from
- * `failedAt`. The sentence mapping is the ONE place reasons get translated;
- * tracert reuses the same `failureSentence` helper so the two stay in lockstep.
+ * On success: Reply/statistics block. On failure: timed-out lines + stats
+ * block, then a dim `[sim] …` annotation that names the device and interface
+ * at fault. The `[sim]` line is `system` kind (matches tracert) so the
+ * learner can tell the simulator narrating apart from raw OS output — the
+ * red `Request timed out.` lines above are what real Windows printed; the
+ * dim line is the engine explaining why. On success no `[sim]` line appears
+ * (silence-is-good).
  */
 function renderPing(
   result: ReturnType<typeof canReach>,
@@ -759,7 +819,7 @@ function renderPing(
       { kind: 'output', text: '    Packets: Sent = 2, Received = 2, Lost = 0 (0% loss)' },
     ];
   }
-  const lines: CommandOutput[] = [
+  return [
     { kind: 'output', text: '' },
     { kind: 'output', text: `Pinging ${target} with 32 bytes of data:` },
     { kind: 'error', text: 'Request timed out.' },
@@ -767,23 +827,22 @@ function renderPing(
     { kind: 'output', text: '' },
     { kind: 'output', text: `Ping statistics for ${target}:` },
     { kind: 'error', text: '    Packets: Sent = 2, Received = 0, Lost = 2 (100% loss)' },
-    { kind: 'error', text: '' },
-    { kind: 'error', text: failureSentence(result.failedAt, target) },
+    { kind: 'system', text: `[sim] ${failureDetail(result.failedAt, target)}` },
   ];
-  return lines;
 }
 
 /**
- * Map a canReach failure to a learner-facing sentence. The ONE source of
- * truth for the FailReason → English mapping; both ping and tracert use it.
- * 3e troubleshooting labs reuse the FailReason enum directly and rely on
- * this mapping. Adding a new reason = add a case.
+ * Map a canReach failure to a learner-facing sentence, first letter upper-cased
+ * so it stands as a complete sentence. The ONE source of truth for the
+ * FailReason → English mapping; both ping and tracert use it for their
+ * `[sim]` lines. 3e troubleshooting labs reuse the FailReason enum directly
+ * and depend on this mapping — add a `case` per new reason.
  */
-function failureSentence(failedAt: FailPoint, target: string): string {
+function failureDetail(failedAt: FailPoint, target: string): string {
   const { reason, direction, deviceId, iface } = failedAt;
   const place = iface ? `${deviceId} ${iface}` : deviceId;
-  const prefix = direction === 'forward' ? 'Request timed out' : 'Reply timed out';
-  return `${prefix} — ${detailFor(reason, place, deviceId, direction, target)}`;
+  const d = detailFor(reason, place, deviceId, direction, target);
+  return d.charAt(0).toUpperCase() + d.slice(1);
 }
 
 function detailFor(
@@ -809,7 +868,12 @@ function detailFor(
     case 'next-hop-unreachable':
       return `the next-hop on ${place} is not in that interface's subnet.`;
     case 'link-peer-down':
-      return `the peer of ${place} is down.`;
+      // Reachability §4 sets `link-peer-down` only when the peer interface's
+      // adminUp is false, so "administratively down" is precise. Wording was
+      // "the peer of ${place} is down" — ambiguous (parses as "${place} IS
+      // the peer, and it's down"). The possessive form is unambiguous and
+      // points the learner at the OTHER end of the cable.
+      return `${place}'s link partner is administratively down.`;
     case 'link-subnet-mismatch':
       return `the subnets on the two ends of the link at ${place} do not match.`;
     case 'dest-nic-down':

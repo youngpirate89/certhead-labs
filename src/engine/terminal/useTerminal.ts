@@ -1,4 +1,4 @@
-import { useCallback, useReducer } from 'react';
+import { useCallback, useEffect, useReducer, useRef } from 'react';
 
 /**
  * Multi-device terminal primitive (presentation layer).
@@ -35,6 +35,10 @@ export interface ExecResult {
   readonly lines: OutputLine[];
   /** When true, the screen is cleared instead of printing `lines`. */
   readonly clear?: boolean;
+  /** Optional async tail — lines arrive one at a time after `lines`. While
+   *  draining, the slice is marked busy and Terminal.tsx disables input.
+   *  See pcAdapter.handleTracert for the only current producer. */
+  readonly stream?: AsyncIterable<OutputLine>;
 }
 
 export type Executor = (raw: string) => ExecResult;
@@ -48,6 +52,9 @@ interface DeviceTerminalState {
   /** Cursor into commandHistory; null means "editing a fresh line". */
   historyIndex: number | null;
   nextId: number;
+  /** True while a streamed command is still emitting lines. The input is
+   *  disabled, Enter/Tab/? are swallowed. Flips back to false on stream end. */
+  busy: boolean;
 }
 
 /** State is keyed by device id — one slice per device. */
@@ -61,6 +68,7 @@ type Action =
   | { type: 'print'; id: string; lines: OutputLine[] }
   | { type: 'inlineHelp'; id: string; prompt: string; raw: string; lines: OutputLine[] }
   | { type: 'clear'; id: string }
+  | { type: 'setBusy'; id: string; busy: boolean }
   /** Bulk-reset every device's slice — used on lab reset. */
   | { type: 'resetAll'; bannersByDeviceId: Record<string, OutputLine[]> };
 
@@ -71,6 +79,7 @@ function initSlice(banner: OutputLine[]): DeviceTerminalState {
     commandHistory: [],
     historyIndex: null,
     nextId: banner.length,
+    busy: false,
   };
 }
 
@@ -90,6 +99,7 @@ function reduceSlice(slice: DeviceTerminalState, action: Action): DeviceTerminal
 
       if (action.result.clear) {
         return {
+          ...slice,
           lines: [],
           input: '',
           historyIndex: null,
@@ -106,6 +116,7 @@ function reduceSlice(slice: DeviceTerminalState, action: Action): DeviceTerminal
         text: l.text,
       }));
       return {
+        ...slice,
         lines: [...slice.lines, echo, ...output],
         input: '',
         historyIndex: null,
@@ -172,6 +183,9 @@ function reduceSlice(slice: DeviceTerminalState, action: Action): DeviceTerminal
     case 'clear':
       return { ...slice, lines: [] };
 
+    case 'setBusy':
+      return slice.busy === action.busy ? slice : { ...slice, busy: action.busy };
+
     case 'resetAll':
       // Handled at the top level, not per-slice.
       return slice;
@@ -218,6 +232,10 @@ export interface UseTerminal {
   lines: TerminalLine[];
   input: string;
   prompt: string;
+  /** True while the active device is draining a streamed command's tail.
+   *  Terminal.tsx disables the input element and ignores Enter/Tab/? while
+   *  this is set; submit() is a no-op. */
+  busy: boolean;
   setInput: (value: string) => void;
   submit: () => void;
   recallPrev: () => void;
@@ -251,15 +269,68 @@ export function useTerminal({
   // Defensive fallback — should never happen for a well-formed LabSession.
   const slice = state[activeId] ?? initSlice(bannersByDeviceId[activeId] ?? []);
 
+  // Track mount state so a slow stream (e.g., tracert) finishing after the
+  // component unmounts doesn't dispatch into a torn-down reducer. dispatch
+  // itself is no-op-safe in React 18, but the warning noise is avoidable.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // Per-submit cancel tokens. Each in-flight stream registers an entry; the
+  // consumer checks it between yields. resetAll flips every live token and
+  // clears the set so the orphan consumers stop dispatching `print` into a
+  // freshly-blank slice (the cold-audit Reset-mid-tracert bug). The token
+  // set is also drained on unmount via mountedRef — but the explicit cancel
+  // path is what makes Reset feel instantaneous.
+  const cancelTokensRef = useRef<Set<{ cancelled: boolean }>>(new Set());
+
   const setInput = useCallback(
-    (value: string) => dispatch({ type: 'setInput', id: activeId, value }),
-    [activeId],
+    (value: string) => {
+      if (slice.busy) return;
+      dispatch({ type: 'setInput', id: activeId, value });
+    },
+    [activeId, slice.busy],
   );
 
   const submit = useCallback(() => {
+    if (slice.busy) return;
     const result = execute(slice.input);
     dispatch({ type: 'submit', id: activeId, prompt, result });
-  }, [execute, prompt, slice.input, activeId]);
+
+    // Optional async tail: keep the device busy (input disabled) until the
+    // stream is exhausted, then flip back. The closure captures activeId so
+    // hop lines from a tracert started on PC-A land on PC-A's slice even if
+    // the learner clicks over to a router mid-trace. The `token` is the
+    // cancellation signal — resetAll flips its `cancelled` flag to abort the
+    // loop without waiting for the next sleep to resolve.
+    if (result.stream) {
+      const id = activeId;
+      const token = { cancelled: false };
+      cancelTokensRef.current.add(token);
+      dispatch({ type: 'setBusy', id, busy: true });
+      void (async () => {
+        try {
+          for await (const line of result.stream!) {
+            if (!mountedRef.current || token.cancelled) return;
+            dispatch({ type: 'print', id, lines: [line] });
+          }
+        } finally {
+          cancelTokensRef.current.delete(token);
+          // Only clear busy if THIS stream wasn't cancelled — when resetAll
+          // fires, it rebuilds the slice (busy already false in the fresh
+          // slice) and dispatching setBusy here would be a no-op write into
+          // the new slice. Harmless either way; guarding keeps it tidy.
+          if (mountedRef.current && !token.cancelled) {
+            dispatch({ type: 'setBusy', id, busy: false });
+          }
+        }
+      })();
+    }
+  }, [execute, prompt, slice.input, slice.busy, activeId]);
 
   const recallPrev = useCallback(
     () => dispatch({ type: 'recallPrev', id: activeId }),
@@ -291,8 +362,15 @@ export function useTerminal({
   }, [complete, slice.input, activeId]);
 
   const resetAll = useCallback(
-    (banners: Record<string, OutputLine[]>) =>
-      dispatch({ type: 'resetAll', bannersByDeviceId: banners }),
+    (banners: Record<string, OutputLine[]>) => {
+      // Cancel any in-flight stream BEFORE rebuilding slices. Without this,
+      // an orphan tracert consumer keeps dispatching `print` actions into
+      // the new (blank) slice — Reset-mid-tracert visibly leaks hop rows
+      // into the reset terminal (cold-audit Fix 1).
+      for (const token of cancelTokensRef.current) token.cancelled = true;
+      cancelTokensRef.current.clear();
+      dispatch({ type: 'resetAll', bannersByDeviceId: banners });
+    },
     [],
   );
 
@@ -300,6 +378,7 @@ export function useTerminal({
     lines: slice.lines,
     input: slice.input,
     prompt,
+    busy: slice.busy,
     setInput,
     submit,
     recallPrev,

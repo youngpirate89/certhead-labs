@@ -23,6 +23,14 @@ export function Terminal({ term }: TerminalProps) {
   }, [term.lines]);
 
   function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    // While a streamed command is still emitting (e.g., tracert), the input
+    // is disabled and these handlers are dead — the `disabled` prop blocks
+    // the keypress entirely, but we mirror the guard here so a programmatic
+    // dispatch can't sneak past.
+    if (term.busy) {
+      e.preventDefault();
+      return;
+    }
     // Intercept `?` BEFORE it lands in the input buffer: real IOS treats `?`
     // as an interactive help trigger, not a literal character.
     if (e.key === '?') {
@@ -54,7 +62,9 @@ export function Terminal({ term }: TerminalProps) {
   return (
     <div
       className="flex h-full cursor-text flex-col bg-terminal-bg font-mono text-[13px] leading-relaxed"
-      onClick={() => inputRef.current?.focus()}
+      onClick={() => {
+        if (!term.busy) inputRef.current?.focus();
+      }}
     >
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3">
         {term.lines.map((line) => (
@@ -74,12 +84,14 @@ export function Terminal({ term }: TerminalProps) {
             value={term.input}
             onChange={(e) => term.setInput(e.target.value)}
             onKeyDown={handleKeyDown}
+            disabled={term.busy}
             spellCheck={false}
             autoComplete="off"
             autoCapitalize="off"
             autoCorrect="off"
             aria-label="Terminal input"
-            className="flex-1 bg-transparent text-terminal-fg caret-terminal-accent outline-none"
+            aria-busy={term.busy}
+            className="flex-1 bg-transparent text-terminal-fg caret-terminal-accent outline-none disabled:cursor-progress disabled:opacity-50"
           />
         </div>
       </div>

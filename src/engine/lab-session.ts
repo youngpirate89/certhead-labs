@@ -131,7 +131,11 @@ function applySeedLine(s: DeviceSession, raw: string): DeviceSession {
 export function applyToActive(
   lab: LabSession,
   raw: string,
-): { session: LabSession; output: CommandOutput[] } {
+): {
+  session: LabSession;
+  output: CommandOutput[];
+  stream?: AsyncIterable<CommandOutput>;
+} {
   const id = lab.activeDeviceId;
   const cur = lab.devices[id];
   const result = dispatchByKind(cur, raw, lab);
@@ -139,7 +143,11 @@ export function applyToActive(
     ...lab,
     devices: { ...lab.devices, [id]: result.session },
   };
-  return { session: refreshDerivedState(next), output: result.output };
+  return {
+    session: refreshDerivedState(next),
+    output: result.output,
+    stream: result.stream,
+  };
 }
 
 /** Kind-dispatch helper so TS narrows on the discriminator. */
@@ -147,15 +155,19 @@ function dispatchByKind(
   s: DeviceSession,
   raw: string,
   lab: LabSession,
-): { session: DeviceSession; output: CommandOutput[] } {
+): {
+  session: DeviceSession;
+  output: CommandOutput[];
+  stream?: AsyncIterable<CommandOutput>;
+} {
   switch (s.kind) {
     case 'router': {
       const r = routerAdapter.applyCommand(s, raw, { lab });
-      return { session: r.session, output: r.output };
+      return { session: r.session, output: r.output, stream: r.stream };
     }
     case 'pc': {
       const r = pcAdapter.applyCommand(s, raw, { lab });
-      return { session: r.session, output: r.output };
+      return { session: r.session, output: r.output, stream: r.stream };
     }
   }
 }

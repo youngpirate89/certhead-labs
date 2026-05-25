@@ -1,7 +1,22 @@
-import { describe, it, expect } from 'vitest';
-import { pcAdapter, type PcSession } from './pc';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { pcAdapter, type PcSession, __setTracertDelayMs } from './pc';
 import { applyToActive, initLabSession, type LabSession } from '@/engine/lab-session';
+import type { CommandOutput } from '@/engine/adapters/types';
 import type { Lab } from '@/engine/types';
+
+/** Drain a tracert/streamed result into a single ordered list of lines.
+ *  Tracert prints its hop rows + summary asynchronously (~150ms per line in
+ *  the UI) so the engine adapter returns a sync header + an `AsyncIterable`
+ *  tail. Tests join everything to assert on the final transcript. */
+async function drain(
+  result: { output: readonly CommandOutput[]; stream?: AsyncIterable<CommandOutput> },
+): Promise<CommandOutput[]> {
+  const lines: CommandOutput[] = [...result.output];
+  if (result.stream) {
+    for await (const line of result.stream) lines.push(line);
+  }
+  return lines;
+}
 
 const SPEC = {
   id: 'PC-A',
@@ -215,27 +230,54 @@ describe('pcAdapter — ping (calls canReach)', () => {
     expect(out).toMatch(/Received = 2, Lost = 0/);
   });
 
-  it('missing return route → "Reply timed out — R2 has no return route" sentence', () => {
+  it('missing return route → muted [sim] line names R2 (return path)', () => {
     let ls = fullyConfigured();
     ls = configure(ls, 'R2', ['no ip route 192.168.1.0 255.255.255.0 192.168.12.1']);
-    const out = pingFrom(ls, 'PC-A', '192.168.2.10').output.map((o) => o.text).join('\n');
+    const result = pingFrom(ls, 'PC-A', '192.168.2.10');
+    const out = result.output.map((o) => o.text).join('\n');
     expect(out).toMatch(/Request timed out\.\nRequest timed out\./);
     expect(out).toMatch(/100% loss/);
-    expect(out).toMatch(/Reply timed out.*R2 has no return route/);
+    expect(out).toMatch(/\[sim\] R2 has no return route to the source\./);
+    // The [sim] line must be `system` kind so the Terminal renders it dim —
+    // it's the simulator narrating, not raw OS output.
+    const simLine = result.output.find((o) => o.text.startsWith('[sim]'));
+    expect(simLine?.kind).toBe('system');
   });
 
-  it('no forward route on R1 → "Request timed out — R1 has no route to <target>"', () => {
+  it('no forward route on R1 → muted [sim] line names R1 (forward)', () => {
     let ls = fullyConfigured();
     ls = configure(ls, 'R1', ['no ip route 192.168.2.0 255.255.255.0 192.168.12.2']);
-    const out = pingFrom(ls, 'PC-A', '192.168.2.10').output.map((o) => o.text).join('\n');
-    expect(out).toMatch(/Request timed out.*R1 has no route to 192\.168\.2\.10/);
+    const result = pingFrom(ls, 'PC-A', '192.168.2.10');
+    const out = result.output.map((o) => o.text).join('\n');
+    expect(out).toMatch(/\[sim\] R1 has no route to 192\.168\.2\.10\./);
+    const simLine = result.output.find((o) => o.text.startsWith('[sim]'));
+    expect(simLine?.kind).toBe('system');
   });
 
   it('egress interface admin-down → "R1 Gi0/0 is administratively down"', () => {
     let ls = fullyConfigured();
     ls = configure(ls, 'R1', ['interface gi0/0', 'shutdown']);
     const out = pingFrom(ls, 'PC-A', '192.168.2.10').output.map((o) => o.text).join('\n');
-    expect(out).toMatch(/R1 Gi0\/0 is administratively down/);
+    expect(out).toMatch(/\[sim\] R1 Gi0\/0 is administratively down\./);
+  });
+
+  it('successful ping does NOT emit a [sim] line (silence-is-good)', () => {
+    const ls = fullyConfigured();
+    const out = pingFrom(ls, 'PC-A', '192.168.2.10').output.map((o) => o.text).join('\n');
+    expect(out).not.toMatch(/\[sim\]/);
+  });
+
+  it('link-peer-down failure uses the unambiguous "link partner" wording', () => {
+    // Shutting R1 Gi0/0 makes R2's view of that interface "peer admin-down".
+    // From PC-B → PC-A the failure surfaces with link-peer-down on the
+    // return-path's first router-router link end (R2 Gi0/0).
+    let ls = fullyConfigured();
+    ls = configure(ls, 'R1', ['interface gi0/0', 'shutdown']);
+    const out = pingFrom(ls, 'PC-B', '192.168.1.10').output.map((o) => o.text).join('\n');
+    // The sentence must NOT use the old ambiguous "the peer of X is down"
+    // wording — the cold-audit found that parses as "X is the peer".
+    expect(out).not.toMatch(/the peer of/);
+    expect(out).toMatch(/\[sim\] R[12] Gi0\/0's link partner is administratively down\./);
   });
 
   it('PC pinging its own gateway succeeds (local-subnet delivery)', () => {
@@ -276,6 +318,12 @@ describe('pcAdapter — ping (calls canReach)', () => {
 });
 
 describe('pcAdapter — tracert / traceroute (hop walk + per-hop reachability)', () => {
+  // Zero the inter-hop delay for these tests — the cadence is a UX choice,
+  // not engine logic, and paying 150ms per hop across 4 tracert tests adds
+  // ~3s to the suite without changing what we assert on.
+  beforeAll(() => __setTracertDelayMs(0));
+  afterAll(() => __setTracertDelayMs(150));
+
   function pingLab(): Lab {
     return {
       id: 'pc-tracert-fixture',
@@ -357,22 +405,27 @@ describe('pcAdapter — tracert / traceroute (hop walk + per-hop reachability)',
     return applyToActive(cur, `tracert ${target}`);
   }
 
-  it('working path: lists gateway → next-hop router → destination, ending in "Trace complete."', () => {
+  it('working path: lists gateway → next-hop router → destination, ending in "Trace complete."', async () => {
     const ls = fullyConfigured();
-    const text = tracertFrom(ls, 'PC-A', '192.168.2.10').output.map((o) => o.text).join('\n');
+    const lines = await drain(tracertFrom(ls, 'PC-A', '192.168.2.10'));
+    const text = lines.map((o) => o.text).join('\n');
     expect(text).toMatch(/Tracing route to 192\.168\.2\.10/);
-    expect(text).toMatch(/1\s+<1 ms.*192\.168\.1\.1/);     // gateway = R1 LAN
-    expect(text).toMatch(/2\s+<1 ms.*192\.168\.12\.2/);    // R2 ingress on R1-R2 link
-    expect(text).toMatch(/3\s+<1 ms.*192\.168\.2\.10/);    // destination
+    expect(text).toMatch(/1\s+<1 ms\s+192\.168\.1\.1/);     // gateway = R1 LAN
+    expect(text).toMatch(/2\s+<1 ms\s+192\.168\.12\.2/);    // R2 ingress on R1-R2 link
+    expect(text).toMatch(/3\s+<1 ms\s+192\.168\.2\.10/);    // destination
     expect(text).toMatch(/Trace complete\./);
     // Working path stops at the destination — no spam timeouts past it.
     expect(text).not.toMatch(/Request timed out/);
+    // No [sim] line on a successful trace — only failures get the simulator
+    // annotation.
+    expect(text).not.toMatch(/\[sim\]/);
   });
 
-  it('traceroute (alias) routes to the same handler', () => {
+  it('traceroute (alias) routes to the same handler', async () => {
     const ls = fullyConfigured();
     const cur = { ...ls, activeDeviceId: 'PC-A' };
-    const text = applyToActive(cur, 'traceroute 192.168.2.10').output.map((o) => o.text).join('\n');
+    const lines = await drain(applyToActive(cur, 'traceroute 192.168.2.10'));
+    const text = lines.map((o) => o.text).join('\n');
     expect(text).toMatch(/Tracing route to 192\.168\.2\.10/);
     expect(text).toMatch(/Trace complete\./);
   });
@@ -381,31 +434,50 @@ describe('pcAdapter — tracert / traceroute (hop walk + per-hop reachability)',
   // egress-down break MUST die at the shut router/interface — not show a
   // successful trace, not show a wrong failure sentence. Same FailReason
   // and same naming as the ping.
-  it('egress-down break: hop 1 succeeds, hops 2+ time out, sentence names R1 Gi0/0', () => {
+  it('egress-down break: hop 1 succeeds, hops 2+ time out, [sim] line names R1 Gi0/0', async () => {
     let ls = fullyConfigured();
     ls = configure(ls, 'R1', ['interface gi0/0', 'shutdown']);
-    const text = tracertFrom(ls, 'PC-A', '192.168.2.10').output.map((o) => o.text).join('\n');
-    expect(text).toMatch(/1\s+<1 ms.*192\.168\.1\.1/);                 // gateway still reachable
-    expect(text).toMatch(/2\s+\*\s+\*\s+\*\s+Request timed out\./);     // dies at hop 2
-    expect(text).toMatch(/R1 Gi0\/0 is administratively down/);          // same sentence as ping
-    expect(text).toMatch(/Trace did not complete:/);
+    const lines = await drain(tracertFrom(ls, 'PC-A', '192.168.2.10'));
+    const text = lines.map((o) => o.text).join('\n');
+    expect(text).toMatch(/1\s+<1 ms\s+192\.168\.1\.1/);             // gateway still reachable
+    expect(text).toMatch(/2\s+\*\s+Request timed out\./);            // single-probe timeout row, dies at hop 2
+    expect(text).toMatch(/Trace did not complete\./);
+    expect(text).toMatch(/\[sim\] R1 Gi0\/0 is administratively down\./);
+    // The [sim] line MUST be a `system` kind so the Terminal renders it
+    // dim/muted — the simulator narrating, not Windows output.
+    const simLine = lines.find((o) => o.text.startsWith('[sim]'));
+    expect(simLine?.kind).toBe('system');
   });
 
-  it('missing return route: hop 1 succeeds; hop 2 times out (return walk fails at R2)', () => {
+  it('missing return route: hop 1 succeeds; hop 2 times out (return walk fails at R2)', async () => {
     let ls = fullyConfigured();
     ls = configure(ls, 'R2', ['no ip route 192.168.1.0 255.255.255.0 192.168.12.1']);
-    const text = tracertFrom(ls, 'PC-A', '192.168.2.10').output.map((o) => o.text).join('\n');
-    expect(text).toMatch(/1\s+<1 ms.*192\.168\.1\.1/);     // gateway OK (R1 has connected route back to PC-A)
-    expect(text).toMatch(/2\s+\*\s+\*\s+\*\s+Request timed out\./);
-    expect(text).toMatch(/R2 has no return route/);          // same sentence the ping prints
+    const lines = await drain(tracertFrom(ls, 'PC-A', '192.168.2.10'));
+    const text = lines.map((o) => o.text).join('\n');
+    expect(text).toMatch(/1\s+<1 ms\s+192\.168\.1\.1/);     // gateway OK (R1 has connected route back to PC-A)
+    expect(text).toMatch(/2\s+\*\s+Request timed out\./);
+    expect(text).toMatch(/\[sim\] R2 has no return route to the source\./);
   });
 
-  it('rejects a non-IPv4 target with a clear error (no walk attempted)', () => {
+  it('header is emitted synchronously; hop rows + summary stream in the async tail', () => {
+    const ls = fullyConfigured();
+    const result = tracertFrom(ls, 'PC-A', '192.168.2.10');
+    // Sync output is just the 3-line header (blank / "Tracing route…" / blank).
+    expect(result.output).toHaveLength(3);
+    expect(result.output[1].text).toMatch(/Tracing route to 192\.168\.2\.10/);
+    // The rest arrives via the stream — there must BE one for a recognized,
+    // reachable target.
+    expect(result.stream).toBeDefined();
+  });
+
+  it('rejects a non-IPv4 target with a clear error (no walk attempted, no stream)', () => {
     const ls = fullyConfigured();
     const cur = { ...ls, activeDeviceId: 'PC-A' };
-    const out = applyToActive(cur, 'tracert google.com').output;
-    expect(out[0].kind).toBe('error');
-    expect(out[0].text).toMatch(/not a valid IPv4/);
+    const result = applyToActive(cur, 'tracert google.com');
+    expect(result.output[0].kind).toBe('error');
+    expect(result.output[0].text).toMatch(/not a valid IPv4/);
+    // No stream on an early-rejected target — the error stands alone.
+    expect(result.stream).toBeUndefined();
   });
 
   it('tracert does NOT touch lastPing (it is not a ping)', () => {

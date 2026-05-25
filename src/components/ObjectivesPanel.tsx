@@ -52,7 +52,21 @@ export function ObjectivesPanel({ title, objectives, onReset }: ObjectivesPanelP
   return (
     <div className="flex h-full flex-col bg-panel-bg">
       <div className="flex items-center justify-between gap-3 border-b border-panel-border px-4 py-3">
-        <h2 className="font-sans text-sm font-semibold text-terminal-fg">{title}</h2>
+        <h2
+          className={`flex items-center gap-2 font-sans text-sm font-semibold transition-colors duration-300 ${
+            allMet ? 'text-terminal-prompt' : 'text-terminal-fg'
+          }`}
+        >
+          {allMet && (
+            <span
+              aria-hidden
+              className="grid h-4 w-4 place-items-center rounded-full border border-terminal-prompt bg-terminal-prompt/15 text-[10px] font-bold text-terminal-prompt"
+            >
+              ✓
+            </span>
+          )}
+          {allMet ? 'Lab Complete' : title}
+        </h2>
         <div className="flex items-center gap-3">
           <span
             className={`font-mono text-xs tabular-nums transition-colors duration-300 ${
@@ -121,6 +135,17 @@ export function ObjectivesPanel({ title, objectives, onReset }: ObjectivesPanelP
           );
         })}
       </ul>
+      {allMet && onReset && (
+        <div className="border-t border-panel-border p-3">
+          <button
+            type="button"
+            onClick={onReset}
+            className="w-full rounded-md border border-terminal-prompt/60 bg-terminal-prompt/10 px-3 py-2 font-sans text-sm font-semibold text-terminal-prompt transition hover:bg-terminal-prompt/20 focus:outline-none focus:ring-2 focus:ring-terminal-prompt focus:ring-offset-2 focus:ring-offset-panel-bg"
+          >
+            Reset lab
+          </button>
+        </div>
+      )}
     </div>
   );
 }

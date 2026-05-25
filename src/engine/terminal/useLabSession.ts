@@ -71,6 +71,18 @@ function bannersForLab(lab: Lab): Record<string, OutputLine[]> {
   return banners;
 }
 
+/** Adapt the adapter's stream of {kind,text} into the terminal's OutputLine
+ *  shape. The two types are structurally identical today (same `kind` union,
+ *  same `text` field) but keep the conversion explicit so a future divergence
+ *  surfaces here, not as a silent miscast. */
+async function* mapStream(
+  stream: AsyncIterable<CommandOutput>,
+): AsyncIterable<OutputLine> {
+  for await (const o of stream) {
+    yield { kind: o.kind, text: o.text };
+  }
+}
+
 /** Build the topology view for one device through its adapter. */
 function viewFor(s: DeviceSession): DeviceTopologyView {
   switch (s.kind) {
@@ -112,9 +124,12 @@ export function useLabSession(lab: Lab): UseLabSession {
   labRef.current = labSession;
 
   const execute = useCallback((raw: string): ExecResult => {
-    const { session: next, output } = applyToActive(labRef.current, raw);
+    const { session: next, output, stream } = applyToActive(labRef.current, raw);
     setLabSession(next);
-    return { lines: output.map((o) => ({ kind: o.kind, text: o.text })) };
+    return {
+      lines: output.map((o) => ({ kind: o.kind, text: o.text })),
+      stream: stream ? mapStream(stream) : undefined,
+    };
   }, []);
 
   const help = useCallback((partialLine: string): OutputLine[] => {

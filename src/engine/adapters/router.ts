@@ -26,9 +26,20 @@ import type {
   InterfaceStatus,
 } from './types';
 
-/** Status derivation for a router interface — agnostic of the view's caller. */
-function interfaceStatus(adminUp: boolean, ip: string | null): InterfaceStatus {
+/** Status derivation for a router interface — agnostic of the view's caller.
+ *
+ *  Order matters: `admin-down` dominates (the local config is explicit).
+ *  Otherwise the line-protocol drop (peer admin-down on a P2P link, set by
+ *  the lab-session refresh pass) takes priority over the `no-ip` warning —
+ *  a learner needs to see the carrier fault before noticing they forgot
+ *  the IP. Final fall-through is the normal up / no-ip distinction. */
+function interfaceStatus(
+  adminUp: boolean,
+  protocolUp: boolean,
+  ip: string | null,
+): InterfaceStatus {
   if (!adminUp) return 'admin-down';
+  if (!protocolUp) return 'protocol-down';
   return ip ? 'up' : 'no-ip';
 }
 
@@ -75,7 +86,7 @@ export const routerAdapter: DeviceAdapter<Session> = {
       interfaces: Object.values(d.interfaces).map((i) => ({
         id: i.id,
         name: i.name,
-        status: interfaceStatus(i.adminUp, i.ip),
+        status: interfaceStatus(i.adminUp, i.protocolUp, i.ip),
         ip: i.ip,
         mask: i.mask,
       })),
