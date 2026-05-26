@@ -63,30 +63,12 @@ export function TryMode() {
     track('lab_reset', { labId: lab.id });
   }
 
-  // Time-based hint surfacing. Hints fire as system lines in the terminal
-  // once `afterSeconds` elapses past lab start AND not all objectives are met.
-  // Ref-based bookkeeping so a hint doesn't surface twice per lab run;
-  // resetToken clears it so a reset re-arms the timers.
-  const shownHintsRef = useRef<Set<number>>(new Set());
-  const { print: termPrint, allMet, resetToken } = session;
-  useEffect(() => {
-    shownHintsRef.current = new Set();
-  }, [resetToken]);
-
-  useEffect(() => {
-    if (!labStartedAt || allMet || lab.hints.length === 0) return;
-    const id = setInterval(() => {
-      const elapsed = (Date.now() - labStartedAt) / 1000;
-      lab.hints.forEach((h, i) => {
-        if (elapsed >= h.afterSeconds && !shownHintsRef.current.has(i)) {
-          shownHintsRef.current.add(i);
-          termPrint([{ kind: 'system', text: `[Hint] ${h.text}` }]);
-          track('hint_shown', { labId: lab.id, hintIndex: i });
-        }
-      });
-    }, 1000);
-    return () => clearInterval(id);
-  }, [labStartedAt, allMet, lab.hints, lab.id, termPrint]);
+  // Hints live in the objectives panel (timer-gated, click-to-reveal); no
+  // auto-print to the terminal. Funnel tracking still wants a 'hint_shown'
+  // signal — wired through the panel via the reveal callback below.
+  function trackHintReveal(index: number) {
+    track('hint_shown', { labId: lab.id, hintIndex: index });
+  }
 
   return (
     <Layout
@@ -106,6 +88,14 @@ export function TryMode() {
           title="Objectives"
           objectives={session.objectives}
           onReset={briefDismissed ? resetLab : undefined}
+          hints={lab.hints.map((h, i) => ({
+            index: i,
+            text: h.text,
+            afterSeconds: h.afterSeconds,
+          }))}
+          labStartedAt={labStartedAt}
+          resetToken={session.resetToken}
+          onRevealHint={trackHintReveal}
         />
       }
       terminal={

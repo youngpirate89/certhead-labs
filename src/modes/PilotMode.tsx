@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { Layout } from '@/components/Layout';
 import { LabBrief } from '@/components/LabBrief';
 import { Terminal } from '@/components/Terminal';
@@ -10,11 +10,9 @@ import type { Lab } from '@/engine/types';
 /**
  * Pilot/dev view for labs not on the public /try path.
  *
- * Was minimal (terminal-only); now also gates on the lab brief and fires
- * timed hints — the cold-student audit (work-order Fix 6) flagged that the
- * scenario field was never rendered for pilot URLs, so a learner landed at
- * the prompt with no trouble ticket. Mirrors TryMode's brief + hint logic
- * minus the analytics + upgrade CTA (this surface stays private/dev-only).
+ * Mirrors TryMode minus analytics + the upgrade CTA. Brief gates the terminal
+ * on first load; the objectives panel hosts the lab's on-demand hint list
+ * (timer-gated buttons — no auto-display in the terminal).
  */
 export function PilotMode({ lab }: { lab: Lab }) {
   const session = useLabSession(lab);
@@ -34,28 +32,6 @@ export function PilotMode({ lab }: { lab: Lab }) {
     setLabStartedAt(Date.now());
   }
 
-  // Hints surface as system lines in the terminal once their `afterSeconds`
-  // elapses. Same ref-based bookkeeping as TryMode: don't fire twice;
-  // reset re-arms via the resetToken effect.
-  const shownHintsRef = useRef<Set<number>>(new Set());
-  const { print: termPrint, allMet, resetToken } = session;
-  useEffect(() => {
-    shownHintsRef.current = new Set();
-  }, [resetToken]);
-  useEffect(() => {
-    if (!labStartedAt || allMet || lab.hints.length === 0) return;
-    const id = setInterval(() => {
-      const elapsed = (Date.now() - labStartedAt) / 1000;
-      lab.hints.forEach((h, i) => {
-        if (elapsed >= h.afterSeconds && !shownHintsRef.current.has(i)) {
-          shownHintsRef.current.add(i);
-          termPrint([{ kind: 'system', text: `[Hint] ${h.text}` }]);
-        }
-      });
-    }, 1000);
-    return () => clearInterval(id);
-  }, [labStartedAt, allMet, lab.hints, termPrint]);
-
   return (
     <Layout
       examLabel={lab.exam}
@@ -74,6 +50,13 @@ export function PilotMode({ lab }: { lab: Lab }) {
           title="Objectives"
           objectives={session.objectives}
           onReset={briefDismissed ? resetLab : undefined}
+          hints={lab.hints.map((h, i) => ({
+            index: i,
+            text: h.text,
+            afterSeconds: h.afterSeconds,
+          }))}
+          labStartedAt={labStartedAt}
+          resetToken={session.resetToken}
         />
       }
       terminal={
