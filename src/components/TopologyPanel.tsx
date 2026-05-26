@@ -48,8 +48,6 @@ export type { DeviceTopologyView, InterfaceTopologyView, InterfaceStatus };
 interface TopologyPanelProps {
   readonly devices: readonly DeviceTopologyView[];
   readonly activeDeviceId: string;
-  /** Prompt string for the active device, e.g. `R1(config-if)#`. */
-  readonly activePrompt?: string;
   readonly onSelectDevice?: (id: string) => void;
   /** Links between device interfaces — drawn as edges in the canvas. */
   readonly links?: readonly Link[];
@@ -74,16 +72,20 @@ const MAX_ZOOM = 1.5;
 interface DeviceNodeData extends Record<string, unknown> {
   view: DeviceTopologyView;
   active: boolean;
-  promptLabel?: string;
   onClick: () => void;
+  /** Per-interface edge placement for in-card LEDs. Set by `layoutNodes` from
+   *  the lab's links; interfaces with no entry render in the card's bottom
+   *  row (the free-lab and unconnected-port path). */
+  portEdges: Map<string, 'left' | 'right' | 'top' | 'bottom'>;
 }
 
 const NODE_WIDTH = 200;
 const NODE_GAP = 80;
 
-/** Horizontal row layout — adequate for 1-3 devices in the rail. Larger
- *  topologies (3b+) will switch to a directed-graph layout via dagre. */
-const NODE_HEIGHT = 94;
+/** Uniform card height across router / switch / workstation. Sized to fit the
+ *  tallest current card content (PC: icon + hostname + centered IP + bottom
+ *  port row) without overflow. */
+const NODE_HEIGHT = 120;
 
 /** Initial canvas height assumed by `defaultViewport`. The panel itself is
  *  `h-full` and grows/shrinks with its parent (Layout owns the live height
@@ -99,10 +101,36 @@ const ROW_INSET_Y = Math.round((INITIAL_CANVAS_HEIGHT - NODE_HEIGHT) / 2);
 
 function layoutNodes(
   devices: readonly DeviceTopologyView[],
+  links: readonly Link[],
   activeId: string,
-  activePrompt: string | undefined,
   onSelect: (id: string) => void,
 ): Node<DeviceNodeData>[] {
+  // Per-device map: interface id → which edge of the card faces its neighbor.
+  // Mirrors EdgeOverlay's anchor logic. For each link, compare the two
+  // devices' x coordinates directly and assign from each device's own
+  // perspective:
+  //   - port on the LOWER-x device faces RIGHT toward its neighbor
+  //   - port on the HIGHER-x device faces LEFT toward its neighbor
+  // Strict `<` / `>` — same-x devices (degenerate case, never happens in the
+  // current linear layout) leave both ports off the map so they fall back to
+  // the card's bottom row. Unlinked interfaces also stay off the map.
+  const xOf = new Map(
+    devices.map((d, i) => [d.id, i * (NODE_WIDTH + NODE_GAP)] as const),
+  );
+  const portEdgesByDevice = new Map<string, Map<string, 'left' | 'right' | 'top' | 'bottom'>>();
+  for (const d of devices) portEdgesByDevice.set(d.id, new Map());
+  for (const link of links) {
+    const aX = xOf.get(link.a.deviceId);
+    const bX = xOf.get(link.b.deviceId);
+    if (aX == null || bX == null) continue;
+    if (aX < bX) {
+      portEdgesByDevice.get(link.a.deviceId)!.set(link.a.iface, 'right');
+      portEdgesByDevice.get(link.b.deviceId)!.set(link.b.iface, 'left');
+    } else if (aX > bX) {
+      portEdgesByDevice.get(link.a.deviceId)!.set(link.a.iface, 'left');
+      portEdgesByDevice.get(link.b.deviceId)!.set(link.b.iface, 'right');
+    }
+  }
   return devices.map((d, i) => ({
     id: d.id,
     type: 'device',
@@ -119,8 +147,8 @@ function layoutNodes(
     data: {
       view: d,
       active: d.id === activeId,
-      promptLabel: d.id === activeId ? activePrompt : undefined,
       onClick: () => onSelect(d.id),
+      portEdges: portEdgesByDevice.get(d.id) ?? new Map(),
     },
   }));
 }
@@ -528,7 +556,6 @@ function CanvasAutoFit({
 export function TopologyPanel({
   devices,
   activeDeviceId,
-  activePrompt,
   onSelectDevice,
   links,
   zoomOnScroll = true,
@@ -539,8 +566,8 @@ export function TopologyPanel({
   );
 
   const nodes = useMemo(
-    () => layoutNodes(devices, activeDeviceId, activePrompt, handleSelect),
-    [devices, activeDeviceId, activePrompt, handleSelect],
+    () => layoutNodes(devices, links ?? [], activeDeviceId, handleSelect),
+    [devices, links, activeDeviceId, handleSelect],
   );
 
   // Edges are drawn as an overlay SVG (see EdgeOverlay) inside the React Flow
@@ -558,18 +585,13 @@ export function TopologyPanel({
     [devices],
   );
 
-  // Center the canvas inside the (now full-width) topology band. The wrapper's
-  // max-width tracks the row's natural footprint: row width + ROW_INSET_X on
-  // each side. For a single-device free lab that's ~240px — too narrow to feel
-  // intentional in a wide band — so floor at 340px (the prior sidebar's width)
-  // so the node sits in a familiar-sized centered card. Multi-device labs grow
-  // past that automatically; when the band itself is narrower than the inner
-  // max-width (mobile portrait, ~520px embed iframe with 4 devices) the wrapper
-  // collapses to the band width and React Flow's panOnDrag handles the
-  // overflow exactly as it did pre-A1.6.
+  // Canvas wrapper fills the full band width — CanvasAutoFit centers the node
+  // row inside it via the React Flow viewport translate, so single-device labs
+  // sit centered while multi-device labs use the full breathing room. Only
+  // rowWidth is needed downstream (for CanvasAutoFit's contentWidth); the
+  // previous max-width cap is gone.
   const rowWidth =
     devices.length * NODE_WIDTH + Math.max(0, devices.length - 1) * NODE_GAP;
-  const canvasMaxWidth = Math.max(rowWidth + 2 * ROW_INSET_X, 340);
 
   // Ref handed to CanvasAutoFit — observing this element catches both
   // viewport resizes AND the Layout divider drag (which changes the parent
@@ -579,17 +601,22 @@ export function TopologyPanel({
   return (
     <ReactFlowProvider>
       {/* Outer band is h-full so Layout's state-driven topologyHeight is
-          the source of truth (was a fixed CANVAS_HEIGHT pre-A1.8). */}
-      <div className="h-full w-full bg-panel-bg">
-        {/* The centered wrapper has `relative` so CanvasControls absolute-
-            positions against the VISIBLE canvas edge, not the full-band edge.
-            (Before A1.7.1 the controls were a sibling of this wrapper — they
-            rendered hundreds of px to the right of the centered canvas and
-            were effectively invisible to a user looking at the topology.) */}
+          the source of truth (was a fixed CANVAS_HEIGHT pre-A1.8).
+          `overflow-visible` is explicit so this wrapper never clips the
+          ReactFlow surface — React Flow manages its own viewport clipping
+          via the inner `.react-flow` element, and any outer overflow:hidden
+          would crop content (e.g. edge-anchored port LEDs that hang half
+          outside the card frame) when zoomed in. */}
+      <div className="h-full w-full overflow-visible bg-panel-bg">
+        {/* The wrapper has `relative` so CanvasControls absolute-positions
+            against the canvas edge. `w-full` lets it fill the full topology
+            band — the node row is centered by CanvasAutoFit's viewport
+            translate rather than by capping the wrapper width.
+            `overflow-visible` mirrors the outer band's rule — see comment
+            there. React Flow's own viewport is the only thing that clips. */}
         <div
           ref={canvasWrapperRef}
-          className="relative mx-auto h-full"
-          style={{ maxWidth: canvasMaxWidth }}
+          className="relative h-full w-full overflow-visible"
         >
           <ReactFlow
             nodes={nodes}
@@ -656,13 +683,16 @@ export function TopologyPanel({
 const NODE_TYPES = { device: DeviceNode };
 
 function DeviceNode({ data }: NodeProps<Node<DeviceNodeData>>) {
-  const { view, active, promptLabel, onClick } = data;
+  const { view, active, onClick, portEdges } = data;
   // A PC's IP is part of its identity in the topology — students shouldn't
   // need to run `ipconfig` just to see what address their own machine has,
   // any more than they should `show ip int brief` to learn a router LAN
   // address that's already drawn on a link label. Single NIC by contract
   // (pcAdapter.toTopologyView only emits one interface).
   const pcIp = view.kind === 'pc' ? view.interfaces[0]?.ip ?? null : null;
+  const leftPorts = view.interfaces.filter((i) => portEdges.get(i.id) === 'left');
+  const rightPorts = view.interfaces.filter((i) => portEdges.get(i.id) === 'right');
+  const bottomPorts = view.interfaces.filter((i) => !portEdges.has(i.id));
   return (
     <div className="relative">
       {/* Handles for edges — visually hidden but still measurable for edge
@@ -701,44 +731,59 @@ function DeviceNode({ data }: NodeProps<Node<DeviceNodeData>>) {
         onClick={onClick}
         aria-pressed={active}
         aria-label={`Console for ${view.hostname}`}
-        style={{ width: NODE_WIDTH }}
-        className={`group flex flex-col gap-2 rounded-md border bg-gradient-to-b from-[#1b2531] to-[#0e141b] px-3 py-2.5 text-left transition-colors ${
+        style={{ width: NODE_WIDTH, height: NODE_HEIGHT }}
+        className={`group relative flex flex-col justify-between gap-2 rounded-md border bg-gradient-to-b from-[#1b2531] to-[#0e141b] px-3 py-2.5 text-left transition-colors ${
           active
             ? 'border-terminal-prompt shadow-[0_0_0_1px_rgba(94,234,212,0.25),inset_0_1px_0_rgba(255,255,255,0.06)]'
             : 'border-panel-border hover:border-terminal-dim/70'
         }`}
       >
-        <div className="flex items-baseline justify-between gap-2">
-          <span className="flex items-center gap-1.5 font-sans text-sm font-semibold tracking-tight text-terminal-fg">
-            <DeviceIcon type={view.platform} size={40} color={active ? '#e2e8f0' : '#94a3b8'} />
+        <div className="flex flex-col items-center gap-0.5">
+          <DeviceIcon type={view.platform} size={40} color={active ? '#e2e8f0' : '#94a3b8'} />
+          <span className="font-sans text-sm font-semibold tracking-tight text-terminal-fg">
             {view.hostname}
           </span>
-          <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-terminal-dim">
-            {view.platform}
-          </span>
-        </div>
-
-        <div className="flex items-end gap-1.5">
-          {view.interfaces.map((i) => (
-            <PortIndicator key={i.id} iface={i} />
-          ))}
           {pcIp ? (
             <span
-              className="ml-1 font-mono text-[10px] leading-none text-terminal-fg/80"
+              className="font-mono text-[10px] leading-none text-terminal-fg/80"
               data-pc-ip={pcIp}
             >
               {pcIp}
             </span>
           ) : null}
         </div>
+        <span className="pointer-events-none absolute right-2 top-1.5 font-mono text-[9px] uppercase tracking-[0.08em] text-terminal-dim">
+          {view.platform}
+        </span>
 
-        {promptLabel ? (
-          <div className="truncate font-mono text-[11px] leading-none text-terminal-prompt">
-            {promptLabel}
+        {bottomPorts.length > 0 ? (
+          <div className="flex items-end justify-center gap-1.5">
+            {bottomPorts.map((i) => (
+              <PortIndicator key={i.id} deviceId={view.id} iface={i} />
+            ))}
           </div>
-        ) : (
-          <div className="h-[11px]" aria-hidden />
-        )}
+        ) : null}
+
+        {leftPorts.length > 0 ? (
+          <div
+            className="pointer-events-none absolute left-0 top-1/2 flex -translate-y-1/2 flex-col gap-2"
+            data-port-edge="left"
+          >
+            {leftPorts.map((i) => (
+              <EdgePortDot key={i.id} deviceId={view.id} iface={i} position="left" />
+            ))}
+          </div>
+        ) : null}
+        {rightPorts.length > 0 ? (
+          <div
+            className="pointer-events-none absolute right-0 top-1/2 flex -translate-y-1/2 flex-col items-end gap-2"
+            data-port-edge="right"
+          >
+            {rightPorts.map((i) => (
+              <EdgePortDot key={i.id} deviceId={view.id} iface={i} position="right" />
+            ))}
+          </div>
+        ) : null}
       </button>
     </div>
   );
@@ -773,15 +818,49 @@ const STATUS_LABEL: Record<InterfaceStatus, string> = {
   'admin-down': 'administratively down',
 };
 
-function PortIndicator({ iface }: { iface: InterfaceTopologyView }) {
+function PortIndicator({
+  deviceId,
+  iface,
+}: {
+  deviceId: string;
+  iface: InterfaceTopologyView;
+}) {
   const style = STATUS_STYLE[iface.status];
   return (
     <div
       className="flex flex-col items-center gap-1"
       title={`${iface.name} — ${STATUS_LABEL[iface.status]}`}
+      data-port-key={`${deviceId}:${iface.id}`}
+      data-port-position="bottom"
     >
       <span className={`block h-2.5 w-2.5 rounded-sm ${style.dot}`} aria-hidden />
       <span className={`font-mono text-[9px] leading-none ${style.label}`}>{iface.id}</span>
     </div>
+  );
+}
+
+/** Structural anchor for a linked port on the card's left/right edge. The
+ *  iface name lives on the cable in EdgeOverlay — repeating it on the card
+ *  edge collides with the platform badge at the top-right and adds visual
+ *  noise. The span remains so positioning tests (data-port-key /
+ *  data-port-position) and any future edge-anchored affordance still have a
+ *  hook, but it intentionally renders no visible content. */
+function EdgePortDot({
+  deviceId,
+  iface,
+  position,
+}: {
+  deviceId: string;
+  iface: InterfaceTopologyView;
+  position: 'left' | 'right';
+}) {
+  return (
+    <span
+      className="block h-0 w-0"
+      title={`${iface.name} — ${STATUS_LABEL[iface.status]}`}
+      data-port-key={`${deviceId}:${iface.id}`}
+      data-port-position={position}
+      aria-hidden
+    />
   );
 }

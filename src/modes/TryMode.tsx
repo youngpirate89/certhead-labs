@@ -78,7 +78,6 @@ export function TryMode() {
         <TopologyPanel
           devices={session.devices}
           activeDeviceId={session.activeDeviceId}
-          activePrompt={session.prompt}
           onSelectDevice={session.setActiveDevice}
           links={lab.topology.links}
         />

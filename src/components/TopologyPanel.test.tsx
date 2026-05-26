@@ -80,17 +80,6 @@ describe('TopologyPanel', () => {
     expect(r2).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('shows the active prompt only on the active device', () => {
-    render(
-      <TopologyPanel
-        devices={[deviceR1(), deviceR2()]}
-        activeDeviceId="R1"
-        activePrompt="R1(config-if)#"
-      />,
-    );
-    expect(screen.getByText('R1(config-if)#')).toBeInTheDocument();
-  });
-
   it('renders interface labels and reflects status via the title tooltip', () => {
     render(<TopologyPanel devices={[deviceR1()]} activeDeviceId="R1" />);
     expect(screen.getByText('Gi0/0')).toBeInTheDocument();
@@ -399,6 +388,64 @@ describe('TopologyPanel', () => {
 
     // And the A1.6 collision floor still applies (CIDR clearly below iface).
     expect(Number(initialCidrY) - Number(initialIfaceY)).toBeGreaterThanOrEqual(20);
+  });
+
+  // ---- in-card LEDs anchored to port-facing edges -----------------------
+
+  it('places linked interfaces on the port-facing edge of the card', () => {
+    const { r1, r2 } = twoRoutersWithLink({ r2Up: true });
+    const { container } = render(
+      <TopologyPanel
+        devices={[r1, r2]}
+        activeDeviceId="R1"
+        links={[
+          { a: { deviceId: 'R1', iface: 'Gi0/0' }, b: { deviceId: 'R2', iface: 'Gi0/0' } },
+        ]}
+      />,
+    );
+    // R1 is leftmost in the row, so its linked port faces RIGHT toward R2.
+    expect(container.querySelector('[data-port-key="R1:Gi0/0"]'))
+      .toHaveAttribute('data-port-position', 'right');
+    // R2 is to the right of R1, so its linked port faces LEFT toward R1.
+    expect(container.querySelector('[data-port-key="R2:Gi0/0"]'))
+      .toHaveAttribute('data-port-position', 'left');
+  });
+
+  it('leaves unlinked interfaces in the card bottom row', () => {
+    // R1 has three interfaces; only Gi0/0 is linked. Gi0/1 and Gi0/2 must
+    // stay in the bottom row (where every port lived pre-edge-placement).
+    const { container } = render(
+      <TopologyPanel
+        devices={[deviceR1(), deviceR2()]}
+        activeDeviceId="R1"
+        links={[
+          { a: { deviceId: 'R1', iface: 'Gi0/0' }, b: { deviceId: 'R2', iface: 'Gi0/0' } },
+        ]}
+      />,
+    );
+    expect(container.querySelector('[data-port-key="R1:Gi0/0"]'))
+      .toHaveAttribute('data-port-position', 'right');
+    expect(container.querySelector('[data-port-key="R1:Gi0/1"]'))
+      .toHaveAttribute('data-port-position', 'bottom');
+    expect(container.querySelector('[data-port-key="R1:Gi0/2"]'))
+      .toHaveAttribute('data-port-position', 'bottom');
+  });
+
+  it('a zero-link lab keeps every port in the bottom row (free-lab invariant)', () => {
+    // Free lab path: single device, no links → every port falls back to the
+    // bottom row, so the user still sees admin-down→up transitions on Gi0/0.
+    const { container } = render(
+      <TopologyPanel devices={[deviceR1()]} activeDeviceId="R1" />,
+    );
+    expect(container.querySelector('[data-port-key="R1:Gi0/0"]'))
+      .toHaveAttribute('data-port-position', 'bottom');
+    expect(container.querySelector('[data-port-key="R1:Gi0/1"]'))
+      .toHaveAttribute('data-port-position', 'bottom');
+    expect(container.querySelector('[data-port-key="R1:Gi0/2"]'))
+      .toHaveAttribute('data-port-position', 'bottom');
+    // No edge-anchor containers should be in the DOM at all.
+    expect(container.querySelector('[data-port-edge="left"]')).toBeNull();
+    expect(container.querySelector('[data-port-edge="right"]')).toBeNull();
   });
 
   // zoomOnScroll prop: not directly observable in jsdom (React Flow's wheel

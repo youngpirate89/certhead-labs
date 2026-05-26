@@ -179,7 +179,7 @@ export function Layout({
             React Flow viewport on every resize. */}
         <div
           data-region="topology"
-          className="shrink-0 overflow-hidden bg-panel-bg"
+          className="shrink-0 overflow-visible bg-panel-bg"
           style={{ height: topologyHeight }}
         >
           {topology}
