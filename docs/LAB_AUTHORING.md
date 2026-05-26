@@ -95,6 +95,23 @@ with an IP+mask, omitted if neither has one. Don't lean on it for grading.
 Free-lab note: the single-device free lab has `links: []`. With no links, the canvas
 emits no LEDs and no network labels — visually identical to its pre-A1.5 render.
 
+### 2.2 One VLAN = one subnet — Cisco IOS standard practice
+
+When a lab uses VLANs, every VLAN must have its own unique IP subnet. Per the official
+CCNA cert guide (Wendell Odom, ICND1) and Cisco's VLAN configuration guides, **never
+place devices from different VLANs on the same subnet**. Same-subnet/different-VLAN
+designs teach the wrong mental model: in real networks a different VLAN is a different
+broadcast domain *and* a different IP subnet — those move together by design.
+
+Concrete: Lab 07 puts PC-A on `192.168.10.0/24` (VLAN 10 = Sales) and PC-B on
+`192.168.20.0/24` (VLAN 20 = Engineering). With this design the PCs are unreachable
+from one another at lab start (no inter-VLAN router exists), which is exactly what
+correct one-subnet-per-VLAN topology produces. The engine's `vlan-mismatch` FailReason
+only fires on same-subnet L2 delivery paths through a switch — it was useful when
+modeling the *broken* design and remains the right diagnosis there, but a properly
+designed VLAN lab will surface `no-gateway` (no router behind the switch) instead.
+Both are correct CCNA-level lessons; pick the one your lab is teaching.
+
 ---
 
 ## 3. Objectives

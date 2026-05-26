@@ -16,9 +16,10 @@ const showSubtree: CommandNode = {
   help: 'Display running system information',
   children: {
     vlan: {
-      // `show vlan` alone is a placeholder we don't support yet (Session 2+
-      // would render the full table). `show vlan brief` is the supported
-      // subcommand for Session 1.
+      // Bare `show vlan` and `show vlan brief` both print the same table —
+      // `brief` is recognised so the muscle-memory form works, but the bare
+      // form is the IOS default and also what `sh vl` resolves to.
+      terminal: true,
       help: 'VLAN information',
       children: {
         brief: done('VLAN summary table'),
@@ -170,6 +171,20 @@ const configVlanMode: CommandNode = {
     name: {
       help: 'Set the VLAN name',
       argument: arg('name', done('Apply VLAN name')),
+    },
+    // Direct hop from config-vlan → config-vlan. Real IOS lets you jump from
+    // one VLAN's configuration into another without an intermediate exit;
+    // mirrors the config-if → config-if hop in grammar.ts.
+    vlan: {
+      help: 'Create or configure another VLAN',
+      argument: arg('id', done('Enter VLAN configuration')),
+    },
+    // Direct hop from config-vlan → config-if. Real IOS treats `interface X`
+    // from any submode as a global-config command and lands directly in
+    // config-if; same dispatch path as the in-mode case (enterInterface).
+    interface: {
+      help: 'Select an interface to configure',
+      argument: arg('iface', done('Switch to interface configuration')),
     },
     exit: done('Exit to global config'),
     end: done('Return to privileged EXEC'),

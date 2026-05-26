@@ -227,7 +227,7 @@ describe('pcAdapter — ping (calls canReach)', () => {
     const out = pingFrom(ls, 'PC-A', '192.168.2.10').output.map((o) => o.text).join('\n');
     expect(out).toMatch(/Pinging 192\.168\.2\.10/);
     expect(out).toMatch(/Reply from 192\.168\.2\.10/);
-    expect(out).toMatch(/Received = 2, Lost = 0/);
+    expect(out).toMatch(/Received = 4, Lost = 0/);
   });
 
   it('missing return route → muted [sim] line names R2 (return path)', () => {
@@ -235,7 +235,9 @@ describe('pcAdapter — ping (calls canReach)', () => {
     ls = configure(ls, 'R2', ['no ip route 192.168.1.0 255.255.255.0 192.168.12.1']);
     const result = pingFrom(ls, 'PC-A', '192.168.2.10');
     const out = result.output.map((o) => o.text).join('\n');
-    expect(out).toMatch(/Request timed out\.\nRequest timed out\./);
+    expect(out).toMatch(
+      /Request timed out\.\nRequest timed out\.\nRequest timed out\.\nRequest timed out\./,
+    );
     expect(out).toMatch(/100% loss/);
     expect(out).toMatch(/\[sim\] R2 has no return route to the source\./);
     // The [sim] line must be `system` kind so the Terminal renders it dim —

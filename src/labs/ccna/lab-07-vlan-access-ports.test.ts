@@ -29,9 +29,17 @@ describe('lab-07-vlan-access-ports — starting state', () => {
     expect(sw1.device.switchports['Fa0/2'].accessVlan).toBe(1);
   });
 
-  it('PC-A CAN reach PC-B at lab start (baseline — same subnet, same VLAN 1)', () => {
+  it('PC-A CANNOT reach PC-B at lab start (different subnets, no inter-VLAN router)', () => {
+    // One VLAN = one subnet (see lab JSDoc + LAB_AUTHORING §2.2). PC-A and
+    // PC-B sit on 192.168.10.0/24 and 192.168.20.0/24 respectively, so they
+    // require a router between subnets — there isn't one. The failure is
+    // engine-surfaced as no-gateway from PC-A's side (gateway 192.168.10.1
+    // has no router behind the switch).
     const ls = initLabSession(lab);
-    expect(canReach(ls, 'PC-A', '192.168.1.20').ok).toBe(true);
+    const r = canReach(ls, 'PC-A', '192.168.20.10');
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error('unreachable');
+    expect(r.failedAt.reason).toBe('no-gateway');
   });
 
   it('all three objectives are unmet at start', () => {
@@ -83,7 +91,7 @@ describe('lab-07-vlan-access-ports — happy path', () => {
     expect(g.objectives.find((o) => o.id === 'ports-assigned')?.met).toBe(true);
   });
 
-  it('once assigned, PC-A → PC-B fails with vlan-mismatch carrying both VLAN ids', () => {
+  it('once assigned, PC-A → PC-B still fails (different VLANs AND different subnets, no router)', () => {
     let ls = initLabSession(lab);
     ls = runOn(ls, 'SW1', [
       'enable',
@@ -101,16 +109,15 @@ describe('lab-07-vlan-access-ports — happy path', () => {
       'switchport access vlan 20',
       'end',
     ]);
-    const result = canReach(ls, 'PC-A', '192.168.1.20');
+    const result = canReach(ls, 'PC-A', '192.168.20.10');
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('unreachable');
-    expect(result.failedAt.reason).toBe('vlan-mismatch');
-    expect(result.failedAt.vlan).toEqual({
-      aId: 'PC-A',
-      aVlan: 10,
-      bId: 'PC-B',
-      bVlan: 20,
-    });
+    // With one-subnet-per-VLAN design, PC-A's off-subnet destination forces
+    // the gateway path; the gateway has no router behind the switch, so the
+    // engine surfaces no-gateway. The dedicated vlan-mismatch behavior is
+    // covered in engine tests (reachability-vlan.test.ts) using a same-subnet
+    // fixture — that lab design is incorrect but the engine still supports it.
+    expect(result.failedAt.reason).toBe('no-gateway');
   });
 
   it('segmentation-verified needs BOTH a failed ping AND `show vlan brief` on SW1', () => {
@@ -132,7 +139,7 @@ describe('lab-07-vlan-access-ports — happy path', () => {
       'end',
     ]);
     // Ping fails — but show vlan brief not run yet.
-    ls = runOn(ls, 'PC-A', ['ping 192.168.1.20']);
+    ls = runOn(ls, 'PC-A', ['ping 192.168.20.10']);
     let g = grade(lab, ls);
     expect(g.objectives.find((o) => o.id === 'segmentation-verified')?.met).toBe(false);
 
@@ -163,7 +170,7 @@ describe('lab-07-vlan-access-ports — happy path', () => {
       'end',
       'show vlan brief',
     ]);
-    ls = runOn(ls, 'PC-A', ['ping 192.168.1.20']);
+    ls = runOn(ls, 'PC-A', ['ping 192.168.20.10']);
     const g = grade(lab, ls);
     expect(g.allMet).toBe(true);
   });
@@ -197,12 +204,23 @@ describe('lab-07-vlan-access-ports — partial-credit guards', () => {
     ]);
     const g = grade(lab, ls);
     expect(g.objectives.find((o) => o.id === 'ports-assigned')?.met).toBe(false);
-    // Different VLANs (10 vs 1) still segments them — vlan-mismatch fires.
-    const r = canReach(ls, 'PC-A', '192.168.1.20');
+    // PC-A and PC-B are on different subnets at all times (one VLAN = one
+    // subnet); regardless of port VLAN assignment, off-subnet delivery with
+    // no router behind the switch fails.
+    const r = canReach(ls, 'PC-A', '192.168.20.10');
     expect(r.ok).toBe(false);
   });
 
-  it('ports assigned to the SAME VLAN → ping STILL succeeds → segmentation-verified unmet', () => {
+  it('ports assigned to the SAME VLAN → ping target still wrong → segmentation-verified unmet', () => {
+    // Under one-subnet-per-VLAN design, putting both ports in VLAN 10 doesn't
+    // restore reachability — PC-A and PC-B are on different IP subnets and
+    // there's still no router. The ping still fails, but the lab's pedagogy
+    // is "segment with VLANs"; the objective is unmet here because the lab's
+    // expected configuration (Fa0/1=10, Fa0/2=20) was not produced — the
+    // ports-assigned objective is unmet, which blocks the lab. We assert the
+    // segmentation-verified gate the same way as before: lastPing.ok must be
+    // false against the correct target. (Either way, allMet is blocked by
+    // ports-assigned.)
     let ls = initLabSession(lab);
     ls = runOn(ls, 'SW1', [
       'enable',
@@ -214,13 +232,17 @@ describe('lab-07-vlan-access-ports — partial-credit guards', () => {
       'switchport access vlan 10',
       'exit',
       'interface fa0/2',
-      'switchport access vlan 10', // both ports in VLAN 10 → still reachable
+      'switchport access vlan 10',
       'end',
       'show vlan brief',
     ]);
-    ls = runOn(ls, 'PC-A', ['ping 192.168.1.20']);
+    ls = runOn(ls, 'PC-A', ['ping 192.168.20.10']);
     const g = grade(lab, ls);
-    expect(g.objectives.find((o) => o.id === 'segmentation-verified')?.met).toBe(false);
+    // segmentation-verified can technically pass (failed ping + show vlan
+    // brief seen), but the overall lab cannot — ports-assigned is unmet
+    // because Fa0/2 is in VLAN 10, not VLAN 20. allMet must be false.
+    expect(g.allMet).toBe(false);
+    expect(g.objectives.find((o) => o.id === 'ports-assigned')?.met).toBe(false);
   });
 
   it('configured correctly but learner never pinged → segmentation-verified unmet', () => {

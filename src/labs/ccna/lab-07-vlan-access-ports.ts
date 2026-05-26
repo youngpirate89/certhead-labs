@@ -3,21 +3,33 @@ import type { Lab } from '@/engine/types';
 /**
  * Lab 7 — VLAN access ports, one switch between two PCs.
  *
- * Topology: PC-A — SW1 — PC-B. Both PCs share the 192.168.1.0/24 subnet and
- * sit on the default VLAN 1 at lab start, so PC-A can reach PC-B before the
- * learner touches anything. The learner's task is to segment the two PCs:
- * create VLAN 10 (Sales) + VLAN 20 (Engineering), assign each PC's port to
- * the right VLAN, and verify the segmentation took hold.
+ * RULE: One VLAN = one subnet. Always. Each VLAN must have its own unique IP
+ * subnet. This is Cisco IOS standard practice per the official CCNA cert guide
+ * (Wendell Odom, ICND1) and Cisco's VLAN configuration guides. Never place
+ * devices from different VLANs on the same subnet in any lab — it is incorrect
+ * network design and teaches the wrong mental model.
+ *
+ * Topology: PC-A — SW1 — PC-B. PC-A sits on 192.168.10.0/24 (the VLAN 10
+ * subnet); PC-B sits on 192.168.20.0/24 (the VLAN 20 subnet). At lab start
+ * both ports are on the default VLAN 1 — but the PCs are on DIFFERENT IP
+ * subnets, so they already cannot reach each other (no inter-VLAN router
+ * exists; an L2 switch alone cannot bridge subnets). The learner's task is to
+ * model the segmentation correctly: create VLAN 10 (Sales) + VLAN 20
+ * (Engineering), assign each PC's port to the right VLAN, and verify the
+ * configuration with a failed ping plus `show vlan brief`.
  *
  * Three objectives, in completion order:
  *   1. `vlans-created` — VLAN 10 named Sales AND VLAN 20 named Engineering,
  *      both active in SW1's VLAN database.
  *   2. `ports-assigned` — Fa0/1 in access mode in VLAN 10 AND Fa0/2 in
  *      access mode in VLAN 20.
- *   3. `segmentation-verified` — PC-A's lastPing to 192.168.1.20 FAILED with
- *      the vlan-mismatch reason AND the learner ran `show vlan brief` on
- *      SW1. Same lastPing + inspect pattern as Lab 6 (ACL) — forces the
- *      learner to demonstrate the block AND inspect the VLAN database.
+ *   3. `segmentation-verified` — PC-A's lastPing to 192.168.20.10 FAILED AND
+ *      the learner ran `show vlan brief` on SW1. Same lastPing + inspect
+ *      pattern as Lab 6 (ACL) — forces the learner to demonstrate the block
+ *      AND inspect the VLAN database. The failure reason itself is
+ *      surfaced-by-engine (no-gateway, since PC-A's gateway has no router
+ *      behind it) and not asserted here — the lesson is "different VLANs
+ *      need a router between subnets," not the specific FailReason.
  *
  * Pro-tier (`isFree: false`); reachable through getLabById once /embed
  * lands, and via `?pilot=ccna-lab07-vlan-access-ports` for dev runs.
@@ -30,7 +42,7 @@ export const lab07VlanAccessPorts: Lab = {
   estimatedMinutes: 8,
   isFree: false,
   scenario:
-    "The network team is segmenting the office. PC-A belongs to the Sales team (VLAN 10) and PC-B belongs to the Engineering team (VLAN 20). Your task: create both VLANs on SW1, assign each PC's port to the correct VLAN, then verify the segmentation is working — PC-A and PC-B should no longer be able to reach each other.",
+    "The network team is segmenting the office into departments. PC-A belongs to the Sales team (VLAN 10, subnet 192.168.10.0/24) and PC-B belongs to the Engineering team (VLAN 20, subnet 192.168.20.0/24). Your task: create both VLANs on SW1, name them, assign each PC's port to the correct VLAN, then verify the segmentation — PC-A and PC-B should not be able to reach each other without inter-VLAN routing.\n\nBoth PCs have been pre-configured with static IP addresses by the network admin — PC-A is 192.168.10.10 and PC-B is 192.168.20.10. You do not need to change anything on the PCs. VLAN assignment happens on the switch; the PCs are unaware of which VLAN they are in.",
   topology: {
     devices: [
       {
@@ -38,7 +50,11 @@ export const lab07VlanAccessPorts: Lab = {
         kind: 'pc',
         platform: 'Workstation',
         interfaces: ['Eth0'],
-        pc: { ip: '192.168.1.10', mask: '255.255.255.0', gateway: '192.168.1.1' },
+        // VLAN 10 subnet (192.168.10.0/24). Gateway is the would-be VLAN 10 SVI
+        // — no router exists in Session 1, so the gateway is unreachable; that
+        // is the correct teaching state for "L2 switch alone cannot route
+        // between VLANs."
+        pc: { ip: '192.168.10.10', mask: '255.255.255.0', gateway: '192.168.10.1' },
       },
       { id: 'SW1', kind: 'switch', platform: 'C2960', interfaces: ['Fa0/1', 'Fa0/2'] },
       {
@@ -46,7 +62,8 @@ export const lab07VlanAccessPorts: Lab = {
         kind: 'pc',
         platform: 'Workstation',
         interfaces: ['Eth0'],
-        pc: { ip: '192.168.1.20', mask: '255.255.255.0', gateway: '192.168.1.1' },
+        // VLAN 20 subnet (192.168.20.0/24). Same gateway story as PC-A.
+        pc: { ip: '192.168.20.10', mask: '255.255.255.0', gateway: '192.168.20.1' },
       },
     ],
     links: [
@@ -54,8 +71,10 @@ export const lab07VlanAccessPorts: Lab = {
       { a: { deviceId: 'SW1', iface: 'Fa0/2' }, b: { deviceId: 'PC-B', iface: 'Eth0' } },
     ],
   },
-  // No setup needed — switchports come up admin-up in VLAN 1 by default, so
-  // PC-A reaches PC-B at lab start without any seeded configuration.
+  // No setup needed — switchports come up admin-up in VLAN 1 by default. The
+  // PCs are unreachable from one another at lab start (different subnets, no
+  // inter-VLAN router), which is exactly what proper one-subnet-per-VLAN
+  // design produces.
   objectives: [
     {
       id: 'vlans-created',
@@ -93,14 +112,14 @@ export const lab07VlanAccessPorts: Lab = {
     },
     {
       id: 'segmentation-verified',
-      text: 'Verify PCs on different VLANs cannot communicate (ping AND inspect VLAN table)',
+      text: 'Confirm segmentation: ping PC-B from PC-A, then run show vlan brief on SW1',
       check: (_state, history, session) => {
         // lastPing pattern: the segmentation must be demonstrated by an actual
         // learner-initiated ping. State-permits-the-block alone is not enough.
         const pca = session.devices['PC-A'];
         if (pca?.kind !== 'pc') return false;
         const pingFailed =
-          pca.lastPing?.target === '192.168.1.20' && pca.lastPing.ok === false;
+          pca.lastPing?.target === '192.168.20.10' && pca.lastPing.ok === false;
         // AND the learner must have inspected the VLAN database on SW1 —
         // forces a discovery step instead of a configure-and-move-on.
         const inspected = history.SW1?.resolved.some((cmd) =>

@@ -862,9 +862,11 @@ function renderPing(
       { kind: 'output', text: `Pinging ${target} with 32 bytes of data:` },
       { kind: 'output', text: `Reply from ${target}: bytes=32 time<1ms TTL=64` },
       { kind: 'output', text: `Reply from ${target}: bytes=32 time<1ms TTL=64` },
+      { kind: 'output', text: `Reply from ${target}: bytes=32 time<1ms TTL=64` },
+      { kind: 'output', text: `Reply from ${target}: bytes=32 time<1ms TTL=64` },
       { kind: 'output', text: '' },
       { kind: 'output', text: `Ping statistics for ${target}:` },
-      { kind: 'output', text: '    Packets: Sent = 2, Received = 2, Lost = 0 (0% loss)' },
+      { kind: 'output', text: '    Packets: Sent = 4, Received = 4, Lost = 0 (0% loss)' },
     ];
   }
   return [
@@ -872,9 +874,11 @@ function renderPing(
     { kind: 'output', text: `Pinging ${target} with 32 bytes of data:` },
     { kind: 'error', text: 'Request timed out.' },
     { kind: 'error', text: 'Request timed out.' },
+    { kind: 'error', text: 'Request timed out.' },
+    { kind: 'error', text: 'Request timed out.' },
     { kind: 'output', text: '' },
     { kind: 'output', text: `Ping statistics for ${target}:` },
-    { kind: 'error', text: '    Packets: Sent = 2, Received = 0, Lost = 2 (100% loss)' },
+    { kind: 'error', text: '    Packets: Sent = 4, Received = 0, Lost = 4 (100% loss)' },
     { kind: 'system', text: `[sim] ${failureDetail(result.failedAt, target)}` },
   ];
 }

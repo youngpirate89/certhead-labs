@@ -467,7 +467,10 @@ function show(
   args: Record<string, string>,
 ): ApplyResult {
   const what = command[1];
-  if (what === 'vlan' && command[2] === 'brief') {
+  if (what === 'vlan' && (command[2] === undefined || command[2] === 'brief')) {
+    // Bare `show vlan` and `show vlan brief` render the same table — IOS
+    // prints a longer per-VLAN block for the bare form, but the brief table
+    // covers everything our Session 1 model knows and is what students need.
     return { session: s, output: out(...showVlanBrief(s)) };
   }
   if (what === 'interfaces') {

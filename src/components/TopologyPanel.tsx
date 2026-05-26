@@ -656,6 +656,12 @@ const NODE_TYPES = { device: DeviceNode };
 
 function DeviceNode({ data }: NodeProps<Node<DeviceNodeData>>) {
   const { view, active, promptLabel, onClick } = data;
+  // A PC's IP is part of its identity in the topology — students shouldn't
+  // need to run `ipconfig` just to see what address their own machine has,
+  // any more than they should `show ip int brief` to learn a router LAN
+  // address that's already drawn on a link label. Single NIC by contract
+  // (pcAdapter.toTopologyView only emits one interface).
+  const pcIp = view.kind === 'pc' ? view.interfaces[0]?.ip ?? null : null;
   return (
     <div className="relative">
       {/* Handles for edges — visually hidden but still measurable for edge
@@ -715,6 +721,14 @@ function DeviceNode({ data }: NodeProps<Node<DeviceNodeData>>) {
           {view.interfaces.map((i) => (
             <PortIndicator key={i.id} iface={i} />
           ))}
+          {pcIp ? (
+            <span
+              className="ml-1 font-mono text-[10px] leading-none text-terminal-fg/80"
+              data-pc-ip={pcIp}
+            >
+              {pcIp}
+            </span>
+          ) : null}
         </div>
 
         {promptLabel ? (
