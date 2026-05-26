@@ -338,4 +338,315 @@ describe('switch — prefix-match parser', () => {
     ]);
     expect(swAc.device.switchports['Fa0/1'].accessVlan).toBe(10);
   });
+
+  it('resolves trunk-specific abbreviations: sw mo tr, sw tr al vl, sh int tr', () => {
+    // sw mo tr → switchport mode trunk
+    const trMode = run(fresh(), [
+      'enable',
+      'conf t',
+      'int fa0/1',
+      'sw mo tr',
+    ]);
+    expect(trMode.device.switchports['Fa0/1'].mode).toBe('trunk');
+
+    // sw tr al vl 10,20 → switchport trunk allowed vlan 10,20
+    const trAllowed = run(fresh(), [
+      'enable',
+      'conf t',
+      'int fa0/1',
+      'sw mo tr',
+      'sw tr al vl 10,20',
+    ]);
+    const allowed = trAllowed.device.switchports['Fa0/1'].trunkAllowedVlans;
+    expect(allowed).toEqual([10, 20]);
+
+    // sh int tr → show interfaces trunk (here: no trunks)
+    const blank = applySwitchCommand(run(fresh(), ['enable']), 'sh int tr');
+    expect(blank.output.some((o) => /There are no trunk interfaces\./.test(o.text))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Session 2: trunk links + VLAN-aware forwarding
+// ---------------------------------------------------------------------------
+
+describe('switch — trunk mode + allowed VLAN configuration', () => {
+  it('switchport mode trunk flips the port to trunk mode', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface fa0/3',
+      'switchport mode trunk',
+    ]);
+    expect(s.device.switchports['Fa0/3'].mode).toBe('trunk');
+  });
+
+  it('default trunk allowed list is the IOS "all" sentinel and native VLAN is 1', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface fa0/3',
+      'switchport mode trunk',
+    ]);
+    const port = s.device.switchports['Fa0/3'];
+    expect(port.trunkAllowedVlans).toBe('all');
+    expect(port.nativeVlan).toBe(1);
+  });
+
+  it('switchport trunk allowed vlan <list> REPLACES the allowed list', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface fa0/3',
+      'switchport mode trunk',
+      'switchport trunk allowed vlan 10,20',
+    ]);
+    expect(s.device.switchports['Fa0/3'].trunkAllowedVlans).toEqual([10, 20]);
+  });
+
+  it('allowed vlan accepts hyphen ranges and mixes', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface fa0/3',
+      'switchport mode trunk',
+      'switchport trunk allowed vlan 10,20-22,30',
+    ]);
+    expect(s.device.switchports['Fa0/3'].trunkAllowedVlans).toEqual([10, 20, 21, 22, 30]);
+  });
+
+  it('switchport trunk allowed vlan add APPENDS to existing list', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface fa0/3',
+      'switchport mode trunk',
+      'switchport trunk allowed vlan 10,20',
+      'switchport trunk allowed vlan add 30',
+    ]);
+    expect(s.device.switchports['Fa0/3'].trunkAllowedVlans).toEqual([10, 20, 30]);
+  });
+
+  it('switchport trunk allowed vlan remove DROPS the named VLANs', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface fa0/3',
+      'switchport mode trunk',
+      'switchport trunk allowed vlan 10,20,30',
+      'switchport trunk allowed vlan remove 20',
+    ]);
+    expect(s.device.switchports['Fa0/3'].trunkAllowedVlans).toEqual([10, 30]);
+  });
+
+  it('switchport trunk allowed vlan all resets to the IOS default sentinel', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface fa0/3',
+      'switchport mode trunk',
+      'switchport trunk allowed vlan 10',
+      'switchport trunk allowed vlan all',
+    ]);
+    expect(s.device.switchports['Fa0/3'].trunkAllowedVlans).toBe('all');
+  });
+
+  it('switchport trunk allowed vlan none empties the allowed list', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface fa0/3',
+      'switchport mode trunk',
+      'switchport trunk allowed vlan none',
+    ]);
+    expect(s.device.switchports['Fa0/3'].trunkAllowedVlans).toEqual([]);
+  });
+
+  it('switchport trunk native vlan <id> sets the native VLAN; reset returns to 1', () => {
+    const set = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface fa0/3',
+      'switchport mode trunk',
+      'switchport trunk native vlan 99',
+    ]);
+    expect(set.device.switchports['Fa0/3'].nativeVlan).toBe(99);
+
+    const reset = run(set, ['configure terminal', 'interface fa0/3', 'no switchport trunk native vlan']);
+    expect(reset.device.switchports['Fa0/3'].nativeVlan).toBe(1);
+  });
+
+  it('no switchport trunk allowed vlan resets to "all"', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface fa0/3',
+      'switchport mode trunk',
+      'switchport trunk allowed vlan 10,20',
+      'no switchport trunk allowed vlan',
+    ]);
+    expect(s.device.switchports['Fa0/3'].trunkAllowedVlans).toBe('all');
+  });
+
+  it('switchport trunk native vlan rejects out-of-range and reserved ids', () => {
+    const bad = applySwitchCommand(
+      run(fresh(), ['enable', 'configure terminal', 'interface fa0/3', 'switchport mode trunk']),
+      'switchport trunk native vlan 5000',
+    );
+    expect(bad.output.some((o) => o.kind === 'error' && /Invalid input/.test(o.text))).toBe(true);
+    expect(bad.session.device.switchports['Fa0/3'].nativeVlan).toBe(1);
+
+    const reserved = applySwitchCommand(
+      run(fresh(), ['enable', 'configure terminal', 'interface fa0/3', 'switchport mode trunk']),
+      'switchport trunk native vlan 1003',
+    );
+    expect(reserved.output.some((o) => o.kind === 'error' && /reserved/i.test(o.text))).toBe(true);
+  });
+
+  it('switchport trunk allowed vlan rejects malformed lists', () => {
+    const badRange = applySwitchCommand(
+      run(fresh(), ['enable', 'configure terminal', 'interface fa0/3', 'switchport mode trunk']),
+      'switchport trunk allowed vlan 30-10',
+    );
+    expect(badRange.output.some((o) => o.kind === 'error' && /Invalid input/.test(o.text))).toBe(true);
+
+    const nonNumeric = applySwitchCommand(
+      run(fresh(), ['enable', 'configure terminal', 'interface fa0/3', 'switchport mode trunk']),
+      'switchport trunk allowed vlan foo',
+    );
+    expect(nonNumeric.output.some((o) => o.kind === 'error' && /Invalid input/.test(o.text))).toBe(true);
+  });
+});
+
+describe('switch — show interfaces trunk', () => {
+  it('reports "no trunk interfaces" when none are configured', () => {
+    const text = applySwitchCommand(run(fresh(), ['enable']), 'show interfaces trunk')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/^There are no trunk interfaces\.$/);
+  });
+
+  it('lists only trunk-mode ports across all four sections', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'vlan 10',
+      'name Sales',
+      'exit',
+      'vlan 20',
+      'name Engineering',
+      'exit',
+      'interface fa0/1',
+      'switchport access vlan 10',
+      'exit',
+      'interface fa0/3',
+      'switchport mode trunk',
+      'end',
+    ]);
+    const text = applySwitchCommand(s, 'show interfaces trunk')
+      .output.map((o) => o.text)
+      .join('\n');
+    // Section 1: only Fa0/3 (the trunk) appears; Fa0/1 (access) does not.
+    expect(text).toMatch(/Port\s+Mode\s+Encapsulation\s+Status\s+Native vlan/);
+    expect(text).toMatch(/^Fa0\/3\s+on\s+802\.1q\s+trunking\s+1$/m);
+    expect(text).not.toMatch(/^Fa0\/1\s+/m);
+    // Section 2: allowed VLANs (default → 1-4094).
+    expect(text).toMatch(/Vlans allowed on trunk/);
+    expect(text).toMatch(/^Fa0\/3\s+1-4094$/m);
+    // Section 3: allowed + active in management domain. VLANs 1,10,20 are active.
+    expect(text).toMatch(/Vlans allowed and active in management domain/);
+    expect(text).toMatch(/^Fa0\/3\s+1,10,20$/m);
+    // Section 4: STP not modeled — mirrors section 3.
+    expect(text).toMatch(/Vlans in spanning tree forwarding state and not pruned/);
+  });
+
+  it('honors a restricted allowed list in the trunk show output', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'vlan 10',
+      'exit',
+      'vlan 20',
+      'exit',
+      'interface fa0/3',
+      'switchport mode trunk',
+      'switchport trunk allowed vlan 10,20',
+      'end',
+    ]);
+    const text = applySwitchCommand(s, 'show interfaces trunk')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/^Fa0\/3\s+10,20$/m);
+  });
+});
+
+describe('switch — show interfaces switchport (trunk fields)', () => {
+  it('adds Trunking VLANs Enabled and reports trunk mode/native VLAN for trunk ports', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface fa0/3',
+      'switchport mode trunk',
+      'end',
+    ]);
+    const text = applySwitchCommand(s, 'show interfaces fa0/3 switchport')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/^Administrative Mode: trunk$/m);
+    expect(text).toMatch(/^Operational Mode: trunk$/m);
+    expect(text).toMatch(/^Trunking Native Mode VLAN: 1 \(default\)$/m);
+    expect(text).toMatch(/^Trunking VLANs Enabled: ALL$/m);
+  });
+
+  it('lists explicit allowed list when set', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface fa0/3',
+      'switchport mode trunk',
+      'switchport trunk allowed vlan 10,20',
+      'end',
+    ]);
+    const text = applySwitchCommand(s, 'show interfaces fa0/3 switchport')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/^Trunking VLANs Enabled: 10,20$/m);
+  });
+});
+
+describe('switch — running-config trunk stanza', () => {
+  it('emits switchport mode trunk and only NON-default trunk settings', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface fa0/3',
+      'switchport mode trunk',
+      'switchport trunk allowed vlan 10,20',
+      'switchport trunk native vlan 99',
+      'end',
+    ]);
+    const text = applySwitchCommand(s, 'show running-config')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/^interface FastEthernet0\/3$/m);
+    expect(text).toMatch(/^ switchport mode trunk$/m);
+    expect(text).toMatch(/^ switchport trunk allowed vlan 10,20$/m);
+    expect(text).toMatch(/^ switchport trunk native vlan 99$/m);
+  });
+
+  it('omits switchport trunk allowed vlan when at default "all"', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface fa0/3',
+      'switchport mode trunk',
+      'end',
+    ]);
+    const text = applySwitchCommand(s, 'show running-config')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/^ switchport mode trunk$/m);
+    expect(text).not.toMatch(/switchport trunk allowed vlan/);
+    expect(text).not.toMatch(/switchport trunk native vlan/);
+  });
 });

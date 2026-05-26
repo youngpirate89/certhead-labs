@@ -130,3 +130,169 @@ describe('canReach — VLAN-aware L2 forwarding via a switch', () => {
     expect(result.ok).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Session 2 — trunk links between switches
+// ---------------------------------------------------------------------------
+
+/** PC-A — SW1 ── (trunk) ── SW2 — PC-B. Same /24 subnet, both ends seeded to
+ *  VLAN 10 on the access ports; the inter-switch link is the variable. */
+function twoSwitchLab(): Lab {
+  return {
+    id: 'fixture-trunk',
+    title: 'trunk-fixture',
+    exam: 'TEST',
+    difficulty: 1,
+    estimatedMinutes: 1,
+    isFree: false,
+    scenario: 'fixture',
+    topology: {
+      devices: [
+        {
+          id: 'PC-A',
+          kind: 'pc',
+          platform: 'Workstation',
+          interfaces: ['Eth0'],
+          pc: { ip: '192.168.10.10', mask: '255.255.255.0', gateway: '192.168.10.1' },
+        },
+        {
+          id: 'SW1',
+          kind: 'switch',
+          platform: 'C2960',
+          interfaces: ['Fa0/1', 'Fa0/24'],
+        },
+        {
+          id: 'SW2',
+          kind: 'switch',
+          platform: 'C2960',
+          interfaces: ['Fa0/1', 'Fa0/24'],
+        },
+        {
+          id: 'PC-B',
+          kind: 'pc',
+          platform: 'Workstation',
+          interfaces: ['Eth0'],
+          pc: { ip: '192.168.10.20', mask: '255.255.255.0', gateway: '192.168.10.1' },
+        },
+      ],
+      links: [
+        { a: { deviceId: 'PC-A', iface: 'Eth0' }, b: { deviceId: 'SW1', iface: 'Fa0/1' } },
+        { a: { deviceId: 'SW1', iface: 'Fa0/24' }, b: { deviceId: 'SW2', iface: 'Fa0/24' } },
+        { a: { deviceId: 'SW2', iface: 'Fa0/1' }, b: { deviceId: 'PC-B', iface: 'Eth0' } },
+      ] satisfies Link[],
+    },
+    setup: {
+      SW1: [
+        'enable',
+        'configure terminal',
+        'vlan 10',
+        'name Sales',
+        'exit',
+        'interface fa0/1',
+        'switchport mode access',
+        'switchport access vlan 10',
+      ],
+      SW2: [
+        'enable',
+        'configure terminal',
+        'vlan 10',
+        'name Sales',
+        'exit',
+        'interface fa0/1',
+        'switchport mode access',
+        'switchport access vlan 10',
+      ],
+    },
+    objectives: [],
+    hints: [],
+  };
+}
+
+describe('canReach — trunk links between switches', () => {
+  it('same VLAN both sides but no trunk → trunk-not-configured with both ends named', () => {
+    const ls = initLabSession(twoSwitchLab());
+    const r = canReach(ls, 'PC-A', '192.168.10.20');
+    if (r.ok) throw new Error('expected trunk-not-configured');
+    expect(r.failedAt.reason).toBe('trunk-not-configured');
+    expect(r.failedAt.trunk).toEqual({
+      aDevice: 'SW1',
+      aIface: 'Fa0/24',
+      bDevice: 'SW2',
+      bIface: 'Fa0/24',
+    });
+  });
+
+  it('both ends trunk + VLAN 10 allowed → reachable', () => {
+    let ls = initLabSession(twoSwitchLab());
+    ls = runOn(ls, 'SW1', [
+      'enable',
+      'configure terminal',
+      'interface fa0/24',
+      'switchport mode trunk',
+      'end',
+    ]);
+    ls = runOn(ls, 'SW2', [
+      'enable',
+      'configure terminal',
+      'interface fa0/24',
+      'switchport mode trunk',
+      'end',
+    ]);
+    const r = canReach(ls, 'PC-A', '192.168.10.20');
+    expect(r.ok).toBe(true);
+  });
+
+  it('trunk configured but VLAN 10 removed from allowed list → vlan-not-allowed', () => {
+    let ls = initLabSession(twoSwitchLab());
+    ls = runOn(ls, 'SW1', [
+      'enable',
+      'configure terminal',
+      'interface fa0/24',
+      'switchport mode trunk',
+      'switchport trunk allowed vlan 20', // VLAN 10 absent
+      'end',
+    ]);
+    ls = runOn(ls, 'SW2', [
+      'enable',
+      'configure terminal',
+      'interface fa0/24',
+      'switchport mode trunk',
+      'end',
+    ]);
+    const r = canReach(ls, 'PC-A', '192.168.10.20');
+    if (r.ok) throw new Error('expected vlan-not-allowed');
+    expect(r.failedAt.reason).toBe('vlan-not-allowed');
+    expect(r.failedAt.vlanAllow).toEqual({ vlanId: 10 });
+    expect(r.failedAt.deviceId).toBe('SW1');
+    expect(r.failedAt.iface).toBe('Fa0/24');
+  });
+
+  it('different VLANs across the trunk → vlan-mismatch (NOT trunk-not-configured)', () => {
+    let ls = initLabSession(twoSwitchLab());
+    // SW2's PC-facing port lands in VLAN 20 instead of 10.
+    ls = runOn(ls, 'SW2', [
+      'enable',
+      'configure terminal',
+      'vlan 20',
+      'name Engineering',
+      'exit',
+      'interface fa0/1',
+      'switchport access vlan 20',
+      'exit',
+      'interface fa0/24',
+      'switchport mode trunk',
+      'end',
+    ]);
+    ls = runOn(ls, 'SW1', [
+      'enable',
+      'configure terminal',
+      'interface fa0/24',
+      'switchport mode trunk',
+      'end',
+    ]);
+    const r = canReach(ls, 'PC-A', '192.168.10.20');
+    if (r.ok) throw new Error('expected vlan-mismatch');
+    expect(r.failedAt.reason).toBe('vlan-mismatch');
+    expect(r.failedAt.vlan).toMatchObject({ aVlan: 10, bVlan: 20 });
+  });
+});

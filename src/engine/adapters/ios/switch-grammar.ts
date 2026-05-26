@@ -28,6 +28,15 @@ const showSubtree: CommandNode = {
     interfaces: {
       terminal: true,
       help: 'Interface status and configuration',
+      // `show interfaces trunk` is a keyword child, NOT an interface argument —
+      // it lists every trunk-mode port rather than describing one named iface.
+      // Must precede the `argument` slot for the resolver to prefer it on the
+      // word `trunk`; the resolver's keyword-vs-argument precedence handles
+      // this automatically (keywords first, argument fallback only when no
+      // child keyword prefix-matches).
+      children: {
+        trunk: done('Status of trunking interfaces'),
+      },
       argument: arg('iface', {
         terminal: true,
         help: 'Per-interface status',
@@ -106,13 +115,14 @@ const configIfMode: CommandNode = {
           help: 'Set the switchport operating mode',
           children: {
             access: done('Set port to access mode'),
-            // Reserved keywords so prefix-match works without surprising the
-            // learner; execution returns a Session-2 redirect.
-            trunk: done('Set port to trunk mode (Session 2)'),
+            trunk: done('Set port to unconditional trunk mode'),
+            // Reserved — `dynamic auto/desirable` still lands on the
+            // explicit "not supported in this lab" error so the learner
+            // gets a clear message instead of a silent no-op.
             dynamic: {
               children: {
-                auto: done('Dynamic negotiation, prefer access (Session 2)'),
-                desirable: done('Dynamic negotiation, prefer trunk (Session 2)'),
+                auto: done('Dynamic negotiation, prefer access (not modeled)'),
+                desirable: done('Dynamic negotiation, prefer trunk (not modeled)'),
               },
             },
           },
@@ -123,6 +133,41 @@ const configIfMode: CommandNode = {
             vlan: {
               help: 'Assign the port to a VLAN',
               argument: arg('id', done('Apply access VLAN')),
+            },
+          },
+        },
+        trunk: {
+          help: 'Configure trunk-mode parameters',
+          children: {
+            allowed: {
+              help: 'VLAN list allowed on this trunk',
+              children: {
+                vlan: {
+                  help: 'Set the allowed VLAN list',
+                  children: {
+                    all: done('Allow all VLANs (default)'),
+                    none: done('Allow no VLANs'),
+                    add: {
+                      help: 'Append VLANs to the existing allowed list',
+                      argument: arg('list', done('Apply VLAN list')),
+                    },
+                    remove: {
+                      help: 'Remove VLANs from the allowed list',
+                      argument: arg('list', done('Apply VLAN list')),
+                    },
+                  },
+                  argument: arg('list', done('Replace the allowed VLAN list')),
+                },
+              },
+            },
+            native: {
+              help: 'Configure the trunk native VLAN',
+              children: {
+                vlan: {
+                  help: 'Set the native (untagged) VLAN',
+                  argument: arg('id', done('Apply native VLAN')),
+                },
+              },
             },
           },
         },
@@ -155,6 +200,19 @@ const configIfMode: CommandNode = {
               help: 'Reset access-mode parameters',
               children: {
                 vlan: done('Reset access VLAN to 1'),
+              },
+            },
+            trunk: {
+              help: 'Reset trunk-mode parameters',
+              children: {
+                allowed: {
+                  help: 'Reset allowed VLAN list',
+                  children: { vlan: done('Reset allowed list to all VLANs') },
+                },
+                native: {
+                  help: 'Reset native VLAN',
+                  children: { vlan: done('Reset native VLAN to 1') },
+                },
               },
             },
           },

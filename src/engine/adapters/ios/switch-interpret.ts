@@ -14,12 +14,15 @@ import { switchGrammarFor } from './switch-grammar';
 import {
   type SwitchMode,
   type SwitchSession,
+  type Switchport,
   type Vlan,
   defaultVlanName,
+  formatVlanList,
   fullSwitchportName,
   isReservedVlan,
   isValidVlanId,
   normaliseSwitchportId,
+  parseVlanList,
   switchPrompt,
 } from './switch-state';
 import type {
@@ -341,16 +344,19 @@ function handleSwitchport(
       port.mode = 'access';
       return { session: s, output: [] };
     }
-    // Trunk and dynamic land in Session 2 — until then they're recognised but
-    // not honored; we tell the learner explicitly so a typo'd intent gets
-    // surfaced rather than silently being accepted as access.
+    if (desired === 'trunk') {
+      port.mode = 'trunk';
+      return { session: s, output: [] };
+    }
+    // `dynamic auto/desirable` still rejected — DTP negotiation is not
+    // modeled and a silent accept-as-trunk would mislead the learner.
     return {
       session: s,
-      output: err(
-        '% Trunk and dynamic switchport modes are not supported in this lab.',
-      ),
+      output: err('% Dynamic switchport modes are not supported in this lab.'),
     };
   }
+
+  if (command[1] === 'trunk') return handleSwitchportTrunk(s, port, command, args);
 
   if (command[1] === 'access' && command[2] === 'vlan') {
     const idArg = args.id;
@@ -380,6 +386,96 @@ function handleSwitchport(
   }
 
   return { session: s, output: err('% Incomplete command.') };
+}
+
+/** Dispatch every `switchport trunk …` form. The grammar already shapes the
+ *  command array; we route on command[2]/command[3] and capture the typed
+ *  list (or VLAN id) from `args`. IOS-faithful behavior:
+ *    - `allowed vlan <list>`     → replace
+ *    - `allowed vlan add <list>` → union
+ *    - `allowed vlan remove <list>` → difference
+ *    - `allowed vlan all`        → reset sentinel
+ *    - `allowed vlan none`       → empty list
+ *    - `native vlan <id>`        → set native VLAN
+ *
+ *  Trunk subcommands are accepted regardless of current mode — IOS lets you
+ *  stage trunk config on an access port; the settings only take effect once
+ *  `switchport mode trunk` is applied. Our model holds the same data so the
+ *  next mode flip surfaces the staged values without re-typing them. */
+function handleSwitchportTrunk(
+  s: SwitchSession,
+  port: Switchport,
+  command: string[],
+  args: Record<string, string>,
+): ApplyResult {
+  if (command[2] === 'allowed' && command[3] === 'vlan') {
+    const op = command[4];
+    if (op === 'all') {
+      port.trunkAllowedVlans = 'all';
+      return { session: s, output: [] };
+    }
+    if (op === 'none') {
+      port.trunkAllowedVlans = [];
+      return { session: s, output: [] };
+    }
+    if (op === 'add' || op === 'remove') {
+      const parsed = parseVlanList(args.list ?? '');
+      if (!parsed) {
+        return { session: s, output: err(`% Invalid input detected at "${args.list}".`) };
+      }
+      const current = port.trunkAllowedVlans === 'all' ? allVlans() : [...port.trunkAllowedVlans];
+      const next = op === 'add' ? unionSorted(current, parsed) : differenceSorted(current, parsed);
+      port.trunkAllowedVlans = next;
+      return { session: s, output: [] };
+    }
+    // Bare `switchport trunk allowed vlan <list>` — replace.
+    const parsed = parseVlanList(args.list ?? '');
+    if (!parsed) {
+      return { session: s, output: err(`% Invalid input detected at "${args.list}".`) };
+    }
+    port.trunkAllowedVlans = parsed;
+    return { session: s, output: [] };
+  }
+
+  if (command[2] === 'native' && command[3] === 'vlan') {
+    const idArg = args.id;
+    const id = Number.parseInt(idArg, 10);
+    if (!isValidVlanId(id) || String(id) !== idArg) {
+      return { session: s, output: err(`% Invalid input detected at "${idArg}".`) };
+    }
+    if (isReservedVlan(id)) {
+      return {
+        session: s,
+        output: err(
+          '% VLAN ids 1002-1005 are reserved for Token Ring and FDDI and cannot be configured',
+        ),
+      };
+    }
+    port.nativeVlan = id;
+    return { session: s, output: [] };
+  }
+
+  return { session: s, output: err('% Incomplete command.') };
+}
+
+function allVlans(): number[] {
+  const out: number[] = [];
+  for (let i = 1; i <= 4094; i++) {
+    if (i >= 1002 && i <= 1005) continue;
+    out.push(i);
+  }
+  return out;
+}
+
+function unionSorted(a: readonly number[], b: readonly number[]): number[] {
+  const set = new Set<number>(a);
+  for (const n of b) set.add(n);
+  return Array.from(set).sort((x, y) => x - y);
+}
+
+function differenceSorted(a: readonly number[], b: readonly number[]): number[] {
+  const drop = new Set<number>(b);
+  return a.filter((n) => !drop.has(n));
 }
 
 function setSwitchportAdmin(s: SwitchSession, up: boolean): ApplyResult {
@@ -455,6 +551,28 @@ function negate(
         if (port) port.accessVlan = 1;
         return { session: s, output: [] };
       }
+      // `no switchport trunk allowed vlan` — reset to the IOS default (all).
+      if (
+        s.currentInterface &&
+        command[2] === 'trunk' &&
+        command[3] === 'allowed' &&
+        command[4] === 'vlan'
+      ) {
+        const port = s.device.switchports[s.currentInterface];
+        if (port) port.trunkAllowedVlans = 'all';
+        return { session: s, output: [] };
+      }
+      // `no switchport trunk native vlan` — reset to VLAN 1.
+      if (
+        s.currentInterface &&
+        command[2] === 'trunk' &&
+        command[3] === 'native' &&
+        command[4] === 'vlan'
+      ) {
+        const port = s.device.switchports[s.currentInterface];
+        if (port) port.nativeVlan = 1;
+        return { session: s, output: [] };
+      }
       return { session: s, output: [] };
     default:
       return { session: s, output: err('% Incomplete command.') };
@@ -474,6 +592,10 @@ function show(
     return { session: s, output: out(...showVlanBrief(s)) };
   }
   if (what === 'interfaces') {
+    // `show interfaces trunk` — keyword child, NOT a per-iface form.
+    if (command[2] === 'trunk') {
+      return { session: s, output: out(...showInterfacesTrunk(s)) };
+    }
     if (command[3] === 'switchport' && args.iface) {
       return showInterfacesSwitchport(s, args.iface);
     }
@@ -525,8 +647,9 @@ function portsInVlan(s: SwitchSession, vlanId: number): string[] {
     .map((p) => p.id);
 }
 
-/** IOS `show interfaces <iface> switchport` — minimal block with the four
- *  lines a CCNA student looks at. */
+/** IOS `show interfaces <iface> switchport` — minimal block with the lines a
+ *  CCNA student looks at. Trunk-mode ports add the Trunking Native VLAN +
+ *  Trunking VLANs Enabled lines per the IOS trunk format. */
 function showInterfacesSwitchport(s: SwitchSession, ifaceToken: string): ApplyResult {
   const id = normaliseSwitchportId(ifaceToken);
   if (!id || !s.device.switchports[id]) {
@@ -535,9 +658,14 @@ function showInterfacesSwitchport(s: SwitchSession, ifaceToken: string): ApplyRe
   const port = s.device.switchports[id];
   const vlan = s.device.vlans.get(port.accessVlan);
   const vlanLabel = vlan ? `${port.accessVlan} (${vlan.name})` : `${port.accessVlan}`;
-  const defaultVlan = s.device.vlans.get(1);
-  const nativeLabel = defaultVlan ? `1 (${defaultVlan.name})` : '1';
-  const lines = [
+  const nativeVlan = s.device.vlans.get(port.nativeVlan);
+  const nativeLabel =
+    port.nativeVlan === 1 && nativeVlan
+      ? `1 (${nativeVlan.name})`
+      : nativeVlan
+        ? `${port.nativeVlan} (${nativeVlan.name})`
+        : `${port.nativeVlan}`;
+  const lines: string[] = [
     `Name: ${port.id}`,
     'Switchport: Enabled',
     `Administrative Mode: ${formatModeLabel(port.mode)}`,
@@ -545,6 +673,15 @@ function showInterfacesSwitchport(s: SwitchSession, ifaceToken: string): ApplyRe
     `Access Mode VLAN: ${vlanLabel}`,
     `Trunking Native Mode VLAN: ${nativeLabel}`,
   ];
+  if (port.mode === 'trunk') {
+    const allowed =
+      port.trunkAllowedVlans === 'all'
+        ? 'ALL'
+        : port.trunkAllowedVlans.length === 0
+          ? 'NONE'
+          : formatVlanList(port.trunkAllowedVlans);
+    lines.push(`Trunking VLANs Enabled: ${allowed}`);
+  }
   return { session: s, output: out(...lines) };
 }
 
@@ -552,6 +689,96 @@ function formatModeLabel(mode: 'access' | 'trunk' | 'dynamic'): string {
   if (mode === 'access') return 'static access';
   if (mode === 'trunk') return 'trunk';
   return 'dynamic auto';
+}
+
+/** IOS `show interfaces trunk` — four-section table covering every port
+ *  currently in trunk mode. Sections:
+ *    1. Port / Mode / Encapsulation / Status / Native vlan
+ *    2. Port / Vlans allowed on trunk
+ *    3. Port / Vlans allowed and active in management domain
+ *    4. Port / Vlans in spanning tree forwarding state and not pruned
+ *
+ *  We don't model STP, so section 4 mirrors section 3 (every active+allowed
+ *  VLAN is "in forwarding state and not pruned"). Matches the IOS output
+ *  format documented in the Catalyst VLAN configuration guides. */
+function showInterfacesTrunk(s: SwitchSession): string[] {
+  const trunkPorts = Object.values(s.device.switchports).filter(
+    (p) => p.mode === 'trunk',
+  );
+  if (trunkPorts.length === 0) {
+    return ['There are no trunk interfaces.'];
+  }
+  const portCol = 12;
+  const modeCol = 13;
+  const encapCol = 15;
+  const statusCol = 14;
+
+  const lines: string[] = [];
+  lines.push(
+    'Port'.padEnd(portCol) +
+      'Mode'.padEnd(modeCol) +
+      'Encapsulation'.padEnd(encapCol) +
+      'Status'.padEnd(statusCol) +
+      'Native vlan',
+  );
+  for (const port of trunkPorts) {
+    const status = port.adminUp && port.protocolUp ? 'trunking' : 'not-trunking';
+    lines.push(
+      port.id.padEnd(portCol) +
+        'on'.padEnd(modeCol) +
+        '802.1q'.padEnd(encapCol) +
+        status.padEnd(statusCol) +
+        port.nativeVlan,
+    );
+  }
+
+  lines.push('');
+  lines.push('Port'.padEnd(portCol) + 'Vlans allowed on trunk');
+  for (const port of trunkPorts) {
+    const allowed =
+      port.trunkAllowedVlans === 'all'
+        ? '1-4094'
+        : port.trunkAllowedVlans.length === 0
+          ? 'none'
+          : formatVlanList(port.trunkAllowedVlans);
+    lines.push(port.id.padEnd(portCol) + allowed);
+  }
+
+  const activeVlanIds = activeAllowedVlans(s);
+
+  lines.push('');
+  lines.push('Port'.padEnd(portCol) + 'Vlans allowed and active in management domain');
+  for (const port of trunkPorts) {
+    const intersected = intersectAllowedWithActive(port, activeVlanIds);
+    lines.push(port.id.padEnd(portCol) + (intersected.length ? formatVlanList(intersected) : 'none'));
+  }
+
+  lines.push('');
+  lines.push('Port'.padEnd(portCol) + 'Vlans in spanning tree forwarding state and not pruned');
+  for (const port of trunkPorts) {
+    const intersected = intersectAllowedWithActive(port, activeVlanIds);
+    lines.push(port.id.padEnd(portCol) + (intersected.length ? formatVlanList(intersected) : 'none'));
+  }
+
+  return lines;
+}
+
+/** Sorted list of every VLAN id currently active in the switch's database. */
+function activeAllowedVlans(s: SwitchSession): number[] {
+  const out: number[] = [];
+  for (const v of s.device.vlans.values()) {
+    if (v.active && !isReservedVlan(v.id)) out.push(v.id);
+  }
+  return out.sort((a, b) => a - b);
+}
+
+function intersectAllowedWithActive(
+  port: Switchport,
+  active: readonly number[],
+): number[] {
+  if (port.trunkAllowedVlans === 'all') return [...active];
+  const allow = new Set<number>(port.trunkAllowedVlans);
+  return active.filter((id) => allow.has(id));
 }
 
 /** Minimal `show interfaces <iface>` — admin state + line protocol. Switches
@@ -610,9 +837,22 @@ function showRunningConfig(s: SwitchSession): string[] {
     // because we don't model 'default dynamic' and because a learner running
     // `show running-config` after `switchport mode access` needs to see the
     // line they just typed in the output.
-    if (port.mode === 'access') lines.push(' switchport mode access');
-    if (port.accessVlan !== 1) {
-      lines.push(` switchport access vlan ${port.accessVlan}`);
+    if (port.mode === 'access') {
+      lines.push(' switchport mode access');
+      if (port.accessVlan !== 1) {
+        lines.push(` switchport access vlan ${port.accessVlan}`);
+      }
+    } else if (port.mode === 'trunk') {
+      lines.push(' switchport mode trunk');
+      // Per official IOS behaviour: omit `switchport trunk allowed vlan`
+      // when set to the default 'all'. Same for native VLAN at default 1.
+      if (port.trunkAllowedVlans !== 'all') {
+        const list = port.trunkAllowedVlans.length === 0 ? 'none' : formatVlanList(port.trunkAllowedVlans);
+        lines.push(` switchport trunk allowed vlan ${list}`);
+      }
+      if (port.nativeVlan !== 1) {
+        lines.push(` switchport trunk native vlan ${port.nativeVlan}`);
+      }
     }
     if (!port.adminUp) lines.push(' shutdown');
     lines.push('!');

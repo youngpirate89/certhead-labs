@@ -26,9 +26,17 @@ export interface Vlan {
 
 /** Per-port configuration. Switchports are L2 — they do NOT carry IPs.
  *
- *  `mode` is always 'access' in Session 1. The 'trunk' and 'dynamic' variants
- *  are reserved in the type so a later session can switch on them without
- *  restructuring the state shape. */
+ *  Session 1 added access mode + the VLAN database. Session 2 adds trunk mode
+ *  and per-trunk allowed/native VLAN configuration. `dynamic` remains reserved
+ *  for a later session.
+ *
+ *  `trunkAllowedVlans === 'all'` is the sentinel for the IOS default (1-4094);
+ *  the show layer renders it as the range string and `show running-config`
+ *  omits the line entirely, matching IOS's "default value is hidden from
+ *  running-config" behaviour. Storing a 4094-element array per port would
+ *  match the spec literally but is wasteful and indistinguishable from a
+ *  learner who explicitly typed the full list — the sentinel keeps the
+ *  distinction. */
 export interface Switchport {
   /** Canonical interface id, e.g. 'Fa0/1'. */
   readonly id: string;
@@ -37,6 +45,11 @@ export interface Switchport {
   mode: 'access' | 'trunk' | 'dynamic';
   /** VLAN id this port belongs to in access mode. Defaults to 1. */
   accessVlan: number;
+  /** Allowed VLAN list when in trunk mode. 'all' is the IOS default sentinel
+   *  (1-4094). An explicit array is the learner-configured list. */
+  trunkAllowedVlans: number[] | 'all';
+  /** Native (untagged) VLAN on a trunk. IOS default is 1. */
+  nativeVlan: number;
   adminUp: boolean;
   /** Refreshed by the LabSession layer — true when the cabled peer is up. */
   protocolUp: boolean;
@@ -130,6 +143,11 @@ export function buildSwitchDevice(spec: {
       name: fullSwitchportName(id),
       mode: 'access',
       accessVlan: 1,
+      // Trunk fields default to IOS factory: all VLANs allowed, native VLAN 1.
+      // They are unused while mode === 'access' but keep the type non-optional
+      // so the dispatcher doesn't need conditional reads.
+      trunkAllowedVlans: 'all',
+      nativeVlan: 1,
       // Real switches boot with ports admin-up by default (unlike routers,
       // which require `no shutdown`). The work order's seeding pattern
       // assumes this — Fa0/1 and Fa0/2 are reachable at lab start.
@@ -168,6 +186,66 @@ export function createSwitchSession(device: SwitchDeviceState): SwitchSession {
  *  handles Map natively. */
 export function cloneSwitchDevice(device: SwitchDeviceState): SwitchDeviceState {
   return structuredClone(device);
+}
+
+/** Parse a Cisco-style VLAN list — `10`, `10,20`, `10-20`, `10,20-25,30` —
+ *  into a sorted, deduplicated array of VLAN ids. Returns null on any
+ *  malformed token (non-numeric, reversed range, out-of-range id, reserved
+ *  id). Whitespace is not allowed around `,` or `-` — IOS rejects spaces
+ *  inside the list too. */
+export function parseVlanList(input: string): number[] | null {
+  if (input.length === 0) return null;
+  const out = new Set<number>();
+  for (const part of input.split(',')) {
+    if (part.length === 0) return null;
+    if (part.includes('-')) {
+      const m = /^(\d+)-(\d+)$/.exec(part);
+      if (!m) return null;
+      const a = Number.parseInt(m[1], 10);
+      const b = Number.parseInt(m[2], 10);
+      if (!isValidVlanId(a) || !isValidVlanId(b) || isReservedVlan(a) || isReservedVlan(b)) {
+        return null;
+      }
+      if (a > b) return null;
+      for (let i = a; i <= b; i++) out.add(i);
+    } else {
+      const n = Number.parseInt(part, 10);
+      if (String(n) !== part || !isValidVlanId(n) || isReservedVlan(n)) return null;
+      out.add(n);
+    }
+  }
+  return Array.from(out).sort((x, y) => x - y);
+}
+
+/** Format a sorted VLAN-id array as a Cisco-style condensed list (`1,3-5,8`).
+ *  Empty array renders as 'none' — what IOS prints for an empty allowed list. */
+export function formatVlanList(vlans: readonly number[]): string {
+  if (vlans.length === 0) return 'none';
+  const out: string[] = [];
+  let runStart = vlans[0];
+  let runEnd = vlans[0];
+  for (let i = 1; i < vlans.length; i++) {
+    const v = vlans[i];
+    if (v === runEnd + 1) {
+      runEnd = v;
+      continue;
+    }
+    out.push(runStart === runEnd ? `${runStart}` : `${runStart}-${runEnd}`);
+    runStart = v;
+    runEnd = v;
+  }
+  out.push(runStart === runEnd ? `${runStart}` : `${runStart}-${runEnd}`);
+  return out.join(',');
+}
+
+/** True when the trunk's allowed list includes the given VLAN. The 'all'
+ *  sentinel means every VLAN 1-4094 is allowed, matching the IOS default. */
+export function trunkAllowsVlan(
+  allowed: readonly number[] | 'all',
+  vlanId: number,
+): boolean {
+  if (allowed === 'all') return true;
+  return allowed.includes(vlanId);
 }
 
 /** The prompt string for the switch's current mode. */

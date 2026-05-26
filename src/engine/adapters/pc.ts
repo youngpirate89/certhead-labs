@@ -891,9 +891,9 @@ function renderPing(
  * and depend on this mapping — add a `case` per new reason.
  */
 function failureDetail(failedAt: FailPoint, target: string): string {
-  const { reason, direction, deviceId, iface, acl, vlan } = failedAt;
+  const { reason, direction, deviceId, iface, acl, vlan, trunk, vlanAllow } = failedAt;
   const place = iface ? `${deviceId} ${iface}` : deviceId;
-  const d = detailFor(reason, place, deviceId, direction, target, acl, vlan);
+  const d = detailFor(reason, place, deviceId, direction, target, acl, vlan, trunk, vlanAllow);
   return d.charAt(0).toUpperCase() + d.slice(1);
 }
 
@@ -905,6 +905,8 @@ function detailFor(
   target: string,
   acl: FailPoint['acl'],
   vlan: FailPoint['vlan'],
+  trunk: FailPoint['trunk'],
+  vlanAllow: FailPoint['vlanAllow'],
 ): string {
   switch (reason) {
     case 'no-route':
@@ -950,5 +952,18 @@ function detailFor(
       // verbatim in test assertions.
       if (!vlan) return `${place} blocked the packet at the VLAN boundary.`;
       return `${vlan.aId} and ${vlan.bId} are on different VLANs (${vlan.aVlan} and ${vlan.bVlan}) — inter-VLAN routing is not configured.`;
+    case 'trunk-not-configured':
+      // Trunk context is always present when reason==='trunk-not-configured';
+      // sentence wording is fixed by the Session-2 work order so labs can
+      // match it verbatim. Names BOTH ends of the link — the learner needs
+      // to configure trunk mode on both switches, so both should appear.
+      if (!trunk) return `${place} is not configured as a trunk.`;
+      return `the link between ${trunk.aDevice} ${trunk.aIface} and ${trunk.bDevice} ${trunk.bIface} is not configured as a trunk — VLANs cannot pass between switches.`;
+    case 'vlan-not-allowed':
+      // vlanAllow always present — names the VLAN that was filtered out of
+      // the trunk's allowed list. The trunk IS configured; the learner just
+      // needs to add the VLAN to the allowed list on the named port.
+      if (!vlanAllow) return `${place} blocked the packet at the trunk boundary.`;
+      return `VLAN ${vlanAllow.vlanId} is not in the allowed VLAN list on ${place}.`;
   }
 }

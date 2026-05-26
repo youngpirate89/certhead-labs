@@ -17,6 +17,7 @@ import type { LabSession, DeviceSession } from './lab-session';
 import type { InterfaceState, Session as RouterSession } from './adapters/ios/state';
 import type { PcSession } from './adapters/pc';
 import type { SwitchSession } from './adapters/ios/switch-state';
+import { trunkAllowsVlan } from './adapters/ios/switch-state';
 import { ipInSubnet, longestPrefixMatch, networkAddress } from './adapters/ios/routing';
 import { routingTable } from './adapters/ios/state';
 import { evaluateAcl } from './adapters/ios/acl';
@@ -37,7 +38,9 @@ export type FailReason =
   | 'dest-unreachable'
   | 'routing-loop'
   | 'acl-deny'
-  | 'vlan-mismatch';
+  | 'vlan-mismatch'
+  | 'trunk-not-configured'
+  | 'vlan-not-allowed';
 
 export interface FailPoint {
   readonly direction: 'forward' | 'return';
@@ -61,6 +64,19 @@ export interface FailPoint {
     readonly aVlan: number;
     readonly bId: string;
     readonly bVlan: number;
+  };
+  /** Extra context for `trunk-not-configured`: both ends of the inter-switch
+   *  link that needs trunk mode. Undefined elsewhere. */
+  readonly trunk?: {
+    readonly aDevice: string;
+    readonly aIface: string;
+    readonly bDevice: string;
+    readonly bIface: string;
+  };
+  /** Extra context for `vlan-not-allowed`: which VLAN was blocked. Device and
+   *  iface come from the top-level FailPoint fields. Undefined elsewhere. */
+  readonly vlanAllow?: {
+    readonly vlanId: number;
   };
 }
 
@@ -471,25 +487,175 @@ function switchL2DeliveryCheck(
   if (!dstOwner || dstOwner.kind !== 'pc') return { ok: true };
 
   const dstEdge = pcSwitchEdge(session, dstOwner.id, dstOwner.nic);
-  if (!dstEdge || dstEdge.switchId !== srcEdge.switchId) return { ok: true };
+  if (!dstEdge) return { ok: true };
 
-  if (srcEdge.vlan === dstEdge.vlan) return { ok: true };
-
-  return {
-    ok: false,
-    failedAt: {
-      direction,
-      deviceId: srcEdge.switchId,
-      iface: null,
-      reason: 'vlan-mismatch',
-      vlan: {
-        aId: srcPc.id,
-        aVlan: srcEdge.vlan,
-        bId: dstOwner.id,
-        bVlan: dstEdge.vlan,
+  // Same-switch case (Session 1): VLAN match is enough; no trunk walk needed.
+  if (dstEdge.switchId === srcEdge.switchId) {
+    if (srcEdge.vlan === dstEdge.vlan) return { ok: true };
+    return {
+      ok: false,
+      failedAt: {
+        direction,
+        deviceId: srcEdge.switchId,
+        iface: null,
+        reason: 'vlan-mismatch',
+        vlan: {
+          aId: srcPc.id,
+          aVlan: srcEdge.vlan,
+          bId: dstOwner.id,
+          bVlan: dstEdge.vlan,
+        },
       },
-    },
-  };
+    };
+  }
+
+  // Different switches: VLAN mismatch trumps everything else — different
+  // broadcast domains are different broadcast domains regardless of trunks.
+  if (srcEdge.vlan !== dstEdge.vlan) {
+    return {
+      ok: false,
+      failedAt: {
+        direction,
+        deviceId: srcEdge.switchId,
+        iface: null,
+        reason: 'vlan-mismatch',
+        vlan: {
+          aId: srcPc.id,
+          aVlan: srcEdge.vlan,
+          bId: dstOwner.id,
+          bVlan: dstEdge.vlan,
+        },
+      },
+    };
+  }
+
+  // Walk switch ⇄ switch via trunks. trunk-not-configured / vlan-not-allowed
+  // surface here; a clean path returns ok.
+  return walkSwitchToSwitch(
+    session,
+    srcEdge.switchId,
+    dstEdge.switchId,
+    srcEdge.vlan,
+    direction,
+  );
+}
+
+/** BFS across the switch graph, traversing only properly-configured trunks
+ *  that allow `vlan`. Returns ok on the first complete path found. When no
+ *  path exists, returns the most informative failure observed — preferring
+ *  the diagnostic-strong reasons (trunk-not-configured, vlan-not-allowed)
+ *  over the generic dest-unreachable fallback.
+ *
+ *  For Lab 08's direct SW1 ⇄ SW2 link this collapses to a single iteration:
+ *  one link to validate, one failure mode to report. Designed to scale to
+ *  multi-hop trunk topologies without restructure. */
+function walkSwitchToSwitch(
+  session: LabSession,
+  fromSwId: string,
+  toSwId: string,
+  vlan: number,
+  direction: Direction,
+): ReachResult {
+  if (fromSwId === toSwId) return { ok: true };
+
+  const visited = new Set<string>([fromSwId]);
+  const queue: string[] = [fromSwId];
+  let firstFailure: ReachResult | null = null;
+
+  while (queue.length > 0) {
+    const swId = queue.shift()!;
+    const swSession = session.devices[swId];
+    if (!swSession || swSession.kind !== 'switch') continue;
+
+    for (const link of session.links) {
+      let myIface: string;
+      let peerEnd: { deviceId: string; iface: string };
+      if (link.a.deviceId === swId) {
+        myIface = link.a.iface;
+        peerEnd = { deviceId: link.b.deviceId, iface: link.b.iface };
+      } else if (link.b.deviceId === swId) {
+        myIface = link.b.iface;
+        peerEnd = { deviceId: link.a.deviceId, iface: link.a.iface };
+      } else {
+        continue;
+      }
+
+      const peer = session.devices[peerEnd.deviceId];
+      if (!peer || peer.kind !== 'switch') continue;
+      if (visited.has(peer.device.id)) continue;
+
+      const myPort = swSession.device.switchports[myIface];
+      const peerPort = peer.device.switchports[peerEnd.iface];
+      if (!myPort || !peerPort) continue;
+
+      // Both ends must be in trunk mode. Either end in access mode → the
+      // link cannot carry VLAN tags. Reporting trunk-not-configured names the
+      // ENTIRE link in the sentence (both ends), which is the cleanest
+      // diagnostic regardless of which side the learner mis-configured.
+      if (myPort.mode !== 'trunk' || peerPort.mode !== 'trunk') {
+        if (!firstFailure) {
+          firstFailure = {
+            ok: false,
+            failedAt: {
+              direction,
+              deviceId: swId,
+              iface: myIface,
+              reason: 'trunk-not-configured',
+              trunk: {
+                aDevice: swId,
+                aIface: myIface,
+                bDevice: peer.device.id,
+                bIface: peerEnd.iface,
+              },
+            },
+          };
+        }
+        continue;
+      }
+
+      // Both ends trunk — VLAN must appear in BOTH allowed lists.
+      if (!trunkAllowsVlan(myPort.trunkAllowedVlans, vlan)) {
+        if (!firstFailure) {
+          firstFailure = {
+            ok: false,
+            failedAt: {
+              direction,
+              deviceId: swId,
+              iface: myIface,
+              reason: 'vlan-not-allowed',
+              vlanAllow: { vlanId: vlan },
+            },
+          };
+        }
+        continue;
+      }
+      if (!trunkAllowsVlan(peerPort.trunkAllowedVlans, vlan)) {
+        if (!firstFailure) {
+          firstFailure = {
+            ok: false,
+            failedAt: {
+              direction,
+              deviceId: peer.device.id,
+              iface: peerEnd.iface,
+              reason: 'vlan-not-allowed',
+              vlanAllow: { vlanId: vlan },
+            },
+          };
+        }
+        continue;
+      }
+
+      // Valid trunk crossing. If this is the destination switch, we're done.
+      if (peer.device.id === toSwId) return { ok: true };
+      visited.add(peer.device.id);
+      queue.push(peer.device.id);
+    }
+  }
+
+  if (firstFailure) return firstFailure;
+  // Fully disjoint switch graph — nothing wrong with any individual link,
+  // there just isn't one between fromSw and toSw. Treat as dest-unreachable.
+  return fail(direction, fromSwId, null, 'dest-unreachable');
 }
 
 /** If `pcId.nic` is cabled to a switch, return the switch id + the VLAN the
