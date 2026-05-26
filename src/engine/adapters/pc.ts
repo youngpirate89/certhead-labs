@@ -803,6 +803,7 @@ function findEgressForNextHop(router: RouterSession, nextHop: string): string | 
 
 function peerOwnsDst(peer: DeviceSession, dstIp: string): boolean {
   if (peer.kind === 'pc') return peer.ip === dstIp;
+  if (peer.kind === 'switch') return false;
   return Object.values(peer.device.interfaces).some((i) => i.ip === dstIp);
 }
 
@@ -886,9 +887,9 @@ function renderPing(
  * and depend on this mapping — add a `case` per new reason.
  */
 function failureDetail(failedAt: FailPoint, target: string): string {
-  const { reason, direction, deviceId, iface, acl } = failedAt;
+  const { reason, direction, deviceId, iface, acl, vlan } = failedAt;
   const place = iface ? `${deviceId} ${iface}` : deviceId;
-  const d = detailFor(reason, place, deviceId, direction, target, acl);
+  const d = detailFor(reason, place, deviceId, direction, target, acl, vlan);
   return d.charAt(0).toUpperCase() + d.slice(1);
 }
 
@@ -899,6 +900,7 @@ function detailFor(
   direction: 'forward' | 'return',
   target: string,
   acl: FailPoint['acl'],
+  vlan: FailPoint['vlan'],
 ): string {
   switch (reason) {
     case 'no-route':
@@ -937,5 +939,12 @@ function detailFor(
       // practice.
       if (!acl) return `${place} denied the packet via an access list.`;
       return `traffic from ${acl.sourceIp} is denied by ACL ${acl.aclNumber} on ${place} (${acl.aclDirection}).`;
+    case 'vlan-mismatch':
+      // VLAN context is always present when reason==='vlan-mismatch' — the
+      // walk builds the FailPoint with the vlan block populated. The
+      // sentence wording is fixed by the work order so a lab can match it
+      // verbatim in test assertions.
+      if (!vlan) return `${place} blocked the packet at the VLAN boundary.`;
+      return `${vlan.aId} and ${vlan.bId} are on different VLANs (${vlan.aVlan} and ${vlan.bVlan}) — inter-VLAN routing is not configured.`;
   }
 }

@@ -17,13 +17,15 @@
  */
 import { routerAdapter } from './adapters/router';
 import { pcAdapter, type PcSession } from './adapters/pc';
+import { switchAdapter } from './adapters/switch';
 import type { CommandOutput, DeviceAdapter, DeviceKind } from './adapters/types';
 import type { Session as RouterSession } from './adapters/ios/state';
+import type { SwitchSession } from './adapters/ios/switch-state';
 import { recomputeOspf } from './adapters/ios/ospf';
 import type { Lab, LabDevice, Link } from './types';
 
-/** Discriminated union of every adapter's session. 3b: router + pc. */
-export type DeviceSession = RouterSession | PcSession;
+/** Discriminated union of every adapter's session. router + pc + switch. */
+export type DeviceSession = RouterSession | PcSession | SwitchSession;
 
 export interface LabSession {
   /** Per-device sessions, keyed by lab device id. Independent state machines. */
@@ -37,14 +39,17 @@ export interface LabSession {
 /** Adapter lookup. Adding a new kind = add a case here; nothing else changes. */
 export function adapterFor(
   kind: DeviceKind,
-): DeviceAdapter<RouterSession> | DeviceAdapter<PcSession> {
+):
+  | DeviceAdapter<RouterSession>
+  | DeviceAdapter<PcSession>
+  | DeviceAdapter<SwitchSession> {
   switch (kind) {
     case 'router':
       return routerAdapter;
     case 'pc':
       return pcAdapter;
     case 'switch':
-      throw new Error(`Device kind '${kind}' is not yet supported (3c).`);
+      return switchAdapter;
   }
 }
 
@@ -102,7 +107,7 @@ function refreshDerivedState(lab: LabSession): LabSession {
 function applySeed(session: DeviceSession, lines: readonly string[]): DeviceSession {
   let cur = session;
   for (const raw of lines) cur = applySeedLine(cur, raw);
-  if (cur.kind === 'router') {
+  if (cur.kind === 'router' || cur.kind === 'switch') {
     cur = applySeedLine(cur, 'end');
     cur = applySeedLine(cur, 'disable');
   }
@@ -115,6 +120,8 @@ function applySeedLine(s: DeviceSession, raw: string): DeviceSession {
       return routerAdapter.applyCommand(s, raw, undefined, { record: false }).session;
     case 'pc':
       return pcAdapter.applyCommand(s, raw, undefined, { record: false }).session;
+    case 'switch':
+      return switchAdapter.applyCommand(s, raw, undefined, { record: false }).session;
   }
 }
 
@@ -169,6 +176,10 @@ function dispatchByKind(
       const r = pcAdapter.applyCommand(s, raw, { lab });
       return { session: r.session, output: r.output, stream: r.stream };
     }
+    case 'switch': {
+      const r = switchAdapter.applyCommand(s, raw, { lab });
+      return { session: r.session, output: r.output, stream: r.stream };
+    }
   }
 }
 
@@ -207,6 +218,8 @@ export function activePrompt(lab: LabSession): string {
       return routerAdapter.prompt(s);
     case 'pc':
       return pcAdapter.prompt(s);
+    case 'switch':
+      return switchAdapter.prompt(s);
   }
 }
 
@@ -239,6 +252,12 @@ function refreshNicUp(lab: LabSession): LabSession {
       }
     } else if (s.kind === 'router') {
       const next = refreshRouterProtocolUp(lab, s);
+      if (next !== s) {
+        devices[id] = next;
+        mutated = true;
+      }
+    } else if (s.kind === 'switch') {
+      const next = refreshSwitchProtocolUp(lab, s);
       if (next !== s) {
         devices[id] = next;
         mutated = true;
@@ -292,9 +311,41 @@ function refreshRouterProtocolUp(lab: LabSession, s: RouterSession): RouterSessi
   return { ...s, device: { ...s.device, interfaces } };
 }
 
+/** Recompute `protocolUp` for every switchport on one switch. Same shape as
+ *  the router refresh — a port whose cabled peer is admin-down reports line
+ *  protocol down. */
+function refreshSwitchProtocolUp(lab: LabSession, s: SwitchSession): SwitchSession {
+  let mutated = false;
+  const switchports: Record<string, SwitchSession['device']['switchports'][string]> = {
+    ...s.device.switchports,
+  };
+  for (const [portId, port] of Object.entries(s.device.switchports)) {
+    const up = peerLinkIsUp(lab, s.device.id, portId, port.adminUp);
+    if (port.protocolUp !== up) {
+      switchports[portId] = { ...port, protocolUp: up };
+      mutated = true;
+    }
+  }
+  if (!mutated) return s;
+  return { ...s, device: { ...s.device, switchports } };
+}
+
 /** True when the router interface's line protocol is up — admin-up locally,
  *  cabled, and the peer's interface is admin-up (or the peer is a PC). */
 function ifaceProtocolUp(
+  lab: LabSession,
+  deviceId: string,
+  iface: string,
+  adminUp: boolean,
+): boolean {
+  return peerLinkIsUp(lab, deviceId, iface, adminUp);
+}
+
+/** Shared link-state predicate for router AND switch interfaces. True iff the
+ *  local end is admin-up AND the cable runs to an admin-up neighbor end. PCs
+ *  are treated as always-up (we don't model NIC admin-down on PCs). Uncabled
+ *  interfaces return false. */
+function peerLinkIsUp(
   lab: LabSession,
   deviceId: string,
   iface: string,
@@ -307,22 +358,38 @@ function ifaceProtocolUp(
     const neighbor = lab.devices[peer.deviceId];
     if (!neighbor) return false;
     if (neighbor.kind === 'pc') return true;
-    const peerIface = neighbor.device.interfaces[peer.iface];
-    return peerIface ? peerIface.adminUp : false;
+    if (neighbor.kind === 'router') {
+      const peerIface = neighbor.device.interfaces[peer.iface];
+      return peerIface ? peerIface.adminUp : false;
+    }
+    if (neighbor.kind === 'switch') {
+      const peerPort = neighbor.device.switchports[peer.iface];
+      return peerPort ? peerPort.adminUp : false;
+    }
+    return false;
   }
   return false; // uncabled
 }
 
 /** Resolve the neighbor of a PC's NIC and report whether the neighbor's
- *  interface is admin-up. Returns false if the PC is uncabled. */
+ *  interface is admin-up. Returns false if the PC is uncabled. Switch and
+ *  router peers both count — Session 1 of the switch build adds switch peers
+ *  to the recognised neighbor set so a PC cabled to a switch reports nicUp. */
 function pcNicIsUp(lab: LabSession, pcId: string, nic: string): boolean {
   for (const link of lab.links) {
     const peer = matchEndpoint(link, pcId, nic);
     if (!peer) continue;
     const neighbor = lab.devices[peer.deviceId];
-    if (!neighbor || neighbor.kind !== 'router') return false;
-    const iface = neighbor.device.interfaces[peer.iface];
-    return iface ? iface.adminUp : false;
+    if (!neighbor) return false;
+    if (neighbor.kind === 'router') {
+      const iface = neighbor.device.interfaces[peer.iface];
+      return iface ? iface.adminUp : false;
+    }
+    if (neighbor.kind === 'switch') {
+      const port = neighbor.device.switchports[peer.iface];
+      return port ? port.adminUp : false;
+    }
+    return false;
   }
   return false;
 }

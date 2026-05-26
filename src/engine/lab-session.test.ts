@@ -90,11 +90,13 @@ describe('lab-session — init', () => {
     }
   });
 
-  it('rejects unsupported device kinds with a clear error (3c gating)', () => {
-    expect(() => adapterFor('switch')).toThrow(/switch.*not yet supported/);
-    // pc is supported as of 3b — confirm it returns an adapter, not throws.
-    expect(() => adapterFor('pc')).not.toThrow();
+  it('resolves an adapter for every supported device kind (router/pc/switch)', () => {
+    // pc landed in 3b, switch in Session 1 of the switch build. router has
+    // been here since 3a. All three must return an adapter whose kind
+    // matches its registration.
+    expect(adapterFor('router').kind).toBe('router');
     expect(adapterFor('pc').kind).toBe('pc');
+    expect(adapterFor('switch').kind).toBe('switch');
   });
 });
 

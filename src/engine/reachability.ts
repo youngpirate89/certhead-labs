@@ -16,6 +16,7 @@
 import type { LabSession, DeviceSession } from './lab-session';
 import type { InterfaceState, Session as RouterSession } from './adapters/ios/state';
 import type { PcSession } from './adapters/pc';
+import type { SwitchSession } from './adapters/ios/switch-state';
 import { ipInSubnet, longestPrefixMatch, networkAddress } from './adapters/ios/routing';
 import { routingTable } from './adapters/ios/state';
 import { evaluateAcl } from './adapters/ios/acl';
@@ -35,7 +36,8 @@ export type FailReason =
   | 'dest-nic-down'
   | 'dest-unreachable'
   | 'routing-loop'
-  | 'acl-deny';
+  | 'acl-deny'
+  | 'vlan-mismatch';
 
 export interface FailPoint {
   readonly direction: 'forward' | 'return';
@@ -50,6 +52,15 @@ export interface FailPoint {
     readonly aclNumber: number;
     readonly aclDirection: 'in' | 'out';
     readonly sourceIp: string;
+  };
+  /** Extra context for `vlan-mismatch`: the two PCs and the VLAN ids they
+   *  are on. Lets failureDetail name both endpoints + VLANs in the `[sim]`
+   *  sentence the work order requires verbatim. Undefined elsewhere. */
+  readonly vlan?: {
+    readonly aId: string;
+    readonly aVlan: number;
+    readonly bId: string;
+    readonly bVlan: number;
   };
 }
 
@@ -102,7 +113,12 @@ function walk(
     const startResult = startFromPc(session, owner, dstIp, direction);
     if (startResult.kind === 'fail') return startResult.result;
     if (startResult.kind === 'delivery') {
-      // dst sits on the PC's local subnet — verify delivery directly.
+      // dst sits on the PC's local subnet. Same-subnet delivery through a
+      // switch requires both PCs to be on the same VLAN — L2 broadcast domain
+      // boundary. The switchL2Delivery check enforces this when applicable;
+      // for direct PC-to-PC cabling (no switch) it short-circuits to true.
+      const vlanCheck = switchL2DeliveryCheck(session, owner, dstIp, direction);
+      if (!vlanCheck.ok) return vlanCheck;
       return deliveryCheck(session, dstIp, direction);
     }
     current = startResult.firstHop;
@@ -257,13 +273,21 @@ function startFromPc(
     return fwd(fail(direction, pc.id, null, 'no-gateway'));
   }
 
-  // Cross the PC's link to the neighbor router.
+  // Cross the PC's link to the neighbor.
   const link = findLink(session, pc.id, pc.nic);
   if (!link) return fwd(fail(direction, pc.id, null, 'source-nic-down'));
   const peerEnd = otherEndOf(link, pc.id, pc.nic);
   const peer = session.devices[peerEnd.deviceId];
-  if (!peer || peer.kind !== 'router') {
+  if (!peer) {
     return fwd(fail(direction, pc.id, null, 'source-nic-down'));
+  }
+
+  // PC cabled directly to a switch can only reach off-subnet destinations if
+  // the switch routes (it doesn't, in Session 1) — no router peer means no
+  // gateway can be reached. The same-subnet delivery branch above is the
+  // only valid L2 path through a switch this session.
+  if (peer.kind !== 'router') {
+    return fwd(fail(direction, pc.id, null, 'no-gateway'));
   }
   const peerIface = peer.device.interfaces[peerEnd.iface];
   if (!peerIface || !peerIface.adminUp) {
@@ -283,6 +307,11 @@ function deliveryCheck(
   if (owner.kind === 'pc') {
     if (!owner.nicUp) return fail(direction, owner.id, null, 'dest-nic-down');
     return { ok: true };
+  }
+  if (owner.kind === 'switch') {
+    // Switches don't own L3 addresses in our model — deviceOwningIp won't
+    // return one, but the type system needs the exhaustive branch.
+    return fail(direction, owner.device.id, null, 'dest-unreachable');
   }
   // Router — confirm the interface holding dstIp is admin-up.
   const iface = Object.values(owner.device.interfaces).find((i) => i.ip === dstIp);
@@ -353,6 +382,7 @@ function idOf(s: DeviceSession): string {
 
 function sourceIpOf(s: DeviceSession): string | null {
   if (s.kind === 'pc') return s.ip;
+  if (s.kind === 'switch') return null;
   for (const i of Object.values(s.device.interfaces)) {
     if (i.adminUp && i.ip) return i.ip;
   }
@@ -365,6 +395,7 @@ function deviceOwningIp(session: LabSession, ip: string): DeviceSession | null {
       if (s.ip === ip) return s;
       continue;
     }
+    if (s.kind === 'switch') continue;
     for (const i of Object.values(s.device.interfaces)) {
       if (i.ip === ip) return s;
     }
@@ -374,6 +405,7 @@ function deviceOwningIp(session: LabSession, ip: string): DeviceSession | null {
 
 function peerOwnsDst(peer: DeviceSession, dstIp: string): boolean {
   if (peer.kind === 'pc') return peer.ip === dstIp;
+  if (peer.kind === 'switch') return false;
   return Object.values(peer.device.interfaces).some((i) => i.ip === dstIp);
 }
 
@@ -405,4 +437,85 @@ function findEgressForNextHop(router: RouterSession, nextHop: string): string | 
     if (ipInSubnet(nextHop, net, i.mask)) return i.id;
   }
   return null;
+}
+
+// ---------- VLAN-aware L2 delivery (Session 1 of switch build) ----------
+
+/**
+ * When the source PC's NIC is cabled to a switch AND the destination PC's
+ * NIC is also cabled to that same switch, both must sit on the same VLAN for
+ * L2 delivery to succeed. Different VLANs are different broadcast domains;
+ * without inter-VLAN routing (Session 2+), the frame never gets across.
+ *
+ * Cases handled (all return ok:true unless the VLAN check fails):
+ *   - Source PC's neighbor is a router (not a switch) → ok (no VLAN context).
+ *   - Source PC's neighbor is a switch BUT dst PC isn't on that switch → ok
+ *     (the topology isn't a pure-L2 PC↔SW↔PC; deliveryCheck handles the rest).
+ *   - Source PC and dst PC sit on the same switch, same VLAN → ok.
+ *   - Same switch, different VLAN → vlan-mismatch with the verbatim sentence
+ *     the work order requires.
+ *
+ * Pure: reads session state only, allocates a single FailPoint on the failure
+ * path. Same-VLAN succeeds in O(links + ports-on-switch).
+ */
+function switchL2DeliveryCheck(
+  session: LabSession,
+  srcPc: PcSession,
+  dstIp: string,
+  direction: Direction,
+): ReachResult {
+  const srcEdge = pcSwitchEdge(session, srcPc.id, srcPc.nic);
+  if (!srcEdge) return { ok: true };
+
+  const dstOwner = deviceOwningIp(session, dstIp);
+  if (!dstOwner || dstOwner.kind !== 'pc') return { ok: true };
+
+  const dstEdge = pcSwitchEdge(session, dstOwner.id, dstOwner.nic);
+  if (!dstEdge || dstEdge.switchId !== srcEdge.switchId) return { ok: true };
+
+  if (srcEdge.vlan === dstEdge.vlan) return { ok: true };
+
+  return {
+    ok: false,
+    failedAt: {
+      direction,
+      deviceId: srcEdge.switchId,
+      iface: null,
+      reason: 'vlan-mismatch',
+      vlan: {
+        aId: srcPc.id,
+        aVlan: srcEdge.vlan,
+        bId: dstOwner.id,
+        bVlan: dstEdge.vlan,
+      },
+    },
+  };
+}
+
+/** If `pcId.nic` is cabled to a switch, return the switch id + the VLAN the
+ *  cabled switchport sits on. Null when the cable runs to anything else or
+ *  the PC is uncabled — caller treats null as "no switch context here". */
+function pcSwitchEdge(
+  session: LabSession,
+  pcId: string,
+  nic: string,
+): { switchId: string; vlan: number } | null {
+  const link = findLink(session, pcId, nic);
+  if (!link) return null;
+  const peer = link.a.deviceId === pcId ? link.b : link.a;
+  const neighbor = session.devices[peer.deviceId];
+  if (!neighbor || neighbor.kind !== 'switch') return null;
+  return switchPortVlan(neighbor, peer.iface);
+}
+
+function switchPortVlan(
+  sw: SwitchSession,
+  ifaceId: string,
+): { switchId: string; vlan: number } | null {
+  const port = sw.device.switchports[ifaceId];
+  if (!port) return null;
+  // Session 1: only access mode carries a definite VLAN. Trunk/dynamic land
+  // in Session 2 — we treat them as access (VLAN 1) until then so the
+  // engine stays deterministic; the grammar rejects mode changes anyway.
+  return { switchId: sw.device.id, vlan: port.accessVlan };
 }

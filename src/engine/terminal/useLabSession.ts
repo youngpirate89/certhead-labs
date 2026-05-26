@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { useTerminal, type ExecResult, type OutputLine, type UseTerminal } from './useTerminal';
 import { routerAdapter } from '@/engine/adapters/router';
 import { pcAdapter } from '@/engine/adapters/pc';
+import { switchAdapter } from '@/engine/adapters/switch';
 import {
   initLabSession,
   applyToActive,
@@ -90,6 +91,8 @@ function viewFor(s: DeviceSession): DeviceTopologyView {
       return routerAdapter.toTopologyView(s);
     case 'pc':
       return pcAdapter.toTopologyView(s);
+    case 'switch':
+      return switchAdapter.toTopologyView(s);
   }
 }
 
@@ -100,6 +103,8 @@ function helpFor(s: DeviceSession, partial: string): CommandOutput[] {
       return routerAdapter.contextHelp(s, partial);
     case 'pc':
       return pcAdapter.contextHelp(s, partial);
+    case 'switch':
+      return switchAdapter.contextHelp(s, partial);
   }
 }
 
@@ -110,6 +115,8 @@ function completeFor(s: DeviceSession, partial: string): string | null {
       return routerAdapter.tabComplete(s, partial);
     case 'pc':
       return pcAdapter.tabComplete(s, partial);
+    case 'switch':
+      return switchAdapter.tabComplete(s, partial);
   }
 }
 

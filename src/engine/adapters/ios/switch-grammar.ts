@@ -1,0 +1,189 @@
+/**
+ * IOS switch command grammar — one tree per CLI mode.
+ *
+ * Same structural conventions as router grammar (grammar.ts): keyword
+ * abbreviation surface only, execution lives in switch-interpret.ts. The two
+ * grammars are kept separate so a learner on a switch never sees router-only
+ * commands (router ospf, ip route) in `?` help, and vice versa.
+ */
+import type { CommandNode } from '@/engine/parser';
+import type { SwitchMode } from './switch-state';
+
+const arg = (name: string, node: CommandNode): CommandNode['argument'] => ({ name, node });
+const done = (help: string): CommandNode => ({ terminal: true, help });
+
+const showSubtree: CommandNode = {
+  help: 'Display running system information',
+  children: {
+    vlan: {
+      // `show vlan` alone is a placeholder we don't support yet (Session 2+
+      // would render the full table). `show vlan brief` is the supported
+      // subcommand for Session 1.
+      help: 'VLAN information',
+      children: {
+        brief: done('VLAN summary table'),
+      },
+    },
+    interfaces: {
+      terminal: true,
+      help: 'Interface status and configuration',
+      argument: arg('iface', {
+        terminal: true,
+        help: 'Per-interface status',
+        children: {
+          switchport: done('Switchport configuration for this interface'),
+        },
+      }),
+    },
+    'running-config': done('Current operating configuration'),
+    version: done('System hardware and software status'),
+  },
+};
+
+const userMode: CommandNode = {
+  children: {
+    enable: done('Turn on privileged commands'),
+    exit: done('Exit from the EXEC'),
+    show: showSubtree,
+  },
+};
+
+const privMode: CommandNode = {
+  children: {
+    enable: done('Already in privileged mode'),
+    disable: done('Turn off privileged commands'),
+    configure: { children: { terminal: done('Configure from the terminal') } },
+    exit: done('Exit from the EXEC'),
+    show: showSubtree,
+    write: {
+      terminal: true,
+      help: 'Write running config to memory',
+      children: { memory: done('Write to memory') },
+    },
+  },
+};
+
+const configMode: CommandNode = {
+  children: {
+    interface: {
+      help: 'Select an interface to configure',
+      argument: arg('iface', done('Enter interface configuration')),
+    },
+    hostname: {
+      help: 'Set the device hostname',
+      argument: arg('name', done('Apply hostname')),
+    },
+    vlan: {
+      help: 'Create or configure a VLAN (enters config-vlan submode)',
+      argument: arg('id', done('Enter VLAN configuration')),
+    },
+    no: {
+      help: 'Negate a command',
+      children: {
+        hostname: done('Reset hostname to default'),
+        vlan: {
+          help: 'Delete a VLAN',
+          argument: arg('id', done('Delete the VLAN from the database')),
+        },
+      },
+    },
+    exit: done('Exit from configuration mode'),
+    end: done('Return to privileged EXEC'),
+  },
+};
+
+const configIfMode: CommandNode = {
+  children: {
+    interface: {
+      help: 'Select another interface to configure',
+      argument: arg('iface', done('Switch to interface configuration')),
+    },
+    switchport: {
+      help: 'Configure switchport parameters',
+      children: {
+        mode: {
+          help: 'Set the switchport operating mode',
+          children: {
+            access: done('Set port to access mode'),
+            // Reserved keywords so prefix-match works without surprising the
+            // learner; execution returns a Session-2 redirect.
+            trunk: done('Set port to trunk mode (Session 2)'),
+            dynamic: {
+              children: {
+                auto: done('Dynamic negotiation, prefer access (Session 2)'),
+                desirable: done('Dynamic negotiation, prefer trunk (Session 2)'),
+              },
+            },
+          },
+        },
+        access: {
+          help: 'Configure access-mode parameters',
+          children: {
+            vlan: {
+              help: 'Assign the port to a VLAN',
+              argument: arg('id', done('Apply access VLAN')),
+            },
+          },
+        },
+      },
+    },
+    // IP address on a switchport — real IOS rejects with the specific sentence
+    // in our spec, but we route it through the grammar so `?` shows it as a
+    // recognised keyword (helps the learner discover the dispatch error).
+    ip: {
+      children: {
+        address: {
+          help: 'Set the interface IP address',
+          argument: arg('ip', { argument: arg('mask', done('Apply IP (rejected on L2)')) }),
+        },
+      },
+    },
+    description: {
+      help: 'Set an interface description',
+      argument: arg('text', done('Apply description')),
+    },
+    shutdown: done('Administratively shut down the interface'),
+    no: {
+      help: 'Negate a command',
+      children: {
+        shutdown: done('Bring the interface up'),
+        switchport: {
+          help: 'Reset switchport settings',
+          children: {
+            access: {
+              help: 'Reset access-mode parameters',
+              children: {
+                vlan: done('Reset access VLAN to 1'),
+              },
+            },
+          },
+        },
+      },
+    },
+    exit: done('Exit interface configuration'),
+    end: done('Return to privileged EXEC'),
+  },
+};
+
+const configVlanMode: CommandNode = {
+  children: {
+    name: {
+      help: 'Set the VLAN name',
+      argument: arg('name', done('Apply VLAN name')),
+    },
+    exit: done('Exit to global config'),
+    end: done('Return to privileged EXEC'),
+  },
+};
+
+const GRAMMARS: Record<SwitchMode, CommandNode> = {
+  user: userMode,
+  priv: privMode,
+  config: configMode,
+  'config-if': configIfMode,
+  'config-vlan': configVlanMode,
+};
+
+export function switchGrammarFor(mode: SwitchMode): CommandNode {
+  return GRAMMARS[mode];
+}
