@@ -277,15 +277,33 @@ interface and the /30).
 
 ## 5. Hints
 
-Two hints, mirroring the pilots' cadence:
+Hints are **on-demand**: the timer gates *availability* (when the hint button becomes
+clickable), it does NOT auto-display content. The learner has to choose to reveal each
+hint. This was a deliberate flip from the older auto-print-to-terminal behaviour — the
+auto form interrupted learners mid-typing and trained them to wait for help instead of
+think first.
 
-- **~90s** — a nudge toward *observing* (e.g. "ping and read where it breaks", "check
-  `show ip route` on each router"). Don't give the answer.
-- **~240s** — name the fix concretely (e.g. the exact `ip route …` line, or "re-IP R2's
-  WAN interface into R1's /30").
+**Authoring rules:**
 
-For troubleshooting labs, write the second hint around the **real failure sentence** from
-§4 so the brief, the ping output, and the hint all point at the same thing.
+- **Two or three hints** is the right size. More than three implies the lab is hand-
+  holding the procedure (re-read §3 — the lesson should be the diagnosis, not the
+  sequence of commands).
+- **Hint cadence: ~60s / ~180s / ~300s.** First hint pushes the learner to observe
+  (e.g. "ping and read where it breaks"), second names the fix concretely, third (if
+  used) repeats the verification command. Don't reveal the answer in hint 1.
+- For troubleshooting labs, write the deepest hint around the **real failure sentence**
+  from §4 so the brief, the ping output, and the hint all point at the same thing.
+
+**UI contract (don't fight it):**
+
+- Each hint renders as a locked button below the objectives panel.
+- While locked: `Hint N — available in M:SS` (countdown ticks in real time).
+- When the countdown reaches zero: `Hint N — click to reveal`.
+- Click → text expands inline below the button; label becomes `Hint N — shown`.
+- Each hint is independent: revealing hint 1 does NOT reveal hint 2.
+- Reset clears all revealed state — hints flip back to their locked/countdown form.
+
+You write a `LabHint` (text + `afterSeconds`). The UI handles the rest.
 
 ---
 
@@ -335,20 +353,78 @@ loading. Until then: **author labs as pilots.**
    three pilots because the gate didn't include "confirm still-unmet after the fix";
    it does now.
 
-   **Use a real-coordinate canvas click to switch the active device. A programmatic
-   `element.click()` (or `document.querySelector(...).click()`) does NOT satisfy this
-   gate.** Real-coordinate clicks exercise the React Flow geometry — node size, zoom,
-   pan, hit area — and only a real click can catch "canvas renders but nodes are
-   unclickable" regressions. We shipped that bug three times because every prior
-   in-browser check used a programmatic DOM `.click()` that bypassed canvas geometry
-   and always landed on the button regardless of where (or how small) it was on
-   screen. If you're driving the browser via tooling, use a real mouse-coordinate
-   click (e.g. `getBoundingClientRect()` → click the center); if you're driving by
-   hand, click with the mouse. Either way, the lab must be hand-completable end-to-end
-   by an actual mouse user.
+   **Programmatic browser checks are not a valid sign-off.** Real mouse + real
+   keyboard cold run is the only gate. `element.click()` /
+   `document.querySelector(...).click()` /
+   value-setter-typing all bypass the canvas geometry that real users hit. We shipped
+   the "canvas-renders-but-nodes-unclickable" bug three times because every prior
+   in-browser check used programmatic clicks that landed on the button regardless of
+   where (or how small) it was on screen. If you're driving the browser via tooling,
+   use real mouse-coordinate clicks (e.g. `getBoundingClientRect()` → click the
+   center); if you're driving by hand, click with the mouse. **Lab must be
+   hand-completable end-to-end by an actual mouse user.**
+
+   **Viewport matrix:** every cold run is performed at **desktop AND ~520px embed
+   width**. The terminal output, topology canvas, and objectives panel all have to
+   stay readable at the embed width — that's the iframe size the eventual
+   `/embed` flow will hand us, and what `EmbedMode` ships with.
+
+   **Use a multi-device lab for every viewport check** — not just the single-device
+   free lab. Multi-device labs exercise the canvas pan/zoom, the per-device
+   terminal-buffer swap, and the hints panel below objectives. A single-device run
+   passes a flat-canvas regression that breaks every 2+ device lab.
 7. Commit (conventional commits, one per lab) and push.
 
 ---
 
-*Authoring guide. Documents the proven pattern as of the three troubleshooting pilots +
-the free lab. Update it when the pattern changes — not before.*
+## 8. Network design rules
+
+These are non-negotiable. Both the lab content and the engine behaviour must align
+with official Cisco IOS documentation and the **CCNA Official Cert Guide** (Wendell
+Odom, ICND1/ICND2). Anywhere a lab or engine behaviour deviates, document **why** and
+cite the source.
+
+- **Verify every behaviour against official documentation before implementing.** Cisco
+  IOS docs (`cisco.com/c/en/us/td/docs/...`) and Wendell Odom's CCNA cert guide are
+  the canonical sources. No assumptions. If a behaviour can't be sourced, flag it
+  before implementing — don't ship the lab on a guess and find out at grading time.
+- **One VLAN = one subnet. Always.** Never place devices from different VLANs on the
+  same subnet (see §2.2 for the full reasoning). Cross-VLAN labs need a router or
+  L3 switch between the VLAN subnets — the lab brief must reflect this.
+- **Static vs DHCP must be explicit in the scenario.** If PCs ship with IPs at lab
+  start, the scenario text must state they were statically configured by the network
+  admin AND that the learner doesn't need to change them. Silence here trains
+  learners to hunt for non-existent DHCP servers when the lab "doesn't work."
+
+---
+
+## 9. Engine rules
+
+Invariants the engine guarantees. Lab authors can rely on these without re-checking;
+deviating from them is an engine change, not a lab change.
+
+- **Mode hops work across every config submode.** Real IOS lets you jump directly
+  from `config-vlan` → `config-vlan` (different VLAN id), from `config-vlan` →
+  `config-if`, and from `config-if` → `config-if` without an intermediate `exit`. The
+  engine mirrors this. Don't author seed sequences that pad with redundant `exit`
+  lines just to "satisfy the parser" — the parser doesn't need them and the padding
+  obscures the real configuration.
+- **`ping` always sends 4 packets, engine-wide.** No lab knob to change this; no
+  Cisco-extended count. Reachability objectives that depend on success vs failure
+  read `pca.lastPing.ok` (§3.4) and don't care about packet count beyond that.
+- **PC IPs are always visible in the topology panel** unless IP discovery is itself
+  an explicit lab objective (rare — flag in the scenario when used). The default is
+  full disclosure so learners aren't stuck guessing addressing.
+- **`show <keyword>` bare always works if `show <keyword> brief` exists.** Don't add
+  a `brief`-only show command. `show vlan` and `show vlan brief` render the same
+  table; `show ip interface` and `show ip interface brief` likewise.
+- **`show running-config interface <iface>` exists on switches** and shows the
+  full state (trunk allowed VLANs as `1-4094` when at default; native VLAN as `1`
+  when at default). The bulk `show running-config` form omits defaults; the
+  per-interface form does NOT — it's the diagnostic surface, explicit-everything is
+  the right ergonomic.
+
+---
+
+*Authoring guide. Documents the proven pattern as of Lab 08 (VLAN trunking) +
+the seven pilots before it. Update it when the pattern changes — not before.*
