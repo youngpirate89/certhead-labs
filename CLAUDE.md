@@ -51,9 +51,9 @@ This project is **explicitly subordinate to CertHead's launch sequence.** Work o
 
 ---
 
-## 🎯 CURRENT FOCUS — CATALOG AT 8 LABS; LAB 08 PENDING COLD-RUN SIGN-OFF
+## 🎯 CURRENT FOCUS — CATALOG AT 8 LABS, ALL COMMITTED
 
-Status: Engine has generalized well past the original troubleshooting-pilot scope. Switch + VLAN + trunking landed; on-demand hint reveal landed; catalog is at 8 labs (7 committed, Lab 08 VLAN trunking built but not yet committed pending cold-run sign-off).
+Status: Engine has generalized well past the original troubleshooting-pilot scope. Switch + VLAN + trunking landed; on-demand hint reveal landed; catalog is at 8 labs, all committed (Lab 08 VLAN trunking signed off by human cold-run and committed at 0542053).
 
 **Catalog (8 labs):**
 - Lab 01: Interface IP — free lab, live at `/try` ✅
@@ -64,20 +64,20 @@ Status: Engine has generalized well past the original troubleshooting-pilot scop
 - Lab 05: OSPF single-area (configure + verify adjacency) ✅
 - Lab 06: Standard ACL (deny host, permit subnet, apply outbound) ✅
 - Lab 07: VLAN access ports (create VLANs, assign ports, verify segmentation) ✅
-- Lab 08: VLAN trunking across two switches — built, pending cold-run sign-off before commit
+- Lab 08: VLAN trunking across two switches (configure trunk, verify, cross-switch reachability) ✅
 
 **Engine capabilities now span:**
 - **Router:** interface config, static routes, OSPF single-area (neighbor state + O routes), standard ACLs (numbered 1–99, `ip access-group`, ACL evaluation in `canReach`), full show suite incl. `show run interface <iface>`.
-- **Switch:** VLAN database, access + trunk ports, native VLAN, `switchport trunk allowed vlan`, VLAN-aware forwarding (same-VLAN reachable, different-VLAN blocked, trunk-aware across switches), `show vlan`, `show interfaces trunk`, `show run interface <iface>`.
+- **Switch:** VLAN database, access + trunk ports, native VLAN, `switchport trunk allowed vlan`, VLAN-aware forwarding (same-VLAN reachable, different-VLAN blocked, trunk-aware across switches), `show vlan`, `show interfaces trunk`, `show run interface <iface>`. Verify-style objectives (e.g. `show interfaces trunk`) use a `lastShowInterfacesTrunk` session field written at command-eval time (mirrors PC `lastPing`) so they require an observe-after-configure action and cannot auto-complete from state alone.
 - **PC:** ping (4 packets, engine-wide), tracert (streamed 150ms/hop, cancel-on-reset), ipconfig, redirect tier for out-of-scope commands.
 - **Terminal:** streaming with input-lock, `[sim]` dim failure sentences, reset cancels in-flight streams.
 - **Hint system:** on-demand reveal — timer gates *availability*, learner clicks to reveal (deliberate flip from auto-print, which interrupted learners mid-typing).
 
-428 tests passing, tsc clean, prod build clean. Free lab unchanged and live.
+444 tests passing, tsc clean, prod build clean. Free lab unchanged and live.
 
 **CertHead state (drives the next move):** Live exams: CCNA, N10-009, SY0-701. Paid subscribers: 0 — pre-launch, building catalog depth in private is the +4–12 week phase, fully in-bounds. Nothing deployed beyond the free lab; catalog registry, `/embed`, custom domain, and the landing-page link to `/try` all still gated on the ≥300-paid bar.
 
-**NEXT — finish Lab 08 cold-run, then inter-VLAN routing OR pause for CertHead.** Inter-VLAN routing (Session 3 of the switch track) is the natural next lab — uses Lab 08's trunk engine as foundation. But higher-leverage work right now is CertHead-side (shipping exams moves the subscriber bar; labs wait). Decide by the subscriber number, not by defaulting into the next lab. This project may sit fallow — that's by design.
+**NEXT — inter-VLAN routing OR pause for CertHead.** Lab 08 is done and committed. Inter-VLAN routing (Session 3 of the switch track) is the natural next lab — uses Lab 08's trunk engine as foundation. Also banked: `switchport trunk allowed vlan` pruning belongs in a future multi-VLAN lab where restriction is meaningful, not in single-VLAN Lab 08. But higher-leverage work right now is CertHead-side (0 paid subscribers; shipping exams moves the bar; labs wait). Decide by the subscriber number, not by defaulting into the next lab. This project may sit fallow — that's by design.
 
 ---
 
@@ -356,7 +356,7 @@ Each item is a discrete weekend's work. Don't start item N+1 until N is done and
 - Static routes (Labs 02–04, egress-down troubleshooting pilots)
 - Standard numbered ACLs 1–99 + `ip access-group` + `canReach` evaluation (Lab 06)
 
-**Weekend 7-8: VLANs + switching basics** ✅ DONE (Lab 07 access ports, Lab 08 trunking pending cold-run)
+**Weekend 7-8: VLANs + switching basics** ✅ DONE (Lab 07 access ports, Lab 08 trunking)
 - VLAN database (`vlan <id>`, `name`, `show vlan [brief]`)
 - Access ports (`switchport mode access`, `switchport access vlan`)
 - Trunk ports (`switchport mode trunk`, `trunk allowed vlan`, `trunk native vlan`, `show interfaces trunk`)
