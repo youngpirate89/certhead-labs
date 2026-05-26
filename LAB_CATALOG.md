@@ -132,7 +132,7 @@ cannot author a two-router OSPF lab before two routers can talk.
 
 | #  | Lab | Domain | Depth |
 |----|-----|--------|-------|
-| 29 | VLANs & access-port assignment | Network Access | VLAN |
+| 29 | VLANs & access-port assignment | Network Access | VLAN — *built* ✓ (`ccna-lab07-vlan-access-ports`) |
 | 30 | 802.1Q trunking | Network Access | VLAN |
 | 31 | Inter-VLAN routing — router-on-a-stick | Network Access | VLAN |
 | 32 | Inter-VLAN routing — SVIs / L3 switch | Network Access | VLAN |

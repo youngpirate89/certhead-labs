@@ -39,17 +39,22 @@ export function grade(lab: Lab, source: Session | LabSession): GradeResult {
   const state: LabState = {};
   const history: Record<string, { raw: readonly string[]; resolved: readonly string[] }> = {};
   for (const [id, sess] of Object.entries(lab1.devices)) {
-    // 3a: only routers exist. Switch/PC adapters (3b/3c) will project their
-    // own state into LabState the same way.
+    // Routers project their full DeviceState into LabState so router-shape
+    // checks read them off `state`. Switch and PC state lives behind the
+    // `session` argument — switch ports + VLAN database via `session.devices`,
+    // PC IP/lastPing the same way — so they don't appear here.
     if (sess.kind === 'router') {
       state[id] = sess.device;
       history[id] = { raw: sess.history, resolved: sess.resolvedHistory };
     }
   }
 
-  // History includes every kind that tracks it (router + pc both do).
+  // History includes every kind that tracks it. Switch + PC both record
+  // commands the same way as routers; without this loop, a switch-only or
+  // PC-only history-check (e.g. lab-07's "did the learner run show vlan brief
+  // on SW1") would silently never match.
   for (const [id, sess] of Object.entries(lab1.devices)) {
-    if (sess.kind === 'pc' && !(id in history)) {
+    if ((sess.kind === 'pc' || sess.kind === 'switch') && !(id in history)) {
       history[id] = { raw: sess.history, resolved: sess.resolvedHistory };
     }
   }

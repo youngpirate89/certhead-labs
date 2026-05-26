@@ -16,6 +16,7 @@ import type { Lab } from '@/engine/types';
 import { lab01InterfaceIp } from './ccna/lab-01-interface-ip';
 import { lab05OspfSingleArea } from './ccna/lab-05-ospf-single-area';
 import { lab06StandardAcl } from './ccna/lab-06-standard-acl';
+import { lab07VlanAccessPorts } from './ccna/lab-07-vlan-access-ports';
 import { tshootReturnRoute } from './ccna/tshoot-return-route';
 import { tshootWrongNextHop } from './ccna/tshoot-wrong-next-hop';
 import { tshootWanSubnetMismatch } from './ccna/tshoot-wan-subnet-mismatch';
@@ -25,6 +26,7 @@ const CATALOG: readonly Lab[] = [
   lab01InterfaceIp,
   lab05OspfSingleArea,
   lab06StandardAcl,
+  lab07VlanAccessPorts,
   tshootReturnRoute,
   tshootWrongNextHop,
   tshootWanSubnetMismatch,

@@ -23,6 +23,7 @@
 import type { Lab } from '@/engine/types';
 import { lab05OspfSingleArea } from '@/labs/ccna/lab-05-ospf-single-area';
 import { lab06StandardAcl } from '@/labs/ccna/lab-06-standard-acl';
+import { lab07VlanAccessPorts } from '@/labs/ccna/lab-07-vlan-access-ports';
 import { tshootReturnRoute } from '@/labs/ccna/tshoot-return-route';
 import { tshootWrongNextHop } from '@/labs/ccna/tshoot-wrong-next-hop';
 import { tshootWanSubnetMismatch } from '@/labs/ccna/tshoot-wan-subnet-mismatch';
@@ -45,6 +46,7 @@ const PILOTS: readonly PilotRegistration[] = [
   { slug: 'tshoot-egress-down', lab: tshootEgressDown },
   { slug: 'ccna-lab05-ospf-single-area', lab: lab05OspfSingleArea },
   { slug: 'ccna-lab06-standard-acl', lab: lab06StandardAcl },
+  { slug: 'ccna-lab07-vlan-access-ports', lab: lab07VlanAccessPorts },
 ];
 
 /** Resolve a pilot slug to its lab, or undefined if not registered. */
