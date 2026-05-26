@@ -45,7 +45,16 @@ const showSubtree: CommandNode = {
         },
       }),
     },
-    'running-config': done('Current operating configuration'),
+    'running-config': {
+      terminal: true,
+      help: 'Current operating configuration',
+      children: {
+        interface: {
+          help: 'Show one interface\'s configuration stanza',
+          argument: arg('iface', done('Per-interface running config')),
+        },
+      },
+    },
     version: done('System hardware and software status'),
   },
 };

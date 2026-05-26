@@ -614,6 +614,87 @@ describe('switch — show interfaces switchport (trunk fields)', () => {
   });
 });
 
+describe('switch — show running-config interface <iface>', () => {
+  it('renders a trunk-port stanza with allowed VLANs and native VLAN, even at defaults', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface fa0/3',
+      'switchport mode trunk',
+      'end',
+    ]);
+    const text = applySwitchCommand(s, 'show running-config interface fa0/3')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/^interface FastEthernet0\/3$/m);
+    expect(text).toMatch(/^ switchport mode trunk$/m);
+    // Default allowed list rendered as 1-4094 (not omitted as in bulk show run).
+    expect(text).toMatch(/^ switchport trunk allowed vlan 1-4094$/m);
+    // Default native VLAN rendered explicitly as 1.
+    expect(text).toMatch(/^ switchport trunk native vlan 1$/m);
+  });
+
+  it('renders explicit allowed/native values when learner has changed them', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface fa0/3',
+      'switchport mode trunk',
+      'switchport trunk allowed vlan 10,20',
+      'switchport trunk native vlan 99',
+      'end',
+    ]);
+    const text = applySwitchCommand(s, 'show running-config interface fa0/3')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/^ switchport trunk allowed vlan 10,20$/m);
+    expect(text).toMatch(/^ switchport trunk native vlan 99$/m);
+  });
+
+  it('renders an access-port stanza with the access VLAN', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'vlan 10',
+      'name Sales',
+      'exit',
+      'interface fa0/1',
+      'switchport mode access',
+      'switchport access vlan 10',
+      'end',
+    ]);
+    const text = applySwitchCommand(s, 'show running-config interface fa0/1')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/^interface FastEthernet0\/1$/m);
+    expect(text).toMatch(/^ switchport mode access$/m);
+    expect(text).toMatch(/^ switchport access vlan 10$/m);
+    expect(text).not.toMatch(/switchport trunk/);
+  });
+
+  it('resolves the prefix-match form: sh run int fa0/3', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface fa0/3',
+      'switchport mode trunk',
+      'end',
+    ]);
+    const text = applySwitchCommand(s, 'sh run int fa0/3')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/^interface FastEthernet0\/3$/m);
+    expect(text).toMatch(/^ switchport mode trunk$/m);
+  });
+
+  it('errors on an unknown interface', () => {
+    const text = applySwitchCommand(run(fresh(), ['enable']), 'show running-config interface fa9/9')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/% Invalid interface/);
+  });
+});
+
 describe('switch — running-config trunk stanza', () => {
   it('emits switchport mode trunk and only NON-default trunk settings', () => {
     const s = run(fresh(), [

@@ -604,6 +604,9 @@ function show(
   }
   if (what === 'version') return { session: s, output: out(...showVersion(s)) };
   if (what === 'running-config') {
+    if (command[2] === 'interface' && args.iface) {
+      return { session: s, output: showRunningInterface(s, args.iface) };
+    }
     return { session: s, output: out(...showRunningConfig(s)) };
   }
   return { session: s, output: err('% Incomplete command.') };
@@ -859,6 +862,45 @@ function showRunningConfig(s: SwitchSession): string[] {
   }
   lines.push('end');
   return lines;
+}
+
+/** IOS `show running-config interface <iface>` — single-port stanza.
+ *
+ *  Diverges intentionally from the bulk `show running-config`: this form is
+ *  EXPLICIT-EVERYTHING. The bulk render omits defaults so the output stays
+ *  scannable; the per-interface form is the diagnostic surface a learner
+ *  reaches for to confirm the trunk's allowed/native VLANs match expectation,
+ *  so it always emits all relevant lines (e.g. `switchport trunk allowed
+ *  vlan 1-4094` even when at default).
+ *
+ *  Real IOS technically omits defaults here too, but the lab learner is the
+ *  audience: hiding "1-4094" mid-troubleshoot teaches them less than seeing
+ *  the actual operational state. */
+function showRunningInterface(s: SwitchSession, ifaceToken: string): CommandOutput[] {
+  const id = normaliseSwitchportId(ifaceToken);
+  if (!id || !s.device.switchports[id]) {
+    return err(`% Invalid interface ${ifaceToken}`);
+  }
+  const port = s.device.switchports[id];
+  const lines: string[] = ['Building configuration...', '!', `interface ${port.name}`];
+  if (port.mode === 'access') {
+    lines.push(' switchport mode access');
+    lines.push(` switchport access vlan ${port.accessVlan}`);
+  } else if (port.mode === 'trunk') {
+    lines.push(' switchport mode trunk');
+    const allowed =
+      port.trunkAllowedVlans === 'all'
+        ? '1-4094'
+        : port.trunkAllowedVlans.length === 0
+          ? 'none'
+          : formatVlanList(port.trunkAllowedVlans);
+    lines.push(` switchport trunk allowed vlan ${allowed}`);
+    lines.push(` switchport trunk native vlan ${port.nativeVlan}`);
+  }
+  if (!port.adminUp) lines.push(' shutdown');
+  lines.push('!');
+  lines.push('end');
+  return out(...lines);
 }
 
 /** Helper for outside callers (e.g., the switch adapter) — duplicate of the
