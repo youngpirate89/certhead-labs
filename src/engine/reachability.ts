@@ -14,10 +14,11 @@
  * fold reasons together — each value carries its diagnostic value.
  */
 import type { LabSession, DeviceSession } from './lab-session';
-import type { Session as RouterSession } from './adapters/ios/state';
+import type { InterfaceState, Session as RouterSession } from './adapters/ios/state';
 import type { PcSession } from './adapters/pc';
 import { ipInSubnet, longestPrefixMatch, networkAddress } from './adapters/ios/routing';
 import { routingTable } from './adapters/ios/state';
+import { evaluateAcl } from './adapters/ios/acl';
 import type { Link } from './types';
 
 // ---------- Public contract (§1) ----------
@@ -33,13 +34,23 @@ export type FailReason =
   | 'link-subnet-mismatch'
   | 'dest-nic-down'
   | 'dest-unreachable'
-  | 'routing-loop';
+  | 'routing-loop'
+  | 'acl-deny';
 
 export interface FailPoint {
   readonly direction: 'forward' | 'return';
   readonly deviceId: string;
   readonly iface: string | null;
   readonly reason: FailReason;
+  /** Extra context for `acl-deny`: which ACL fired, which direction it was
+   *  applied to the interface, and the source IP that hit the deny. Carried
+   *  here so failureDetail can name the ACL in the `[sim]` sentence without
+   *  re-walking the topology. Undefined for every other reason. */
+  readonly acl?: {
+    readonly aclNumber: number;
+    readonly aclDirection: 'in' | 'out';
+    readonly sourceIp: string;
+  };
 }
 
 export type ReachResult =
@@ -109,6 +120,18 @@ function walk(
     }
     const currentId = current.device.id;
 
+    // Inbound ACL fires the moment the packet arrives on this router (after
+    // a link crossing OR on the first hop from a PC). Locally-originated
+    // traffic — when this is the source router — skips the inbound check
+    // because there's no ingress interface (matches IOS behavior).
+    if (ingressIface !== null) {
+      const inIface = current.device.interfaces[ingressIface];
+      if (inIface) {
+        const denied = checkInterfaceAcl(current, inIface, srcIp, 'in', direction);
+        if (denied) return denied;
+      }
+    }
+
     const route = longestPrefixMatch(routingTable(current), dstIp);
     if (!route) return fail(direction, currentId, ingressIface, 'no-route');
 
@@ -133,6 +156,14 @@ function walk(
       if (!ipInSubnet(route.nextHop, egressNet, egressIface.mask)) {
         return fail(direction, currentId, egressIfaceId, 'next-hop-unreachable');
       }
+    }
+
+    // Outbound ACL fires as the packet leaves the egress interface. Evaluated
+    // before delivery / link traversal so the failure point is named on the
+    // forwarding router (not the destination), matching IOS semantics.
+    {
+      const denied = checkInterfaceAcl(current, egressIface, srcIp, 'out', direction);
+      if (denied) return denied;
     }
 
     // Connected route AND dst lives on this directly-attached subnet —
@@ -270,6 +301,50 @@ function fail(
   reason: FailReason,
 ): ReachResult {
   return { ok: false, failedAt: { direction, deviceId, iface, reason } };
+}
+
+function failAcl(
+  direction: Direction,
+  deviceId: string,
+  iface: string,
+  aclNumber: number,
+  aclDirection: 'in' | 'out',
+  sourceIp: string,
+): ReachResult {
+  return {
+    ok: false,
+    failedAt: {
+      direction,
+      deviceId,
+      iface,
+      reason: 'acl-deny',
+      acl: { aclNumber, aclDirection, sourceIp },
+    },
+  };
+}
+
+/** Run the ACL bound to `iface` in the given `aclDirection` against `sourceIp`.
+ *  Returns the failing ReachResult on deny, or null when the packet passes
+ *  (no ACL bound, ACL number references no defined ACL, or first-match permit).
+ *  Pure: never mutates inputs. */
+function checkInterfaceAcl(
+  router: RouterSession,
+  iface: InterfaceState,
+  sourceIp: string,
+  aclDirection: 'in' | 'out',
+  walkDirection: Direction,
+): ReachResult | null {
+  const aclNumber = iface.accessGroups[aclDirection];
+  if (aclNumber === null) return null;
+  const acl = router.device.acls.get(aclNumber);
+  // Real IOS: an `ip access-group N <dir>` pointing at an undefined ACL is a
+  // no-op (nothing to filter against). Keep the lab consistent with that —
+  // the learner only sees blocks once they've actually defined the ACL.
+  if (!acl) return null;
+  if (evaluateAcl(acl, sourceIp) === 'deny') {
+    return failAcl(walkDirection, router.device.id, iface.id, aclNumber, aclDirection, sourceIp);
+  }
+  return null;
 }
 
 function idOf(s: DeviceSession): string {

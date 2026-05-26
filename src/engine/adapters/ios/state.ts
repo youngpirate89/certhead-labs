@@ -39,6 +39,27 @@ export interface OspfState {
   neighbors: Map<string, OspfNeighborState>;
 }
 
+/** One ACE in a numbered standard ACL.
+ *  - `source` is the prefix (or host IP, or '0.0.0.0' for `any`).
+ *  - `wildcard` null encodes a `host <ip>` exact match (semantically /32).
+ *  - `sequence` is the IOS line number, auto-assigned in 10s on insertion. */
+export interface AclEntry {
+  readonly sequence: number;
+  readonly action: 'permit' | 'deny';
+  readonly source: string;
+  readonly wildcard: string | null;
+}
+
+/** Standard numbered IP ACL (range 1-99). Extended (100-199) is out of scope
+ *  for now; the `type` discriminator is set up so extended can be added
+ *  without restructuring. Entries iterate in insertion order — first-match
+ *  wins, with an implicit deny at the end. */
+export interface Acl {
+  readonly number: number;
+  readonly type: 'standard';
+  entries: AclEntry[];
+}
+
 export interface InterfaceState {
   /** Canonical interface id, e.g. 'Gi0/0'. */
   readonly id: string;
@@ -58,6 +79,9 @@ export interface InterfaceState {
    *  for tests / standalone sessions that never go through the refresh —
    *  show ip int brief falls back to adminUp gracefully in that case. */
   protocolUp: boolean;
+  /** ACL numbers bound inbound/outbound on this interface. Null = no ACL on
+   *  that direction. Reachability evaluates these on every transit. */
+  accessGroups: { in: number | null; out: number | null };
 }
 
 export interface DeviceState {
@@ -69,6 +93,10 @@ export interface DeviceState {
    *  Recomputed by the LabSession after any change to networks or interface
    *  admin state. */
   ospf: OspfState;
+  /** Standard numbered ACLs keyed by ACL number. Map preserves insertion order
+   *  for deterministic `show access-lists` rendering. Empty until the learner
+   *  defines an ACL with `access-list <n> permit|deny ...`. */
+  acls: Map<number, Acl>;
 }
 
 export interface Session {
@@ -221,6 +249,7 @@ export function buildDevice(spec: {
       // Direct adapter tests (no lab session) see protocolUp follow adminUp
       // via showIpIntBrief's fallback.
       protocolUp: true,
+      accessGroups: { in: null, out: null },
     };
   }
   return {
@@ -229,6 +258,7 @@ export function buildDevice(spec: {
     platform: spec.platform,
     interfaces,
     ospf: { process: null, routerId: null, networks: [], neighbors: new Map() },
+    acls: new Map(),
   };
 }
 

@@ -41,12 +41,14 @@ import {
   isValidMask,
   routingTable,
   type Session as RouterSession,
+  type InterfaceState,
 } from './ios/state';
 import {
   ipInSubnet,
   longestPrefixMatch,
   networkAddress,
 } from './ios/routing';
+import { evaluateAcl } from './ios/acl';
 import {
   canReach,
   type FailPoint,
@@ -628,10 +630,23 @@ function discoverHops(
   const hops: Hop[] = [{ hopIp: peerIface.ip, isDestination: false }];
 
   let current: RouterSession = peer;
+  let ingressIfaceId: string | null = peerEnd.iface;
+  const sourceIp = pc.ip;
   const limit = Object.keys(session.devices).length + 2;
 
   for (let i = 0; i < limit; i++) {
     const currentId = current.device.id;
+
+    // Inbound ACL on the arrival interface mirrors canReach. Drift here
+    // would print a different `[sim]` line in the tracert summary than the
+    // ping shows — LAB_AUTHORING §4 warns against exactly that.
+    if (ingressIfaceId !== null) {
+      const inIface = current.device.interfaces[ingressIfaceId];
+      if (inIface) {
+        const denied = aclCheck(current, inIface, sourceIp, 'in');
+        if (denied) return { hops, failedAt: denied };
+      }
+    }
 
     const route = longestPrefixMatch(routingTable(current), dstIp);
     if (!route) {
@@ -662,6 +677,13 @@ function discoverHops(
       if (!ipInSubnet(route.nextHop, egressNet, egressIface.mask)) {
         return { hops, failedAt: fp('forward', currentId, egressIfaceId, 'next-hop-unreachable') };
       }
+    }
+
+    // Outbound ACL on the egress mirrors canReach. Evaluated before
+    // delivery / link crossing so the failure names the forwarding router.
+    {
+      const denied = aclCheck(current, egressIface, sourceIp, 'out');
+      if (denied) return { hops, failedAt: denied };
     }
 
     // Connected route AND dst on this subnet ⇒ destination is on this link.
@@ -714,6 +736,7 @@ function discoverHops(
     }
     hops.push({ hopIp: nextPeerIface.ip, isDestination: false });
     current = nextPeer;
+    ingressIfaceId = nextPeerEnd.iface;
   }
 
   return { hops, failedAt: fp('forward', current.device.id, null, 'routing-loop') };
@@ -726,6 +749,30 @@ function fp(
   reason: FailReason,
 ): FailPoint {
   return { direction, deviceId, iface, reason };
+}
+
+/** Match canReach's ACL hook (reachability.checkInterfaceAcl) — tracert MUST
+ *  surface the same acl-deny FailPoint canReach does so the `[sim]` trailer
+ *  reads the same sentence as the ping. Pure: returns the FailPoint on deny,
+ *  null on permit / no binding / undefined ACL. */
+function aclCheck(
+  router: RouterSession,
+  iface: InterfaceState,
+  sourceIp: string,
+  aclDirection: 'in' | 'out',
+): FailPoint | null {
+  const aclNumber = iface.accessGroups[aclDirection];
+  if (aclNumber === null) return null;
+  const acl = router.device.acls.get(aclNumber);
+  if (!acl) return null;
+  if (evaluateAcl(acl, sourceIp) !== 'deny') return null;
+  return {
+    direction: 'forward',
+    deviceId: router.device.id,
+    iface: iface.id,
+    reason: 'acl-deny',
+    acl: { aclNumber, aclDirection, sourceIp },
+  };
 }
 
 function findLink(session: LabSession, deviceId: string, iface: string): Link | null {
@@ -839,9 +886,9 @@ function renderPing(
  * and depend on this mapping — add a `case` per new reason.
  */
 function failureDetail(failedAt: FailPoint, target: string): string {
-  const { reason, direction, deviceId, iface } = failedAt;
+  const { reason, direction, deviceId, iface, acl } = failedAt;
   const place = iface ? `${deviceId} ${iface}` : deviceId;
-  const d = detailFor(reason, place, deviceId, direction, target);
+  const d = detailFor(reason, place, deviceId, direction, target, acl);
   return d.charAt(0).toUpperCase() + d.slice(1);
 }
 
@@ -851,6 +898,7 @@ function detailFor(
   deviceId: string,
   direction: 'forward' | 'return',
   target: string,
+  acl: FailPoint['acl'],
 ): string {
   switch (reason) {
     case 'no-route':
@@ -882,5 +930,12 @@ function detailFor(
       return 'the destination is unreachable (no responding interface).';
     case 'routing-loop':
       return 'static routes form a loop — packets never arrive.';
+    case 'acl-deny':
+      // ACL details are always present when reason==='acl-deny' — the walk
+      // builds the FailPoint with the acl block populated. Falling back to a
+      // generic sentence keeps the type checker happy and never fires in
+      // practice.
+      if (!acl) return `${place} denied the packet via an access list.`;
+      return `traffic from ${acl.sourceIp} is denied by ACL ${acl.aclNumber} on ${place} (${acl.aclDirection}).`;
   }
 }

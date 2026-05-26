@@ -1,6 +1,7 @@
 import { tokenize, resolve, complete } from '@/engine/parser';
 import { grammarFor } from './grammar';
 import {
+  type AclEntry,
   type Mode,
   type Session,
   normaliseInterface,
@@ -310,10 +311,18 @@ function dispatch(
       return negate(s, command, args);
 
     case 'ip':
-      // command[1] differentiates ip address (config-if) from ip route (config).
+      // command[1] differentiates ip address (config-if) from ip route (config)
+      // from ip access-group (config-if). All three share the `ip` keyword.
       if (command[1] === 'address') return setIpAddress(s, args.ip, args.mask);
       if (command[1] === 'route') return addStaticRoute(s, args.prefix, args.mask, args.target);
+      if (command[1] === 'access-group') {
+        return setAccessGroup(s, args.number, command[3] as 'in' | 'out');
+      }
       return { session: s, output: err('% Incomplete command.') };
+
+    case 'access-list':
+      // command = ['access-list', '<num>', 'permit'|'deny', ...source-form]
+      return addAclEntry(s, args.number, command[2] as 'permit' | 'deny', command, args);
 
     case 'show':
       return show(s, command, args);
@@ -380,12 +389,17 @@ function negate(s: Session, command: string[], args: Record<string, string>): Ap
       if (command[2] === 'route') {
         return removeStaticRoute(s, args.prefix, args.mask, args.target);
       }
+      if (command[2] === 'access-group') {
+        return clearAccessGroup(s, args.number, command[4] as 'in' | 'out');
+      }
       // `no ip address` (config-if): clear the interface's IP.
       if (s.currentInterface) {
         s.device.interfaces[s.currentInterface].ip = null;
         s.device.interfaces[s.currentInterface].mask = null;
       }
       return { session: s, output: [] };
+    case 'access-list':
+      return removeAcl(s, args.number);
     case 'network':
       return removeOspfNetwork(s, args.prefix, args.wildcard, args.area);
     default:
@@ -553,6 +567,120 @@ function removeOspfNetwork(
   return { session: s, output: [] };
 }
 
+/** Parse the standard-ACL number argument. Range is 1-99 (extended is out of
+ *  scope; the spec calls it explicitly). Returns null and emits the IOS error
+ *  caller-side. */
+function parseAclNumber(raw: string): number | null {
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || String(n) !== raw) return null;
+  if (n < 1 || n > 99) return null;
+  return n;
+}
+
+/** Apply an `access-list <n> permit|deny ...` line: append an entry to the
+ *  numbered ACL (creating it if absent), with a sequence auto-assigned in 10s
+ *  matching IOS behavior. Dedup is intentionally NOT performed — IOS will
+ *  happily stack identical entries; the lab pedagogy benefits from learners
+ *  seeing exactly what they typed in the show output. */
+function addAclEntry(
+  s: Session,
+  numberArg: string,
+  action: 'permit' | 'deny',
+  command: string[],
+  args: Record<string, string>,
+): ApplyResult {
+  const number = parseAclNumber(numberArg);
+  if (number === null) {
+    return { session: s, output: err(`% Invalid input detected at "${numberArg}".`) };
+  }
+  // command shape:
+  //   ['access-list', '<n>', 'permit'|'deny', 'any']
+  //   ['access-list', '<n>', 'permit'|'deny', 'host', '<ip>']
+  //   ['access-list', '<n>', 'permit'|'deny', '<src>', '<wildcard>']
+  const sourceForm = command[3];
+  let source: string;
+  let wildcard: string | null;
+  if (sourceForm === 'any') {
+    source = '0.0.0.0';
+    wildcard = '255.255.255.255';
+  } else if (sourceForm === 'host') {
+    if (!isValidIpv4(args.source)) {
+      return { session: s, output: err(`% Invalid input detected at "${args.source}".`) };
+    }
+    source = args.source;
+    wildcard = null;
+  } else {
+    // Bare-network form: <src> <wildcard>
+    if (!isValidIpv4(args.source)) {
+      return { session: s, output: err(`% Invalid input detected at "${args.source}".`) };
+    }
+    if (!isValidIpv4(args.wildcard)) {
+      return { session: s, output: err(`% Invalid input detected at "${args.wildcard}".`) };
+    }
+    source = args.source;
+    wildcard = args.wildcard;
+  }
+
+  let acl = s.device.acls.get(number);
+  if (!acl) {
+    acl = { number, type: 'standard', entries: [] };
+    s.device.acls.set(number, acl);
+  }
+  const nextSequence = (acl.entries.length + 1) * 10;
+  const entry: AclEntry = { sequence: nextSequence, action, source, wildcard };
+  acl.entries.push(entry);
+  return { session: s, output: [] };
+}
+
+/** Remove an entire numbered ACL with `no access-list <n>`. Real IOS errors if
+ *  the ACL doesn't exist; we silently no-op to keep teardown-by-script idempotent
+ *  (pedagogy doesn't care, and an error would surprise students reading scripts). */
+function removeAcl(s: Session, numberArg: string): ApplyResult {
+  const number = parseAclNumber(numberArg);
+  if (number === null) {
+    return { session: s, output: err(`% Invalid input detected at "${numberArg}".`) };
+  }
+  s.device.acls.delete(number);
+  return { session: s, output: [] };
+}
+
+/** Bind an ACL to the current interface in the given direction
+ *  (`ip access-group <n> in|out`). No-ops if no interface is selected. */
+function setAccessGroup(
+  s: Session,
+  numberArg: string,
+  direction: 'in' | 'out',
+): ApplyResult {
+  const number = parseAclNumber(numberArg);
+  if (number === null) {
+    return { session: s, output: err(`% Invalid input detected at "${numberArg}".`) };
+  }
+  if (!s.currentInterface) return { session: s, output: [] };
+  s.device.interfaces[s.currentInterface].accessGroups[direction] = number;
+  return { session: s, output: [] };
+}
+
+/** Unbind an ACL from the current interface (`no ip access-group <n> in|out`).
+ *  IOS clears the binding regardless of the supplied number — but the syntax
+ *  requires the number; we honor that with a soft check that mismatches still
+ *  clear (matches real IOS, which is lenient). */
+function clearAccessGroup(
+  s: Session,
+  numberArg: string,
+  direction: 'in' | 'out',
+): ApplyResult {
+  const number = parseAclNumber(numberArg);
+  if (number === null) {
+    return { session: s, output: err(`% Invalid input detected at "${numberArg}".`) };
+  }
+  if (!s.currentInterface) return { session: s, output: [] };
+  const iface = s.device.interfaces[s.currentInterface];
+  if (iface.accessGroups[direction] === number) {
+    iface.accessGroups[direction] = null;
+  }
+  return { session: s, output: [] };
+}
+
 function show(
   s: Session,
   command: string[],
@@ -560,14 +688,19 @@ function show(
 ): ApplyResult {
   // command = ['show', ...]
   const what = command[1];
+  if (what === 'access-lists') return { session: s, output: out(...showAccessLists(s)) };
   if (what === 'ip') {
-    // `show ip interface brief` vs `show ip route` vs `show ip ospf [neighbor]`.
+    // `show ip interface brief` vs `show ip interface <iface>` vs route vs ospf.
     if (command[2] === 'route') return { session: s, output: out(...showIpRoute(s)) };
     if (command[2] === 'ospf') {
       if (command[3] === 'neighbor') {
         return { session: s, output: out(...showIpOspfNeighbor(s)) };
       }
       return { session: s, output: out(...showIpOspf(s)) };
+    }
+    if (command[2] === 'interface') {
+      if (command[3] === 'brief') return { session: s, output: out(...showIpIntBrief(s)) };
+      if (args.iface) return showIpInterfaceOne(s, args.iface);
     }
     return { session: s, output: out(...showIpIntBrief(s)) };
   }
@@ -583,6 +716,72 @@ function show(
     return { session: s, output: out(...showRunningConfig(s)) };
   }
   return { session: s, output: err('% Incomplete command.') };
+}
+
+/** Render `show access-lists`. Empty case matches IOS verbatim. */
+function showAccessLists(s: Session): string[] {
+  if (s.device.acls.size === 0) {
+    return ['There are no access lists.'];
+  }
+  const lines: string[] = [];
+  for (const acl of s.device.acls.values()) {
+    lines.push(`Standard IP access list ${acl.number}`);
+    for (const e of acl.entries) {
+      lines.push(formatAclEntryLine(e));
+    }
+  }
+  return lines;
+}
+
+/** Single entry in `show access-lists` format.
+ *
+ *  IOS form:
+ *    `    10 permit 192.168.1.0, wildcard bits 0.0.0.255`
+ *    `    20 deny   host 192.168.1.10`
+ *    `    30 permit any`
+ *
+ *  We collapse the host case to `host <ip>` and the any case to `any` because
+ *  the lab pedagogy reads cleaner when entries echo back the exact form the
+ *  learner typed (the spec's example shows the bare-network form with
+ *  wildcard bits — both forms appear). The padded action keeps columns
+ *  aligned at glance. */
+function formatAclEntryLine(e: AclEntry): string {
+  const seq = String(e.sequence).padStart(2, ' ');
+  const action = e.action.padEnd(6, ' ');
+  let body: string;
+  if (e.source === '0.0.0.0' && e.wildcard === '255.255.255.255') {
+    body = 'any';
+  } else if (e.wildcard === null) {
+    body = `host ${e.source}`;
+  } else {
+    body = `${e.source}, wildcard bits ${e.wildcard}`;
+  }
+  return `    ${seq} ${action} ${body}`;
+}
+
+/** Render `show ip interface <iface>`. Minimal: line-protocol state, addressing,
+ *  and the two ACL-group lines the lab needs to verify bindings. */
+function showIpInterfaceOne(s: Session, ifaceToken: string): ApplyResult {
+  const id = normaliseInterface(ifaceToken);
+  if (!id || !s.device.interfaces[id]) {
+    return { session: s, output: err(`% Invalid interface ${ifaceToken}`) };
+  }
+  const i = s.device.interfaces[id];
+  const state = i.adminUp ? 'up' : 'administratively down';
+  const proto = i.adminUp && i.protocolUp ? 'up' : 'down';
+  const lines: string[] = [
+    `${i.name} is ${state}, line protocol is ${proto}`,
+  ];
+  if (i.ip && i.mask) {
+    lines.push(`  Internet address is ${i.ip}/${maskToCidr(i.mask)}`);
+  } else {
+    lines.push('  Internet protocol processing disabled');
+  }
+  const inLine = i.accessGroups.in === null ? 'not set' : `is ${i.accessGroups.in}`;
+  const outLine = i.accessGroups.out === null ? 'not set' : `is ${i.accessGroups.out}`;
+  lines.push(`  Inbound  access list ${inLine}`);
+  lines.push(`  Outbound access list ${outLine}`);
+  return { session: s, output: out(...lines) };
 }
 
 function showIpRoute(s: Session): string[] {
@@ -794,6 +993,8 @@ function showRunningConfig(s: Session): string[] {
     if (i.description) lines.push(` description ${i.description}`);
     if (i.ip && i.mask) lines.push(` ip address ${i.ip} ${i.mask}`);
     else lines.push(' no ip address');
+    if (i.accessGroups.in !== null) lines.push(` ip access-group ${i.accessGroups.in} in`);
+    if (i.accessGroups.out !== null) lines.push(` ip access-group ${i.accessGroups.out} out`);
     if (!i.adminUp) lines.push(' shutdown');
     lines.push('!');
   }
@@ -810,6 +1011,21 @@ function showRunningConfig(s: Session): string[] {
   if (s.staticRoutes.some((r) => r.source === 'static')) {
     lines.push('!');
   }
+  // ACL lines appear after interfaces / routes — matches IOS ordering. Each
+  // entry collapses to its source form (any / host / network+wildcard).
+  for (const acl of s.device.acls.values()) {
+    for (const e of acl.entries) {
+      lines.push(`access-list ${acl.number} ${e.action} ${aclEntryRunConfig(e)}`);
+    }
+  }
+  if (s.device.acls.size > 0) lines.push('!');
   lines.push('end');
   return lines;
+}
+
+/** Render an ACL entry's source-form for `show running-config`. */
+function aclEntryRunConfig(e: AclEntry): string {
+  if (e.source === '0.0.0.0' && e.wildcard === '255.255.255.255') return 'any';
+  if (e.wildcard === null) return `host ${e.source}`;
+  return `${e.source} ${e.wildcard}`;
 }

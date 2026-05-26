@@ -441,12 +441,14 @@ describe('IOS interpreter — `do` exec shortcut in config modes', () => {
     expect(out[1].text).toBe("% Invalid input detected at '^' marker.");
   });
 
-  it('positions caret deep on `do sh ip int xyz`', () => {
+  it('positions caret deep on `do sh ip xyz` (no `ip` argument slot)', () => {
     const s = configIf();
-    const out = applyCommand(s, 'do sh ip int xyz').output;
+    const out = applyCommand(s, 'do sh ip xyz').output;
     const promptLen = prompt(s).length + 1;
-    // 'xyz' starts at offset 13: 'do '(3) + 'sh '(3) + 'ip '(3) + 'int '(4)
-    expect(out[0].text).toBe(' '.repeat(promptLen + 13) + '^');
+    // 'xyz' starts at offset 9: 'do '(3) + 'sh '(3) + 'ip '(3)
+    // `show ip` has no argument slot, so an unrecognized token at this
+    // position triggers the parser-level caret line.
+    expect(out[0].text).toBe(' '.repeat(promptLen + 9) + '^');
   });
 
   it('does NOT treat `do` as a keyword in user / priv modes', () => {

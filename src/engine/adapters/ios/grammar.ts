@@ -16,9 +16,15 @@ const done = (help: string): CommandNode => ({ terminal: true, help });
 const showSubtree: CommandNode = {
   help: 'Display running system information',
   children: {
+    'access-lists': done('All configured access lists'),
     ip: {
       children: {
-        interface: { children: { brief: done('Brief interface summary') } },
+        interface: {
+          children: { brief: done('Brief interface summary') },
+          // Per-interface form: `show ip interface <iface>` prints the
+          // detailed status block (used for inspecting ACL bindings).
+          argument: arg('iface', done('Per-interface IP details')),
+        },
         route: done('IP routing table'),
         ospf: {
           terminal: true,
@@ -83,6 +89,42 @@ const ipRouteSubtree: CommandNode = {
   }),
 };
 
+/** `permit|deny` body for an `access-list <n>` entry.
+ *
+ *  Three source forms must coexist under one node:
+ *    - `any`               → keyword child
+ *    - `host <ip>`         → keyword child with one arg
+ *    - `<network> <wildcard>` → falls through to the argument slot
+ *
+ *  The resolver tries keyword children first (prefix-match), so `permit a` →
+ *  `any` and `permit h <ip>` → `host`. Numeric tokens never collide with
+ *  the keywords, so the bare-network form lands cleanly in the argument
+ *  slot. Shared between `permit` and `deny` — same shape, action differs. */
+const accessListEntryBody: CommandNode = {
+  children: {
+    any: done('Match all sources'),
+    host: { argument: arg('source', done('Match a single host (/32)')) },
+  },
+  argument: arg('source', {
+    argument: arg('wildcard', done('Match a subnet with wildcard mask')),
+  }),
+};
+
+const accessListSubtree: CommandNode = {
+  help: 'Add to or define a numbered access list',
+  argument: arg('number', {
+    children: {
+      permit: accessListEntryBody,
+      deny: accessListEntryBody,
+    },
+  }),
+};
+
+const noAccessListSubtree: CommandNode = {
+  help: 'Remove a numbered access list',
+  argument: arg('number', done('Remove all entries in this ACL')),
+};
+
 const configMode: CommandNode = {
   children: {
     interface: {
@@ -97,6 +139,7 @@ const configMode: CommandNode = {
       help: 'IP configuration commands',
       children: { route: ipRouteSubtree },
     },
+    'access-list': accessListSubtree,
     router: {
       help: 'Enable a routing process',
       children: {
@@ -111,6 +154,7 @@ const configMode: CommandNode = {
       children: {
         hostname: done('Reset hostname to default'),
         ip: { children: { route: ipRouteSubtree } },
+        'access-list': noAccessListSubtree,
       },
     },
     exit: done('Exit from configuration mode'),
@@ -164,6 +208,15 @@ const configIfMode: CommandNode = {
           help: 'Set the interface IP address',
           argument: arg('ip', { argument: arg('mask', done('Apply IP and mask')) }),
         },
+        'access-group': {
+          help: 'Bind an ACL to this interface',
+          argument: arg('number', {
+            children: {
+              in: done('Apply ACL inbound'),
+              out: done('Apply ACL outbound'),
+            },
+          }),
+        },
       },
     },
     description: {
@@ -175,7 +228,20 @@ const configIfMode: CommandNode = {
       help: 'Negate a command',
       children: {
         shutdown: done('Bring the interface up'),
-        ip: { children: { address: done('Remove the IP address') } },
+        ip: {
+          children: {
+            address: done('Remove the IP address'),
+            'access-group': {
+              help: 'Remove an ACL binding',
+              argument: arg('number', {
+                children: {
+                  in: done('Remove inbound ACL'),
+                  out: done('Remove outbound ACL'),
+                },
+              }),
+            },
+          },
+        },
       },
     },
     exit: done('Exit interface configuration'),
