@@ -42,6 +42,7 @@ import type {
 } from '@/engine/adapters/types';
 import type { Link } from '@/engine/types';
 import { maskLength, networkAddress } from '@/engine/adapters/ios/routing';
+import DeviceIcon from './topology/icons/DeviceIcon';
 export type { DeviceTopologyView, InterfaceTopologyView, InterfaceStatus };
 
 interface TopologyPanelProps {
@@ -709,7 +710,7 @@ function DeviceNode({ data }: NodeProps<Node<DeviceNodeData>>) {
       >
         <div className="flex items-baseline justify-between gap-2">
           <span className="flex items-center gap-1.5 font-sans text-sm font-semibold tracking-tight text-terminal-fg">
-            <DeviceIcon kind={view.kind} />
+            <DeviceIcon type={view.platform} size={40} color={active ? '#e2e8f0' : '#94a3b8'} />
             {view.hostname}
           </span>
           <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-terminal-dim">
@@ -741,32 +742,6 @@ function DeviceNode({ data }: NodeProps<Node<DeviceNodeData>>) {
       </button>
     </div>
   );
-}
-
-/** Inline-SVG device icons, sized to match the hostname's font line. */
-function DeviceIcon({ kind }: { kind: DeviceTopologyView['kind'] }) {
-  switch (kind) {
-    case 'router':
-      return (
-        <svg width="12" height="12" viewBox="0 0 24 24" aria-hidden className="text-terminal-dim">
-          <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.5" />
-          <path d="M8 12h8M12 8v8" stroke="currentColor" strokeWidth="1.5" />
-        </svg>
-      );
-    case 'switch':
-      return (
-        <svg width="12" height="12" viewBox="0 0 24 24" aria-hidden className="text-terminal-dim">
-          <rect x="3" y="9" width="18" height="6" rx="1" fill="none" stroke="currentColor" strokeWidth="1.5" />
-        </svg>
-      );
-    case 'pc':
-      return (
-        <svg width="12" height="12" viewBox="0 0 24 24" aria-hidden className="text-terminal-dim">
-          <rect x="4" y="5" width="16" height="11" rx="1" fill="none" stroke="currentColor" strokeWidth="1.5" />
-          <path d="M9 19h6M12 16v3" stroke="currentColor" strokeWidth="1.5" />
-        </svg>
-      );
-  }
 }
 
 const STATUS_STYLE: Record<InterfaceStatus, { dot: string; label: string }> = {
