@@ -266,7 +266,7 @@ function dispatch(
       return negate(s, command, args);
 
     case 'show':
-      return show(s, command, args);
+      return show(s, command, args, opts);
 
     case 'write':
       return { session: s, output: out('Building configuration...', '[OK]') };
@@ -583,6 +583,7 @@ function show(
   s: SwitchSession,
   command: string[],
   args: Record<string, string>,
+  opts: ApplyOptions | undefined,
 ): ApplyResult {
   const what = command[1];
   if (what === 'vlan' && (command[2] === undefined || command[2] === 'brief')) {
@@ -594,6 +595,16 @@ function show(
   if (what === 'interfaces') {
     // `show interfaces trunk` — keyword child, NOT a per-iface form.
     if (command[2] === 'trunk') {
+      // Stamp a snapshot of which local ports were in trunk mode AT THIS
+      // INSTANT, so verify-style objectives can require the observation to
+      // happen while the trunk was already up. Mirrors lastPing's contract:
+      // gated on opts?.record so seed runs don't pre-satisfy the objective.
+      if (opts?.record !== false) {
+        const trunkPortIds = Object.values(s.device.switchports)
+          .filter((p) => p.mode === 'trunk')
+          .map((p) => p.id);
+        s.lastShowInterfacesTrunk = { trunkPortIds };
+      }
       return { session: s, output: out(...showInterfacesTrunk(s)) };
     }
     if (command[3] === 'switchport' && args.iface) {

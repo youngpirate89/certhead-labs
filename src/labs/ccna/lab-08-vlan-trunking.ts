@@ -108,25 +108,31 @@ export const lab08VlanTrunking: Lab = {
     {
       id: 'trunk-verified',
       text: 'Verify VLAN 10 is active on the trunk (run `show interfaces trunk`)',
-      check: (_state, history, session) => {
+      check: (_state, _history, session) => {
         const sw1 = session.devices.SW1;
         const sw2 = session.devices.SW2;
         if (sw1?.kind !== 'switch' || sw2?.kind !== 'switch') return false;
+        // Read current port state from the same path trunk-configured uses
+        // (session.devices.<id>.device.switchports['Fa0/24']) so the two
+        // objectives stay consistent.
         const sw1Port = sw1.device.switchports['Fa0/24'];
         const sw2Port = sw2.device.switchports['Fa0/24'];
         if (!sw1Port || !sw2Port) return false;
+        // The verify command must have run on SW1 OR SW2 AT A MOMENT when
+        // the local Fa0/24 was already in trunk mode. The engine stamps
+        // `lastShowInterfacesTrunk` at command-eval time (mirrors lastPing);
+        // a verify run pre-config records trunkPortIds=[] and naturally fails
+        // this check. Plain history.some() cannot express this ordering.
+        const sw1Verified = sw1.lastShowInterfacesTrunk?.trunkPortIds.includes('Fa0/24') ?? false;
+        const sw2Verified = sw2.lastShowInterfacesTrunk?.trunkPortIds.includes('Fa0/24') ?? false;
+        if (!sw1Verified && !sw2Verified) return false;
         // VLAN 10 must be present in BOTH trunks' allowed lists — 'all' is the
         // IOS default (every VLAN) and naturally satisfies this.
         const sw1Allows =
           sw1Port.trunkAllowedVlans === 'all' || sw1Port.trunkAllowedVlans.includes(10);
         const sw2Allows =
           sw2Port.trunkAllowedVlans === 'all' || sw2Port.trunkAllowedVlans.includes(10);
-        if (!sw1Allows || !sw2Allows) return false;
-        // History on SW1 OR SW2 must include a `show interfaces trunk` —
-        // checking resolved history catches every abbreviation (sh int tr, …).
-        const ran = (deviceId: string): boolean =>
-          history[deviceId]?.resolved.some((cmd) => /^(do\s+)?show interfaces trunk$/.test(cmd)) ?? false;
-        return ran('SW1') || ran('SW2');
+        return sw1Allows && sw2Allows;
       },
     },
     {

@@ -77,6 +77,13 @@ export interface SwitchSession {
   device: SwitchDeviceState;
   history: string[];
   resolvedHistory: string[];
+  /** Snapshot recorded by the `show interfaces trunk` handler at command-eval
+   *  time — `trunkPortIds` is the list of switchports that were in trunk mode
+   *  on this switch the moment the learner ran the command. Mirrors `lastPing`
+   *  on PcSession: verify-style objectives MUST read this rather than command
+   *  history + current state, otherwise a verify run BEFORE the trunk was
+   *  configured auto-completes the objective the instant trunks come up later. */
+  lastShowInterfacesTrunk: { trunkPortIds: readonly string[] } | null;
 }
 
 /** Reserved VLAN range — token ring/FDDI in real IOS. Creation is rejected
@@ -179,6 +186,7 @@ export function createSwitchSession(device: SwitchDeviceState): SwitchSession {
     device: cloneSwitchDevice(device),
     history: [],
     resolvedHistory: [],
+    lastShowInterfacesTrunk: null,
   };
 }
 

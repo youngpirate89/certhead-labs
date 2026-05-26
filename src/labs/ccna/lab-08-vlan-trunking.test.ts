@@ -174,6 +174,17 @@ describe('lab-08-vlan-trunking — partial-credit guards', () => {
     expect(r.failedAt.vlanAllow).toEqual({ vlanId: 10 });
   });
 
+  it('verify command run at t=0 (no trunk configured) → trunk-verified unmet', () => {
+    // Regression: default access ports carry `trunkAllowedVlans === 'all'` —
+    // running `show interfaces trunk` BEFORE configuring trunks must NOT
+    // satisfy trunk-verified, because no trunk exists yet.
+    let ls = initLabSession(lab);
+    ls = runOn(ls, 'SW1', ['enable', 'show interfaces trunk']);
+    const g = grade(lab, ls);
+    expect(g.objectives.find((o) => o.id === 'trunk-configured')?.met).toBe(false);
+    expect(g.objectives.find((o) => o.id === 'trunk-verified')?.met).toBe(false);
+  });
+
   it('configured + pinged BUT never ran `show interfaces trunk` → trunk-verified unmet', () => {
     let ls = initLabSession(lab);
     ls = runOn(ls, 'SW1', [
@@ -196,5 +207,54 @@ describe('lab-08-vlan-trunking — partial-credit guards', () => {
     expect(g.objectives.find((o) => o.id === 'trunk-verified')?.met).toBe(false);
     expect(g.objectives.find((o) => o.id === 'reachability')?.met).toBe(true);
     expect(g.allMet).toBe(false);
+  });
+
+  it('verify-at-t=0 then configure trunks → trunk-verified stays unmet (stale snapshot)', () => {
+    // Ordering regression: running the verify command BEFORE the trunk is
+    // configured stamps a snapshot with no trunk ports. Configuring trunks
+    // afterward must NOT retroactively satisfy trunk-verified — the learner
+    // has to re-run the verify command for the snapshot to update.
+    let ls = initLabSession(lab);
+    ls = runOn(ls, 'SW1', ['enable', 'show interfaces trunk']);
+    ls = runOn(ls, 'SW1', [
+      'configure terminal',
+      'interface fa0/24',
+      'switchport mode trunk',
+      'end',
+    ]);
+    ls = runOn(ls, 'SW2', [
+      'enable',
+      'configure terminal',
+      'interface fa0/24',
+      'switchport mode trunk',
+      'end',
+    ]);
+    const g = grade(lab, ls);
+    expect(g.objectives.find((o) => o.id === 'trunk-configured')?.met).toBe(true);
+    expect(g.objectives.find((o) => o.id === 'trunk-verified')?.met).toBe(false);
+  });
+
+  it('verify-at-t=0 → configure → verify-again → trunk-verified flips to met', () => {
+    // Companion to the previous test: once the learner re-runs the verify
+    // command POST-config, the fresh snapshot includes Fa0/24 and the
+    // objective ticks.
+    let ls = initLabSession(lab);
+    ls = runOn(ls, 'SW1', ['enable', 'show interfaces trunk']);
+    ls = runOn(ls, 'SW1', [
+      'configure terminal',
+      'interface fa0/24',
+      'switchport mode trunk',
+      'end',
+    ]);
+    ls = runOn(ls, 'SW2', [
+      'enable',
+      'configure terminal',
+      'interface fa0/24',
+      'switchport mode trunk',
+      'end',
+    ]);
+    expect(grade(lab, ls).objectives.find((o) => o.id === 'trunk-verified')?.met).toBe(false);
+    ls = runOn(ls, 'SW1', ['show interfaces trunk']);
+    expect(grade(lab, ls).objectives.find((o) => o.id === 'trunk-verified')?.met).toBe(true);
   });
 });
