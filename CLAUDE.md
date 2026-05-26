@@ -4,7 +4,7 @@
 > the question-bank product. Do not conflate the two; they have different
 > architectures, different priorities, and different timelines.
 >
-> Last updated: 2026-05-16
+> Last updated: 2026-05-26
 
 ---
 
@@ -51,25 +51,33 @@ This project is **explicitly subordinate to CertHead's launch sequence.** Work o
 
 ---
 
-## 🎯 CURRENT FOCUS — TROUBLESHOOTING-LAB FACTORY PROVEN; NEXT MOVE STILL GATED ON CERTHEAD
+## 🎯 CURRENT FOCUS — CATALOG AT 8 LABS; LAB 08 PENDING COLD-RUN SIGN-OFF
 
-Status: The consolidate fork (path b) was taken — rather than extend the engine into 3c, we built catalog depth on the proven 3a/3b engine. A seed-then-break troubleshooting-lab pattern is now proven, documented, and human-verified.
+Status: Engine has generalized well past the original troubleshooting-pilot scope. Switch + VLAN + trunking landed; on-demand hint reveal landed; catalog is at 8 labs (7 committed, Lab 08 VLAN trunking built but not yet committed pending cold-run sign-off).
 
-**DONE and pushed (this phase):**
-- **`setup` primitive** — optional per-device IOS command list on `Lab`, run through the existing `applyCommand` pipeline at session init (history NOT recorded; engine auto-tails `end`/`disable`). The ONLY engine change this phase — content-enablement, not 3c/3d/3e. Unlocks seed-then-break troubleshooting labs.
-- **3 troubleshooting pilots** (dev-only, `_pilots/`, tree-shaken from prod): `tshoot-return-route` (no-route/return), `tshoot-wrong-next-hop` (next-hop-unreachable), `tshoot-wan-subnet-mismatch` (link-subnet-mismatch). Each seeds a mostly-working topology, breaks one thing; learner diagnoses from the failure sentence and fixes. Two objectives only (fix + reachability).
-- **Canvas fix** — multi-device topology renders nodes at fixed clickable size with horizontal pan (was: fitView crushed N>1 nodes to unclickable ~60px). Real-mouse device-switching confirmed.
-- **IOS-fidelity fix** — `interface X` hops directly from `config-if` to another interface (no forced `exit`), matching real IOS. (Root cause: `interface` keyword missing from `configIfMode` children in grammar.ts.)
-- **Reachability-objective fix (important)** — reachability objectives now require a learner-initiated successful ping (`lastPing` on PcSession), not just `canReach(...).ok`. Previously they auto-completed the instant the fix was applied — the lab showed 2/2 without the learner ever pinging (tested capability, not action). Fixed across all 4 reachability labs (3 troubleshooting + 3b pilot).
-- **`docs/LAB_AUTHORING.md`** — created and current. Both archetypes (build-from-scratch / seed-then-break), the `setup` primitive, the full FailReason failure-mode menu with verbatim sentences + sharp/generic verdicts, and the lastPing reachability pattern.
+**Catalog (8 labs):**
+- Lab 01: Interface IP — free lab, live at `/try` ✅
+- Lab 02: Tshoot — wrong return route ✅
+- Lab 03: Tshoot — wrong next-hop ✅
+- Lab 04: Tshoot — WAN subnet mismatch ✅
+- egress-down: Tshoot — WAN admin-down ✅
+- Lab 05: OSPF single-area (configure + verify adjacency) ✅
+- Lab 06: Standard ACL (deny host, permit subnet, apply outbound) ✅
+- Lab 07: VLAN access ports (create VLANs, assign ports, verify segmentation) ✅
+- Lab 08: VLAN trunking across two switches — built, pending cold-run sign-off before commit
 
-204 tests, free lab unchanged and live. All pilots human-verified end-to-end (cold run, real mouse + keyboard).
+**Engine capabilities now span:**
+- **Router:** interface config, static routes, OSPF single-area (neighbor state + O routes), standard ACLs (numbered 1–99, `ip access-group`, ACL evaluation in `canReach`), full show suite incl. `show run interface <iface>`.
+- **Switch:** VLAN database, access + trunk ports, native VLAN, `switchport trunk allowed vlan`, VLAN-aware forwarding (same-VLAN reachable, different-VLAN blocked, trunk-aware across switches), `show vlan`, `show interfaces trunk`, `show run interface <iface>`.
+- **PC:** ping (4 packets, engine-wide), tracert (streamed 150ms/hop, cancel-on-reset), ipconfig, redirect tier for out-of-scope commands.
+- **Terminal:** streaming with input-lock, `[sim]` dim failure sentences, reset cancels in-flight streams.
+- **Hint system:** on-demand reveal — timer gates *availability*, learner clicks to reveal (deliberate flip from auto-print, which interrupted learners mid-typing).
 
-**HARD-WON LESSON — verification:** Programmatic checks (`querySelector().click()`, value-setter typing) hid all 4 bugs this phase (unclickable canvas, forced interface-exit, auto-completing reachability, the input blind spot itself). Passing tests ≠ human-usable. The last gate on any lab is a COLD HUMAN RUN — real mouse, real keyboard, as a learner. Now in LAB_AUTHORING.md §7.
+428 tests passing, tsc clean, prod build clean. Free lab unchanged and live.
 
-**CertHead state (drives the next move):** Live exams: CCNA, N10-009 (SY0-701 shipping). Paid subscribers: 0 — and that's fine; building labs in private is the +4–12 week phase, fully in-bounds. Nothing deployed beyond the free lab; catalog registry, `/embed`, custom domain, and the landing-page link to `/try` all still gated on the ≥300-paid bar.
+**CertHead state (drives the next move):** Live exams: CCNA, N10-009, SY0-701. Paid subscribers: 0 — pre-launch, building catalog depth in private is the +4–12 week phase, fully in-bounds. Nothing deployed beyond the free lab; catalog registry, `/embed`, custom domain, and the landing-page link to `/try` all still gated on the ≥300-paid bar.
 
-**NEXT — author more labs OR pause for CertHead.** The factory works; the marginal next lab (`egress-down` is the natural pick off the FailReason menu — simplest, sharpest, unused) is near-free but doesn't change strategic position until the catalog can ship. Higher-leverage work right now is CertHead-side (shipping exams moves the subscriber bar; labs wait). Decide by the subscriber number, not by defaulting into the next lab. This project may sit fallow — that's by design.
+**NEXT — finish Lab 08 cold-run, then inter-VLAN routing OR pause for CertHead.** Inter-VLAN routing (Session 3 of the switch track) is the natural next lab — uses Lab 08's trunk engine as foundation. But higher-leverage work right now is CertHead-side (shipping exams moves the subscriber bar; labs wait). Decide by the subscriber number, not by defaulting into the next lab. This project may sit fallow — that's by design.
 
 ---
 
@@ -315,52 +323,57 @@ Labs follow question banks. Linux+ labs only get built after Linux+ question ban
 
 9. **Honor CertHead's launch priority.** If this project is taking time away from CertHead launch tasks, stop. Guardrail #21 is the law: dumb implementations until evidence demands more.
 
+10. **Research official Cisco docs before any engine behavior or lab content.** Sources of record: `cisco.com/c/en/us/td/docs/...`, Wendell Odom's CCNA Official Cert Guide (ICND1/ICND2), IETF RFCs. No assumptions. If a behavior can't be sourced, flag it before implementing — don't ship a lab on a guess and find out at grading time. See `docs/LAB_AUTHORING.md` §8 for the design-rule corollaries (one VLAN = one subnet; static vs DHCP explicit in scenario).
+
 ---
 
 ## 🛠️ ENGINE BUILD ORDER
 
 Each item is a discrete weekend's work. Don't start item N+1 until N is done and committed. **The first ship target is the public free lab — everything before that is prerequisites.**
 
-**Weekend 1-2: Foundation**
+**Weekend 1-2: Foundation** ✅ DONE
 - Vite + React + TypeScript scaffolding
 - Three-panel layout (topology / terminal / objectives)
 - Terminal UI primitive (input handling, history, prompt rendering)
 - Parser primitive: tokenizer + prefix-match command resolution
 
-**Weekend 3-4: Cisco IOS adapter — single device**
+**Weekend 3-4: Cisco IOS adapter — single device** ✅ DONE
 - Mode stack (user / priv / config / config-if)
 - Interface state (IP, mask, admin/protocol state)
 - ~30 commands covering interface config + basic show commands
 - The free lab definition (interface configuration end-to-end)
 - `TryMode.tsx` route with completion CTA → `certhead.com/register?source=free-lab`
 
-**🚀 SHIP MILESTONE 1: Public free lab at `labs.certhead.com/try`**
+**🚀 SHIP MILESTONE 1: Public free lab at `labs.certhead.com/try`** ✅ HIT
 
-- Cloudflare Pages or Vercel static deploy
-- CNAME `labs.certhead.com` from Namecheap DNS
-- Link added from CertHead landing page once CertHead is live
+- Cloudflare Pages direct-upload deploy (`npx wrangler pages deploy`)
+- Live at `https://main.certhead-labs.pages.dev/`
+- `labs.certhead.com` CNAME + landing-page link still gated on CertHead launch
 - PostHog anonymous analytics on engagement + completion + CTA clicks
 - Standalone marketing asset; no CertHead code changes required to ship
 
-**Weekend 5-6: Static routing + ACLs**
-- Routing table state, static route configuration
-- ACL definition + traffic evaluation
-- 5 more labs (Pro-tier, built locally, not deployed yet)
+**Weekend 5-6: Static routing + ACLs** ✅ DONE
+- Static routes (Labs 02–04, egress-down troubleshooting pilots)
+- Standard numbered ACLs 1–99 + `ip access-group` + `canReach` evaluation (Lab 06)
 
-**Weekend 7-8: VLANs + switching basics**
-- VLAN database, trunk/access mode, STP basics
-- 5 more labs
+**Weekend 7-8: VLANs + switching basics** ✅ DONE (Lab 07 access ports, Lab 08 trunking pending cold-run)
+- VLAN database (`vlan <id>`, `name`, `show vlan [brief]`)
+- Access ports (`switchport mode access`, `switchport access vlan`)
+- Trunk ports (`switchport mode trunk`, `trunk allowed vlan`, `trunk native vlan`, `show interfaces trunk`)
+- VLAN-aware forwarding; trunk-aware forwarding across switches
+- `show run interface <iface>` on switches (full state, explicit defaults)
+- STP not implemented — out of scope until a lab demands it
 
-**Weekend 9-10: Multi-device — OSPF**
-- Multi-router topology, hello/neighbor state machine
-- OSPF process configuration, network statements, area config
-- Convergence simulation with realistic timing
-- 5 more labs
+**Weekend 9-10: Multi-device — OSPF** ✅ DONE (Lab 05)
+- Multi-router topology rendering (React Flow, fixed-size clickable nodes, horizontal pan)
+- OSPF single-area: `router ospf`, `network`, neighbor state, `O` routes in `show ip route`
+- `show ip ospf neighbor`, `show ip ospf`
 
-**Weekend 11-12: Polish + lab authoring docs**
-- Hint system, progressive reveal
-- Reset, save/resume (local storage only)
-- `LAB_AUTHORING.md` so future-me (or an SME) can author labs without engine work
+**Weekend 11-12: Polish + lab authoring docs** ✅ DONE
+- On-demand hint reveal (timer gates availability, learner clicks to reveal)
+- Reset cancels in-flight streams + clears revealed hint state
+- `docs/LAB_AUTHORING.md` current through Lab 08
+- Save/resume not implemented — deferred until a learner asks for it
 
 **🚀 SHIP MILESTONE 2: Pro-tier labs available**
 
