@@ -8,6 +8,7 @@ import { lab01InterfaceIp } from './ccna/lab-01-interface-ip';
 const CATALOG_IDS = [
   'ccna-l01-interface-ip',
   'ccna-lab05-ospf-single-area',
+  'ccna-lab06-standard-acl',
   'ccna-tshoot-return-route',
   'ccna-tshoot-wrong-next-hop',
   'ccna-tshoot-wan-subnet-mismatch',
