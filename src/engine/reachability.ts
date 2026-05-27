@@ -93,6 +93,13 @@ export type ReachResult =
  * Evaluate L3-static reachability from `fromDeviceId` to `toIp`. Round-trip:
  * a missing return route is the headline failure case and surfaces with
  * `direction:'return'`.
+ *
+ * NAT (Lab 11) flips the return-walk destination: when the forward walk
+ * crosses an inside→outside boundary with a matching PAT statement, the
+ * packet's source IP becomes the outside interface's IP. The reply comes
+ * back to THAT address — not to the original source. We capture the final
+ * post-translation source via a NatContext written by the forward walk and
+ * use it as the return walk's destination.
  */
 export function canReach(
   session: LabSession,
@@ -108,10 +115,19 @@ export function canReach(
     return fail('forward', fromDeviceId, null, 'source-no-ip');
   }
 
-  const fwd = walk(session, srcIp, toIp, 'forward');
+  const natCtx: NatContext = { finalSrcIp: srcIp };
+  const fwd = walk(session, srcIp, toIp, 'forward', natCtx);
   if (!fwd.ok) return fwd;
-  const ret = walk(session, toIp, srcIp, 'return');
+  const ret = walk(session, toIp, natCtx.finalSrcIp, 'return');
   return ret;
+}
+
+/** Out-parameter the forward walk writes its post-NAT source IP into.
+ *  Default = the source IP (i.e. no translation occurred). When the walk
+ *  crosses an inside→outside NAT boundary with a matching statement, it
+ *  updates `finalSrcIp` to the outside interface's IP. */
+interface NatContext {
+  finalSrcIp: string;
 }
 
 // ---------- Walk (§4) ----------
@@ -123,7 +139,15 @@ function walk(
   srcIp: string,
   dstIp: string,
   direction: Direction,
+  natCtx?: NatContext,
 ): ReachResult {
+  // Mutable "what's the source IP in the packet right now" for the walk.
+  // Starts at srcIp; updated when an inside→outside NAT translation fires.
+  // ACL checks use this so an inbound ACL on the inside iface sees the
+  // pre-NAT source (correct: IOS evaluates inbound before NAT) and an
+  // outbound ACL on the outside iface sees the post-NAT source.
+  let effectiveSrcIp = srcIp;
+
   const owner = deviceOwningIp(session, srcIp);
   if (!owner) return fail(direction, '', null, 'source-no-ip');
 
@@ -164,7 +188,7 @@ function walk(
     if (ingressIface !== null) {
       const inIface = current.device.interfaces[ingressIface];
       if (inIface) {
-        const denied = checkInterfaceAcl(current, inIface, srcIp, 'in', direction);
+        const denied = checkInterfaceAcl(current, inIface, effectiveSrcIp, 'in', direction);
         if (denied) return denied;
       }
     }
@@ -222,11 +246,29 @@ function walk(
       }
     }
 
+    // NAT inside→outside translation, evaluated AFTER the routing decision
+    // (so we know the egress) and BEFORE the outbound ACL (so the outbound
+    // ACL sees the post-NAT source — matches IOS semantics). Only the
+    // physical-egress path participates; the subif egress path is the
+    // Lab 09 router-on-a-stick boundary, where NAT isn't applicable.
+    if (!egressSubif) {
+      const translated = computeNatTranslation(
+        current,
+        ingressIface,
+        egressIfaceId,
+        effectiveSrcIp,
+      );
+      if (translated !== null) {
+        effectiveSrcIp = translated;
+        if (natCtx) natCtx.finalSrcIp = translated;
+      }
+    }
+
     // Outbound ACL fires as the packet leaves the egress interface. Evaluated
     // before delivery / link traversal so the failure point is named on the
     // forwarding router (not the destination), matching IOS semantics.
     {
-      const denied = checkInterfaceAcl(current, egressIface, srcIp, 'out', direction);
+      const denied = checkInterfaceAcl(current, egressIface, effectiveSrcIp, 'out', direction);
       if (denied) return denied;
     }
 
@@ -658,6 +700,39 @@ function checkInterfaceAcl(
   if (!acl) return null;
   if (evaluateAcl(acl, sourceIp) === 'deny') {
     return failAcl(walkDirection, router.device.id, iface.id, aclNumber, aclDirection, sourceIp);
+  }
+  return null;
+}
+
+/** If a PAT (overload) statement on `router` would translate a packet that
+ *  arrived on `ingressIfaceId` (must be inside) and exits via `egressIfaceId`
+ *  (must be outside, with an IP) when the source is `sourceIp` (must match
+ *  the statement's ACL), return the new effective source IP — the outside
+ *  interface's IP. Otherwise return null and the walk continues unchanged.
+ *
+ *  Permissive on missing ACLs: an `ip nat inside source list N ...` whose
+ *  referenced ACL `N` doesn't exist is a no-translate (matches the same
+ *  "undefined ACL = no-op" posture as {@link checkInterfaceAcl}). The
+ *  symptom in that case is the return walk failing with the original
+ *  private source — exactly the teaching moment in Lab 11. */
+function computeNatTranslation(
+  router: RouterSession,
+  ingressIfaceId: string | null,
+  egressIfaceId: string,
+  sourceIp: string,
+): string | null {
+  if (ingressIfaceId === null) return null;
+  const inIface = router.device.interfaces[ingressIfaceId];
+  const outIface = router.device.interfaces[egressIfaceId];
+  if (!inIface || inIface.natRole !== 'inside') return null;
+  if (!outIface || outIface.natRole !== 'outside' || !outIface.ip) return null;
+  for (const stmt of router.device.natStatements) {
+    if (stmt.outsideInterface !== egressIfaceId) continue;
+    const acl = router.device.acls.get(stmt.aclId);
+    if (!acl) continue;
+    if (evaluateAcl(acl, sourceIp) === 'permit') {
+      return outIface.ip;
+    }
   }
   return null;
 }

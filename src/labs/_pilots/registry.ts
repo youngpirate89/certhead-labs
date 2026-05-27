@@ -27,6 +27,7 @@ import { lab07VlanAccessPorts } from '@/labs/ccna/lab-07-vlan-access-ports';
 import { lab08VlanTrunking } from '@/labs/ccna/lab-08-vlan-trunking';
 import { lab09IntervlanRouting } from '@/labs/ccna/lab-09-intervlan-routing';
 import { lab10Dhcp } from '@/labs/ccna/lab-10-dhcp';
+import { lab11NatPat } from '@/labs/ccna/lab-11-nat-pat';
 import { tshootReturnRoute } from '@/labs/ccna/tshoot-return-route';
 import { tshootWrongNextHop } from '@/labs/ccna/tshoot-wrong-next-hop';
 import { tshootWanSubnetMismatch } from '@/labs/ccna/tshoot-wan-subnet-mismatch';
@@ -53,6 +54,7 @@ const PILOTS: readonly PilotRegistration[] = [
   { slug: 'ccna-lab08-vlan-trunking', lab: lab08VlanTrunking },
   { slug: 'ccna-lab09-intervlan-routing', lab: lab09IntervlanRouting },
   { slug: 'ccna-lab10-dhcp-server', lab: lab10Dhcp },
+  { slug: 'ccna-lab11-nat-pat', lab: lab11NatPat },
 ];
 
 /** Resolve a pilot slug to its lab, or undefined if not registered. */

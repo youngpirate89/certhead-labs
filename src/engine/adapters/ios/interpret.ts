@@ -4,6 +4,7 @@ import {
   type AclEntry,
   type DhcpPool,
   type Mode,
+  type NatStatement,
   type Session,
   type SubInterface,
   nextEngineSeq,
@@ -343,6 +344,20 @@ function dispatch(
         if (command[2] === 'pool') return enterDhcpPool(s, args.name);
         if (command[2] === 'excluded-address') return addDhcpExcluded(s, args.start, args.end);
       }
+      if (command[1] === 'nat') {
+        // config-if: `ip nat inside|outside` marks the interface's NAT role.
+        // config:    `ip nat inside source list <acl> interface <iface> overload`
+        //            registers a PAT statement. Mode disambiguates which
+        //            grammar produced the path; the grammar tree already
+        //            enforces the rest, so the handler trusts args.{acl,iface}
+        //            will be present on the config path.
+        if (s.mode === 'config-if' && (command[2] === 'inside' || command[2] === 'outside')) {
+          return setNatRole(s, command[2]);
+        }
+        if (s.mode === 'config' && command[2] === 'inside') {
+          return addNatStatement(s, args.acl, args.iface);
+        }
+      }
       return { session: s, output: err('% Incomplete command.') };
 
     case 'network':
@@ -546,6 +561,16 @@ function negate(s: Session, command: string[], args: Record<string, string>): Ap
         if (command[3] === 'pool') return removeDhcpPool(s, args.name);
         if (command[3] === 'excluded-address') {
           return removeDhcpExcluded(s, args.start, args.end);
+        }
+      }
+      if (command[2] === 'nat') {
+        // Mode-disambiguated mirror of the positive form. config-if removes
+        // the interface marking; config removes the matching PAT statement.
+        if (s.mode === 'config-if' && (command[3] === 'inside' || command[3] === 'outside')) {
+          return clearNatRole(s, command[3]);
+        }
+        if (s.mode === 'config' && command[3] === 'inside') {
+          return removeNatStatement(s, args.acl, args.iface);
         }
       }
       // `no ip address`:
@@ -1003,6 +1028,132 @@ function clearAccessGroup(
   return { session: s, output: [] };
 }
 
+// ---------- NAT: ip nat inside|outside (config-if) + ip nat inside source list
+//            <acl> interface <iface> overload (config) ----------
+
+/** Mark the active interface as a NAT boundary in the given direction. The
+ *  grammar only exposes this in config-if, so currentInterface must be set —
+ *  we still guard defensively so a desynced session reads as a no-op rather
+ *  than crashing. */
+function setNatRole(s: Session, role: 'inside' | 'outside'): ApplyResult {
+  if (!s.currentInterface) return { session: s, output: [] };
+  s.device.interfaces[s.currentInterface].natRole = role;
+  return { session: s, output: [] };
+}
+
+/** Remove the active interface's NAT marking. Real IOS scopes `no ip nat
+ *  inside` to clear ONLY when the role matches — `no ip nat outside` on an
+ *  inside-marked iface is a silent no-op. We match that to avoid surprising
+ *  the learner whose `no` removes a different role than they typed. */
+function clearNatRole(s: Session, role: 'inside' | 'outside'): ApplyResult {
+  if (!s.currentInterface) return { session: s, output: [] };
+  const iface = s.device.interfaces[s.currentInterface];
+  if (iface.natRole === role) iface.natRole = undefined;
+  return { session: s, output: [] };
+}
+
+/** Add `ip nat inside source list <acl> interface <iface> overload`. Replaces
+ *  any existing statement bound to the same outside interface so re-running
+ *  the command is idempotent — matches Lab 06's ACL-replay friendliness. */
+function addNatStatement(
+  s: Session,
+  aclArg: string,
+  ifaceArg: string,
+): ApplyResult {
+  const aclId = parseAclNumber(aclArg);
+  if (aclId === null) {
+    return { session: s, output: err(`% Invalid input detected at "${aclArg}".`) };
+  }
+  const ifaceId = normaliseInterface(ifaceArg);
+  if (!ifaceId || !s.device.interfaces[ifaceId]) {
+    return { session: s, output: err(`% Invalid interface ${ifaceArg}`) };
+  }
+  s.device.natStatements = s.device.natStatements.filter(
+    (st) => st.outsideInterface !== ifaceId,
+  );
+  const statement: NatStatement = {
+    type: 'inside-source-list-overload',
+    aclId,
+    outsideInterface: ifaceId,
+  };
+  s.device.natStatements.push(statement);
+  return { session: s, output: [] };
+}
+
+/** Remove the matching `ip nat inside source list ... overload` statement.
+ *  Soft `% Not found.` when nothing matches — same shape as the static-route
+ *  / OSPF-network negations. */
+function removeNatStatement(
+  s: Session,
+  aclArg: string,
+  ifaceArg: string,
+): ApplyResult {
+  const aclId = parseAclNumber(aclArg);
+  if (aclId === null) {
+    return { session: s, output: err(`% Invalid input detected at "${aclArg}".`) };
+  }
+  const ifaceId = normaliseInterface(ifaceArg);
+  if (!ifaceId) {
+    return { session: s, output: err(`% Invalid interface ${ifaceArg}`) };
+  }
+  const before = s.device.natStatements.length;
+  s.device.natStatements = s.device.natStatements.filter(
+    (st) => !(st.aclId === aclId && st.outsideInterface === ifaceId),
+  );
+  if (s.device.natStatements.length === before) {
+    return { session: s, output: err('% Not found.') };
+  }
+  return { session: s, output: [] };
+}
+
+/** Render `show ip nat translations`. Empty case mirrors IOS verbatim. Each
+ *  entry is the PAT (overload) form — no port tracking, so port columns
+ *  display `---`. The translation table is rebuilt by the LabSession's NAT
+ *  refresh pass after every state mutation; this handler reads it as-is. */
+function showIpNatTranslations(s: Session): string[] {
+  if (s.device.natTranslations.size === 0) {
+    return ['% There are no entries in the NAT table.'];
+  }
+  const lines: string[] = [
+    'Pro Inside global         Inside local          Outside local         Outside global',
+  ];
+  for (const t of s.device.natTranslations.values()) {
+    lines.push(
+      '--- ' +
+        t.insideGlobal.padEnd(22) +
+        t.insideLocal.padEnd(22) +
+        '---'.padEnd(22) +
+        '---',
+    );
+  }
+  return lines;
+}
+
+/** Render `show ip nat statistics`. Counts of marked interfaces + the active
+ *  translation total. Hits is derived from active translations × 4 so the
+ *  number scales with how many PCs are translating — close enough for a
+ *  recognisable display without modeling per-packet counters. */
+function showIpNatStatistics(s: Session): string[] {
+  const outsideIfaces: string[] = [];
+  const insideIfaces: string[] = [];
+  for (const i of Object.values(s.device.interfaces)) {
+    if (i.natRole === 'outside') outsideIfaces.push(i.name);
+    if (i.natRole === 'inside') insideIfaces.push(i.name);
+  }
+  const total = s.device.natTranslations.size;
+  const lines: string[] = [
+    `Total active translations: ${total} (0 static, ${total} dynamic; 0 extended)`,
+    'Outside interfaces:',
+  ];
+  if (outsideIfaces.length === 0) lines.push('  (none)');
+  else for (const n of outsideIfaces) lines.push(`  ${n}`);
+  lines.push('Inside interfaces:');
+  if (insideIfaces.length === 0) lines.push('  (none)');
+  else for (const n of insideIfaces) lines.push(`  ${n}`);
+  lines.push(`Hits: ${total * 4}  Misses: 0`);
+  return lines;
+}
+
 function show(
   s: Session,
   command: string[],
@@ -1033,6 +1184,19 @@ function show(
       }
       if (command[3] === 'conflict') {
         return { session: s, output: out(...showIpDhcpConflict()) };
+      }
+    }
+    if (command[2] === 'nat') {
+      if (command[3] === 'translations') {
+        // Only stamp the verify gate when the table actually has content —
+        // an empty-table run prints the IOS "no entries" line but does NOT
+        // satisfy a verify objective (matches lastShowDhcpBinding semantics).
+        const hasTranslations = s.device.natTranslations.size > 0;
+        if (hasTranslations) s.lastShowNatTranslations = nextEngineSeq();
+        return { session: s, output: out(...showIpNatTranslations(s)) };
+      }
+      if (command[3] === 'statistics') {
+        return { session: s, output: out(...showIpNatStatistics(s)) };
       }
     }
     if (command[2] === 'interface') {

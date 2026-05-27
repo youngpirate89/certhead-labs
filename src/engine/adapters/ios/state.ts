@@ -102,6 +102,29 @@ export interface DhcpBinding {
   readonly poolName: string;
 }
 
+/** A `ip nat inside source list <acl> interface <iface> overload` PAT
+ *  statement. Today the engine only models the overload (PAT) form — the one
+ *  CCNA cares about. `aclId` is the standard-ACL number that selects which
+ *  inside sources get translated; `outsideInterface` is the canonical id of
+ *  the interface whose IP is borrowed as the translated source. */
+export interface NatStatement {
+  readonly type: 'inside-source-list-overload';
+  readonly aclId: number;
+  readonly outsideInterface: string;
+}
+
+/** One active NAT translation entry — what `show ip nat translations`
+ *  renders. Today we model only the overload (PAT) form, so port columns
+ *  display as `---` in show output (no port tracking). `insideLocal` is the
+ *  inside client's real IP; `insideGlobal` is the outside interface's IP
+ *  that the inside source gets rewritten to. Recomputed by the lab-session
+ *  NAT refresh pass any time interface state, ACL state, or topology shifts
+ *  — same lifecycle as DHCP bindings. */
+export interface NatTranslation {
+  readonly insideLocal: string;
+  readonly insideGlobal: string;
+}
+
 export interface InterfaceState {
   /** Canonical interface id, e.g. 'Gi0/0'. */
   readonly id: string;
@@ -124,6 +147,12 @@ export interface InterfaceState {
   /** ACL numbers bound inbound/outbound on this interface. Null = no ACL on
    *  that direction. Reachability evaluates these on every transit. */
   accessGroups: { in: number | null; out: number | null };
+  /** NAT boundary role set by `ip nat inside` / `ip nat outside`. Undefined
+   *  means no NAT role (the interface does not participate in translation).
+   *  canReach's NAT pass triggers only when a packet enters on an `inside`
+   *  iface AND exits on an `outside` iface that has a matching overload
+   *  statement. (Lab 11.) */
+  natRole?: 'inside' | 'outside';
 }
 
 /** A dot1Q subinterface — Lab 09 router-on-a-stick. Subinterfaces live ON a
@@ -178,6 +207,17 @@ export interface DeviceState {
    *  Rewritten by the LabSession's DHCP refresh pass after any change to
    *  pools, excluded ranges, or DHCP-client topology. */
   dhcpBindings: Map<string, DhcpBinding>;
+  /** PAT (overload) statements in insertion order. Each statement maps a
+   *  source-selecting ACL onto an outside interface whose IP becomes the
+   *  translated source. canReach's NAT pass and the show handlers iterate
+   *  this list; the LabSession NAT refresh pass uses it to rebuild
+   *  {@link natTranslations} from current topology. */
+  natStatements: NatStatement[];
+  /** Active NAT translations keyed by the inside local IP. Rewritten by the
+   *  LabSession's NAT refresh pass any time interfaces, ACLs, statements,
+   *  or connected-PC IPs change. `show ip nat translations` renders this
+   *  map verbatim. */
+  natTranslations: Map<string, NatTranslation>;
 }
 
 export interface Session {
@@ -198,6 +238,12 @@ export interface Session {
    *  the show command to actually have been run (mirrors `lastShowIpIntBrief`
    *  and `lastShowInterfacesTrunk`). */
   lastShowDhcpBinding: number;
+  /** Monotonic engine-seq stamp updated each time the learner runs `show ip
+   *  nat translations` AND the table is non-empty. Mirrors
+   *  `lastShowDhcpBinding`: an empty-table run prints the IOS "no entries"
+   *  line but doesn't satisfy the verify gate — the learner has to land NAT
+   *  config first. (Lab 11.) */
+  lastShowNatTranslations: number;
   /** Monotonic stamp (Date.now()) updated each time the learner runs
    *  `show ip interface brief` on this router. Verify-style objectives compare
    *  this against `subIfConfiguredAt[...]` to require the show to run AFTER
@@ -333,6 +379,7 @@ export function createSession(device: DeviceState): Session {
     activeDhcpPool: null,
     lastShowIpIntBrief: 0,
     lastShowDhcpBinding: 0,
+    lastShowNatTranslations: 0,
     subIfConfiguredAt: {},
     device: cloneDevice(device),
     history: [],
@@ -402,6 +449,8 @@ export function buildDevice(spec: {
     dhcpPools: new Map(),
     dhcpExcluded: [],
     dhcpBindings: new Map(),
+    natStatements: [],
+    natTranslations: new Map(),
   };
 }
 

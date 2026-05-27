@@ -22,6 +22,7 @@ import type { CommandOutput, DeviceAdapter, DeviceKind } from './adapters/types'
 import type {
   DhcpBinding,
   DhcpPool,
+  NatTranslation,
   Session as RouterSession,
 } from './adapters/ios/state';
 import type { SwitchSession } from './adapters/ios/switch-state';
@@ -31,6 +32,7 @@ import {
   recomputeBindings,
   type DhcpClientRequest,
 } from './adapters/ios/dhcp';
+import { evaluateAcl } from './adapters/ios/acl';
 import { ipInSubnet, networkAddress } from './adapters/ios/routing';
 import type { Lab, LabDevice, Link } from './types';
 
@@ -111,12 +113,14 @@ export function initLabSession(lab: Lab): LabSession {
  *  first (interface link health), then OSPF adjacency (which depends on the
  *  fresh adminUp + the just-updated peer adminUp), then DHCP — bindings need
  *  the current router pool config + the freshly-evaluated PC nicUp / link
- *  topology, and they end with another nicUp tweak (the PC's ip lands from
- *  the binding, but that doesn't change link health, so no third pass). */
+ *  topology — and finally NAT translations, which depend on the freshly-
+ *  resolved PC IPs (DHCP can land a PC's ip after this pass, so NAT must
+ *  run after DHCP). */
 function refreshDerivedState(lab: LabSession): LabSession {
   const linkUp = refreshNicUp(lab);
   const ospf = refreshOspf(linkUp);
-  return refreshDhcp(ospf);
+  const dhcp = refreshDhcp(ospf);
+  return refreshNat(dhcp);
 }
 
 /** Apply a list of seed commands to one device with `record:false`. Router
@@ -477,6 +481,81 @@ function bindingsEqual(
     const vb = b.get(k);
     if (!vb) return false;
     if (vb.ip !== va.ip || vb.poolName !== va.poolName) return false;
+  }
+  return true;
+}
+
+/** Recompute every router's NAT translation table from current state. Mirrors
+ *  refreshDhcp / refreshOspf: walk routers, build the new translation map,
+ *  skip the replace when nothing changed. Pure: returns the same LabSession
+ *  when no router's table moved. (Lab 11.) */
+function refreshNat(lab: LabSession): LabSession {
+  let mutated = false;
+  const devices: Record<string, DeviceSession> = { ...lab.devices };
+  for (const [id, s] of Object.entries(lab.devices)) {
+    if (s.kind !== 'router') continue;
+    const next = computeNatTranslations(lab, s);
+    if (!translationsEqual(s.device.natTranslations, next)) {
+      devices[id] = { ...s, device: { ...s.device, natTranslations: next } };
+      mutated = true;
+    }
+  }
+  return mutated ? { ...lab, devices } : lab;
+}
+
+/** Build the NAT translation table for one router. An entry exists per
+ *  (PC, statement) pair where:
+ *   - the statement's outsideInterface has natRole 'outside' and an IP
+ *   - the router has at least one inside-marked interface with an IP that
+ *     equals the PC's default gateway (i.e. the PC is in this router's
+ *     LAN-side broadcast domain via the inside interface)
+ *   - the ACL referenced by the statement exists and permits the PC's IP
+ *  Keyed by insideLocal IP so a PC appears at most once even when multiple
+ *  statements would match. */
+function computeNatTranslations(
+  lab: LabSession,
+  router: RouterSession,
+): Map<string, NatTranslation> {
+  const out = new Map<string, NatTranslation>();
+  if (router.device.natStatements.length === 0) return out;
+
+  const insideIfaceIps = new Set<string>();
+  for (const i of Object.values(router.device.interfaces)) {
+    if (i.natRole === 'inside' && i.ip) insideIfaceIps.add(i.ip);
+  }
+  if (insideIfaceIps.size === 0) return out;
+
+  for (const stmt of router.device.natStatements) {
+    const outsideIface = router.device.interfaces[stmt.outsideInterface];
+    if (!outsideIface || outsideIface.natRole !== 'outside' || !outsideIface.ip) {
+      continue;
+    }
+    const acl = router.device.acls.get(stmt.aclId);
+    if (!acl) continue;
+    for (const peer of Object.values(lab.devices)) {
+      if (peer.kind !== 'pc') continue;
+      if (!peer.ip || !peer.gateway) continue;
+      if (!insideIfaceIps.has(peer.gateway)) continue;
+      if (evaluateAcl(acl, peer.ip) !== 'permit') continue;
+      out.set(peer.ip, { insideLocal: peer.ip, insideGlobal: outsideIface.ip });
+    }
+  }
+  return out;
+}
+
+/** True if two NAT-translation maps describe the same set. Used to skip a
+ *  no-op router-state replace. */
+function translationsEqual(
+  a: ReadonlyMap<string, NatTranslation>,
+  b: ReadonlyMap<string, NatTranslation>,
+): boolean {
+  if (a.size !== b.size) return false;
+  for (const [k, va] of a) {
+    const vb = b.get(k);
+    if (!vb) return false;
+    if (vb.insideLocal !== va.insideLocal || vb.insideGlobal !== va.insideGlobal) {
+      return false;
+    }
   }
   return true;
 }

@@ -41,6 +41,13 @@ const showSubtree: CommandNode = {
             conflict: done('Address conflicts (none in simulation)'),
           },
         },
+        nat: {
+          help: 'NAT status',
+          children: {
+            translations: done('Active NAT translations'),
+            statistics: done('NAT activity summary'),
+          },
+        },
       },
     },
     // `show interfaces` either dumps every interface (terminal here) OR takes a
@@ -139,6 +146,42 @@ const ipDhcpPoolSubtree: CommandNode = {
   argument: arg('name', done('Enter DHCP pool configuration')),
 };
 
+/** `ip nat inside source list <acl> interface <iface> overload` — the PAT
+ *  (NAT overload) statement. The same subtree is reused under config's
+ *  `no` branch so the negate form removes the matching statement. */
+const ipNatStatementSubtree: CommandNode = {
+  help: 'Define a NAT translation statement',
+  children: {
+    inside: {
+      help: 'Translate inside source addresses',
+      children: {
+        source: {
+          help: 'Source-list NAT',
+          children: {
+            list: {
+              help: 'Match traffic by ACL number',
+              argument: arg('acl', {
+                children: {
+                  interface: {
+                    help: 'Use an interface IP as the translated source',
+                    argument: arg('iface', {
+                      children: {
+                        overload: done(
+                          'Apply PAT (port address translation)',
+                        ),
+                      },
+                    }),
+                  },
+                },
+              }),
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
 /** `ip dhcp excluded-address <start> [end]` — reserves a host or range so
  *  the allocator skips it. Single-host form omits the end argument; the
  *  resolver lets the optional second argument fall through cleanly because
@@ -163,6 +206,7 @@ const ipConfigSubtree: CommandNode = {
         'excluded-address': ipDhcpExcludedSubtree,
       },
     },
+    nat: ipNatStatementSubtree,
   },
 };
 
@@ -201,6 +245,7 @@ const configMode: CommandNode = {
                 'excluded-address': ipDhcpExcludedSubtree,
               },
             },
+            nat: ipNatStatementSubtree,
           },
         },
         'access-list': noAccessListSubtree,
@@ -266,6 +311,13 @@ const configIfMode: CommandNode = {
             },
           }),
         },
+        nat: {
+          help: 'Mark this interface for NAT translation',
+          children: {
+            inside: done('Mark interface as NAT inside'),
+            outside: done('Mark interface as NAT outside'),
+          },
+        },
       },
     },
     description: {
@@ -288,6 +340,13 @@ const configIfMode: CommandNode = {
                   out: done('Remove outbound ACL'),
                 },
               }),
+            },
+            nat: {
+              help: 'Remove a NAT interface marking',
+              children: {
+                inside: done('Remove NAT inside marking'),
+                outside: done('Remove NAT outside marking'),
+              },
             },
           },
         },
