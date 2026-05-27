@@ -83,6 +83,7 @@ export function PilotMode({ lab }: { lab: Lab }) {
             }))}
             labStartedAt={labStartedAt}
             resetToken={session.resetToken}
+            solution={lab.solution}
           />
         }
       />

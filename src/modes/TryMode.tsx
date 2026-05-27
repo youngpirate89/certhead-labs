@@ -110,6 +110,7 @@ export function TryMode() {
             labStartedAt={labStartedAt}
             resetToken={session.resetToken}
             onRevealHint={trackHintReveal}
+            solution={lab.solution}
           />
         }
       />

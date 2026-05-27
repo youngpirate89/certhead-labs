@@ -116,4 +116,23 @@ export const tshootReturnRoute: Lab = {
         'R2 has no route back to 192.168.1.0/24. Click R2 → `enable`, `configure terminal`, then `ip route 192.168.1.0 255.255.255.0 192.168.12.1`. Re-run the ping from PC-A.',
     },
   ],
+  solution: {
+    steps: [
+      {
+        device: 'R2',
+        note: 'Add the missing return route back to PC-A’s subnet:',
+        commands: [
+          'enable',
+          'configure terminal',
+          'ip route 192.168.1.0 255.255.255.0 192.168.12.1',
+          'end',
+        ],
+      },
+      {
+        device: 'PC-A',
+        note: 'Confirm the round-trip works now:',
+        commands: ['ping 192.168.2.10'],
+      },
+    ],
+  },
 };

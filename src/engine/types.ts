@@ -54,6 +54,25 @@ export interface LabHint {
   readonly text: string;
 }
 
+/** One block of the worked solution shown by the "See Solution" disclosure.
+ *  Each step targets a single device and lists the commands in order; an
+ *  optional `note` annotates what this block does (rendered above the block
+ *  as a one-line caption). Step grouping matches the way a learner would
+ *  type them — switching devices means starting a new step. */
+export interface SolutionStep {
+  readonly device: string;
+  readonly commands: readonly string[];
+  readonly note?: string;
+}
+
+/** Worked solution displayed by the "See Solution" disclosure in the
+ *  objectives sidebar. Every catalog lab ships one — kept optional on the
+ *  Lab type so pilot/throwaway labs don't need to author one, but the
+ *  catalog convention is to always provide it. */
+export interface LabSolution {
+  readonly steps: readonly SolutionStep[];
+}
+
 export interface LabDevice {
   readonly id: string;
   /** Device kind — selects the adapter (router/switch/pc). */
@@ -114,4 +133,9 @@ export interface Lab {
   readonly setup?: Readonly<Record<string, readonly string[]>>;
   readonly objectives: readonly LabObjective[];
   readonly hints: readonly LabHint[];
+  /** Worked solution shown by the sidebar's "See Solution" disclosure.
+   *  Closed by default in the UI. Optional on the type so pilots/throwaway
+   *  labs can omit it, but every catalog lab MUST provide one — see
+   *  CLAUDE.md "solution field standard". */
+  readonly solution?: LabSolution;
 }

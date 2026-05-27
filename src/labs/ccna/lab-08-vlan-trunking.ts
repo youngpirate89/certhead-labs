@@ -159,4 +159,37 @@ export const lab08VlanTrunking: Lab = {
       text: 'Run show interfaces trunk on SW1 to verify VLAN 10 appears in the allowed and active VLAN list.',
     },
   ],
+  solution: {
+    steps: [
+      {
+        device: 'SW1',
+        note: 'Convert the inter-switch port to a trunk on SW1:',
+        commands: [
+          'enable',
+          'configure terminal',
+          'interface Fa0/24',
+          'switchport mode trunk',
+          'end',
+          'show interfaces trunk',
+        ],
+      },
+      {
+        device: 'SW2',
+        note: 'Do the same on SW2 — both ends of the link must agree:',
+        commands: [
+          'enable',
+          'configure terminal',
+          'interface Fa0/24',
+          'switchport mode trunk',
+          'end',
+          'show interfaces trunk',
+        ],
+      },
+      {
+        device: 'PC-A',
+        note: 'Confirm cross-switch reachability:',
+        commands: ['ping 192.168.10.20'],
+      },
+    ],
+  },
 };

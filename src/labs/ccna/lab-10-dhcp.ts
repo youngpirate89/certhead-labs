@@ -136,4 +136,34 @@ export const lab10Dhcp: Lab = {
         'Verify with `show ip dhcp binding`. PC-A should appear with an address starting at 192.168.1.11 — the first slot after the excluded range.',
     },
   ],
+  solution: {
+    steps: [
+      {
+        device: 'R1',
+        note: 'Enter privileged and global config mode:',
+        commands: ['enable', 'configure terminal'],
+      },
+      {
+        device: 'R1',
+        note: 'Exclude the first 10 addresses (router IP + reserved):',
+        commands: ['ip dhcp excluded-address 192.168.1.1 192.168.1.10'],
+      },
+      {
+        device: 'R1',
+        note: 'Create the DHCP pool and configure it:',
+        commands: [
+          'ip dhcp pool LAN',
+          ' network 192.168.1.0 255.255.255.0',
+          ' default-router 192.168.1.1',
+          ' dns-server 8.8.8.8',
+          'exit',
+        ],
+      },
+      {
+        device: 'R1',
+        note: 'Verify the binding:',
+        commands: ['end', 'show ip dhcp binding'],
+      },
+    ],
+  },
 };

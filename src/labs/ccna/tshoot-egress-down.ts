@@ -141,4 +141,24 @@ export const tshootEgressDown: Lab = {
         'R1\'s WAN interface is administratively down. Click R1 → `enable`, `configure terminal`, `interface gi0/2`, `no shutdown`. Re-run the ping from PC-A to confirm the round-trip works.',
     },
   ],
+  solution: {
+    steps: [
+      {
+        device: 'R1',
+        note: "Bring R1's WAN interface back up — it was administratively down:",
+        commands: [
+          'enable',
+          'configure terminal',
+          'interface Gi0/2',
+          'no shutdown',
+          'end',
+        ],
+      },
+      {
+        device: 'PC-A',
+        note: 'Confirm end-to-end reachability:',
+        commands: ['ping 192.168.2.10'],
+      },
+    ],
+  },
 };

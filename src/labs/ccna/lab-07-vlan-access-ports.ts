@@ -143,4 +143,42 @@ export const lab07VlanAccessPorts: Lab = {
       text: 'Run show vlan brief on SW1 to see which ports are in which VLAN. Then ping from PC-A to confirm segmentation.',
     },
   ],
+  solution: {
+    steps: [
+      {
+        device: 'SW1',
+        note: 'Create both VLANs in the switch database:',
+        commands: [
+          'enable',
+          'configure terminal',
+          'vlan 10',
+          'name Sales',
+          'exit',
+          'vlan 20',
+          'name Engineering',
+          'exit',
+        ],
+      },
+      {
+        device: 'SW1',
+        note: 'Assign each access port to its VLAN:',
+        commands: [
+          'interface Fa0/1',
+          'switchport mode access',
+          'switchport access vlan 10',
+          'exit',
+          'interface Fa0/2',
+          'switchport mode access',
+          'switchport access vlan 20',
+          'end',
+          'show vlan brief',
+        ],
+      },
+      {
+        device: 'PC-A',
+        note: 'Confirm segmentation — the ping should fail:',
+        commands: ['ping 192.168.20.10'],
+      },
+    ],
+  },
 };

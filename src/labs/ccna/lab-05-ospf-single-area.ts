@@ -142,4 +142,38 @@ export const lab05OspfSingleArea: Lab = {
       text: 'Run show ip ospf neighbor on R1. If the output shows FULL, OSPF is working. If empty, check that R2 has matching network statements in area 0.',
     },
   ],
+  solution: {
+    steps: [
+      {
+        device: 'R1',
+        note: 'Enable OSPF on R1 and advertise both networks into area 0:',
+        commands: [
+          'enable',
+          'configure terminal',
+          'router ospf 1',
+          'network 192.168.1.0 0.0.0.255 area 0',
+          'network 10.0.0.0 0.0.0.3 area 0',
+          'end',
+        ],
+      },
+      {
+        device: 'R2',
+        note: 'Mirror the configuration on R2:',
+        commands: [
+          'enable',
+          'configure terminal',
+          'router ospf 1',
+          'network 192.168.2.0 0.0.0.255 area 0',
+          'network 10.0.0.0 0.0.0.3 area 0',
+          'end',
+          'show ip ospf neighbor',
+        ],
+      },
+      {
+        device: 'PC-A',
+        note: 'Confirm end-to-end reachability:',
+        commands: ['ping 192.168.2.10'],
+      },
+    ],
+  },
 };

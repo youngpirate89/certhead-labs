@@ -206,4 +206,47 @@ export const lab09IntervlanRouting: Lab = {
         "If PC-A cannot ping PC-B, check that both Gi0/0.10 and Gi0/0.20 have 'no shutdown' applied — subinterfaces default to shutdown when created.",
     },
   ],
+  solution: {
+    steps: [
+      {
+        device: 'R1',
+        note: 'Bring up the physical trunk-facing interface (no IP — the L3 lives on the subifs):',
+        commands: [
+          'enable',
+          'configure terminal',
+          'interface Gi0/0',
+          'no shutdown',
+          'exit',
+        ],
+      },
+      {
+        device: 'R1',
+        note: 'Configure the VLAN 10 subinterface:',
+        commands: [
+          'interface Gi0/0.10',
+          'encapsulation dot1q 10',
+          'ip address 192.168.10.1 255.255.255.0',
+          'no shutdown',
+          'exit',
+        ],
+      },
+      {
+        device: 'R1',
+        note: 'Configure the VLAN 20 subinterface and verify:',
+        commands: [
+          'interface Gi0/0.20',
+          'encapsulation dot1q 20',
+          'ip address 192.168.20.1 255.255.255.0',
+          'no shutdown',
+          'end',
+          'show ip interface brief',
+        ],
+      },
+      {
+        device: 'PC-A',
+        note: 'Confirm cross-VLAN reachability:',
+        commands: ['ping 192.168.20.10'],
+      },
+    ],
+  },
 };

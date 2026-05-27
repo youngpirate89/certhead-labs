@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import type { LabSolution } from '@/engine/types';
+import { SolutionDisclosure } from './SolutionDisclosure';
 
 /**
  * ObjectivesPanel — live status of the lab's objectives + on-demand hints.
@@ -47,6 +49,10 @@ interface ObjectivesPanelProps {
   /** Fired ONCE when the learner reveals a previously-locked hint. Used by
    *  TryMode for funnel analytics; pilot mode leaves it undefined. */
   onRevealHint?: (index: number) => void;
+  /** Optional worked solution. When provided AND non-empty, a collapsible
+   *  "See Solution" disclosure renders below the hints. Closed by default;
+   *  the panel keeps its own open/closed state independently of reset. */
+  solution?: LabSolution;
 }
 
 /** Detect objectives that just flipped to met; clears after the flash plays. */
@@ -79,6 +85,7 @@ export function ObjectivesPanel({
   labStartedAt,
   resetToken,
   onRevealHint,
+  solution,
 }: ObjectivesPanelProps) {
   const justMet = useJustMet(objectives);
   const metCount = objectives.filter((o) => o.met).length;
@@ -178,6 +185,9 @@ export function ObjectivesPanel({
             resetToken={resetToken ?? 0}
             onRevealHint={onRevealHint}
           />
+        )}
+        {solution && solution.steps.length > 0 && (
+          <SolutionDisclosure steps={solution.steps} />
         )}
       </div>
       {allMet && onReset && (

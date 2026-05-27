@@ -119,4 +119,25 @@ export const tshootWanSubnetMismatch: Lab = {
         'R1’s Gi0/0 is 192.168.12.1/30 → network 192.168.12.0/30. R2’s Gi0/0 was set to 192.168.12.6/30 → network 192.168.12.4/30. Fix R2 to match R1’s link: `enable`, `configure terminal`, `interface gi0/0`, `no ip address`, `ip address 192.168.12.2 255.255.255.252`.',
     },
   ],
+  solution: {
+    steps: [
+      {
+        device: 'R2',
+        note: "Re-IP Gi0/0 so it sits in the same /30 as R1's end of the link:",
+        commands: [
+          'enable',
+          'configure terminal',
+          'interface Gi0/0',
+          'no ip address',
+          'ip address 192.168.12.2 255.255.255.252',
+          'end',
+        ],
+      },
+      {
+        device: 'PC-A',
+        note: 'Confirm the round-trip works now:',
+        commands: ['ping 192.168.2.10'],
+      },
+    ],
+  },
 };

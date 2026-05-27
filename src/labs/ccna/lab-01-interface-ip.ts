@@ -51,4 +51,22 @@ export const lab01InterfaceIp: Lab = {
     { afterSeconds: 60, text: 'Start with `enable` to enter privileged mode, then `configure terminal`.' },
     { afterSeconds: 180, text: 'Use `interface GigabitEthernet0/0` to configure the interface, then `ip address 192.168.1.1 255.255.255.0`.' },
   ],
+  solution: {
+    steps: [
+      {
+        device: 'R1',
+        note: 'Enter config, set the IP, bring the interface up, and verify:',
+        commands: [
+          'enable',
+          'configure terminal',
+          'interface GigabitEthernet0/0',
+          'ip address 192.168.1.1 255.255.255.0',
+          'no shutdown',
+          'exit',
+          'end',
+          'show ip interface brief',
+        ],
+      },
+    ],
+  },
 };

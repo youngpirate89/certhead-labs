@@ -119,4 +119,24 @@ export const tshootWrongNextHop: Lab = {
         'On R2, remove the bad static and add the right one. The R1–R2 link is 192.168.12.0/30 — R1’s end is 192.168.12.1, R2’s end is 192.168.12.2. From R2: `enable`, `configure terminal`, `no ip route 192.168.1.0 255.255.255.0 192.168.12.99`, then `ip route 192.168.1.0 255.255.255.0 192.168.12.1`.',
     },
   ],
+  solution: {
+    steps: [
+      {
+        device: 'R2',
+        note: 'Remove the broken static (next-hop outside the /30) and add the correct one:',
+        commands: [
+          'enable',
+          'configure terminal',
+          'no ip route 192.168.1.0 255.255.255.0 192.168.12.99',
+          'ip route 192.168.1.0 255.255.255.0 192.168.12.1',
+          'end',
+        ],
+      },
+      {
+        device: 'PC-A',
+        note: 'Confirm the round-trip works now:',
+        commands: ['ping 192.168.2.10'],
+      },
+    ],
+  },
 };

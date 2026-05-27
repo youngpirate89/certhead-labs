@@ -143,6 +143,35 @@ export const lab06StandardAcl: Lab = {
       text: 'Apply the ACL closest to the destination — outbound on the interface facing PC-B: ip access-group 1 out (under interface Gi0/1)',
     },
   ],
+  solution: {
+    steps: [
+      {
+        device: 'R1',
+        note: 'Define ACL 1 — deny PC-A first, then permit the rest of the subnet:',
+        commands: [
+          'enable',
+          'configure terminal',
+          'access-list 1 deny host 192.168.1.10',
+          'access-list 1 permit 192.168.1.0 0.0.0.255',
+        ],
+      },
+      {
+        device: 'R1',
+        note: 'Apply the ACL outbound on the interface facing PC-B:',
+        commands: [
+          'interface Gi0/1',
+          'ip access-group 1 out',
+          'end',
+          'show access-lists',
+        ],
+      },
+      {
+        device: 'PC-A',
+        note: 'Confirm PC-A is blocked (the ping should time out):',
+        commands: ['ping 192.168.2.10'],
+      },
+    ],
+  },
 };
 
 /** True for any entry that denies just PC-A (192.168.1.10): the `host` form
