@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Layout } from '@/components/Layout';
 import { LabBrief } from '@/components/LabBrief';
-import { Terminal } from '@/components/Terminal';
-import { DeviceTabBar } from '@/components/terminal/DeviceTabBar';
 import { TopologyPanel } from '@/components/TopologyPanel';
 import { ObjectivesPanel } from '@/components/ObjectivesPanel';
 import { useLabSession } from '@/engine/terminal/useLabSession';
@@ -16,6 +14,10 @@ const REGISTER_URL = 'https://certhead.com/register?source=free-lab';
  * On completion, shows the upgrade CTA — AFTER completion, never during
  * (CLAUDE.md free-lab design principle). No CertHead API calls. Anonymous
  * PostHog funnel events only: viewed -> started -> completed -> cta_clicked.
+ *
+ * Layout is topology-first: the canvas fills the viewport, the objectives
+ * sidebar pins to the right. Per-device terminals appear as floating panels
+ * mounted at the document root (added in Section 2 of this refactor).
  */
 export function TryMode() {
   const lab = lab01InterfaceIp;
@@ -45,8 +47,6 @@ export function TryMode() {
     }
   }, [session.allMet, completed, session.commandCount, lab.id]);
 
-  // Brief gates the terminal on first load. Skippable in one click; topology
-  // stays visible the whole time for spatial context.
   const [briefDismissed, setBriefDismissed] = useState(false);
   const [labStartedAt, setLabStartedAt] = useState<number | null>(null);
 
@@ -72,47 +72,36 @@ export function TryMode() {
   }
 
   return (
-    <Layout
-      examLabel={lab.exam}
-      labTitle={lab.title}
-      topology={
-        <TopologyPanel
-          devices={session.devices}
-          activeDeviceId={session.activeDeviceId}
-          onSelectDevice={session.setActiveDevice}
-          links={lab.topology.links}
-        />
-      }
-      objectives={
-        <ObjectivesPanel
-          title="Objectives"
-          objectives={session.objectives}
-          onReset={briefDismissed ? resetLab : undefined}
-          hints={lab.hints.map((h, i) => ({
-            index: i,
-            text: h.text,
-            afterSeconds: h.afterSeconds,
-          }))}
-          labStartedAt={labStartedAt}
-          resetToken={session.resetToken}
-          onRevealHint={trackHintReveal}
-        />
-      }
-      terminal={
-        briefDismissed ? (
-          <div className="relative flex h-full flex-col">
-            <DeviceTabBar
-              openDeviceIds={session.openDeviceIds}
-              activeDeviceId={session.activeDeviceId}
-              onSelect={session.setActiveDevice}
-              onClose={session.closeDevice}
-            />
-            <div className="relative min-h-0 flex-1">
-              <Terminal term={session} />
-              {completed && <CompletionCard labId={lab.id} />}
-            </div>
-          </div>
-        ) : (
+    <>
+      <Layout
+        examLabel={lab.exam}
+        labTitle={lab.title}
+        topology={
+          <TopologyPanel
+            devices={session.devices}
+            activeDeviceId={session.activeDeviceId}
+            onSelectDevice={session.setActiveDevice}
+            links={lab.topology.links}
+          />
+        }
+        objectives={
+          <ObjectivesPanel
+            title="Objectives"
+            objectives={session.objectives}
+            onReset={briefDismissed ? resetLab : undefined}
+            hints={lab.hints.map((h, i) => ({
+              index: i,
+              text: h.text,
+              afterSeconds: h.afterSeconds,
+            }))}
+            labStartedAt={labStartedAt}
+            resetToken={session.resetToken}
+            onRevealHint={trackHintReveal}
+          />
+        }
+      />
+      {!briefDismissed && (
+        <div className="fixed inset-0 z-40 bg-[#070a0e]/85 backdrop-blur-sm">
           <LabBrief
             title={lab.title}
             examLabel={lab.exam}
@@ -122,15 +111,19 @@ export function TryMode() {
             objectives={lab.objectives.map((o) => ({ id: o.id, text: o.text }))}
             onStart={startLab}
           />
-        )
-      }
-    />
+        </div>
+      )}
+      {completed && <CompletionBanner labId={lab.id} />}
+    </>
   );
 }
 
-function CompletionCard({ labId }: { labId: string }) {
+/** Completion banner — same content as the previous in-terminal CompletionCard.
+ *  Renders as a fixed-position strip at the bottom of the viewport so it works
+ *  regardless of which (or how many) floating panels are open. */
+function CompletionBanner({ labId }: { labId: string }) {
   return (
-    <div className="animate-slide-up absolute inset-x-0 bottom-0 border-t border-terminal-prompt/40 bg-panel-header/95 p-5 backdrop-blur">
+    <div className="animate-slide-up fixed inset-x-0 bottom-0 z-30 border-t border-terminal-prompt/40 bg-panel-header/95 p-5 backdrop-blur">
       <div className="animate-celebrate mx-auto flex max-w-2xl items-center gap-4 rounded-md p-1 sm:flex-row">
         <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-terminal-prompt/70 bg-terminal-prompt/20 text-terminal-prompt">
           <span className="animate-check-pop text-base font-bold">✓</span>
