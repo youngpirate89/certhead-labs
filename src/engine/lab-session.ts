@@ -32,6 +32,11 @@ export interface LabSession {
   readonly devices: Readonly<Record<string, DeviceSession>>;
   /** Which device the terminal is currently bound to. Always a key in devices. */
   readonly activeDeviceId: string;
+  /** Devices the learner has opened a console for, in tab order. Drives the
+   *  per-device tab bar above the terminal. Always non-empty: seeded with the
+   *  initial active device, appended on first setActive, never emptied by
+   *  closeDevice (the last tab cannot be closed). */
+  readonly openDeviceIds: readonly string[];
   /** Cables between device interfaces — authored by the lab, not learners. */
   readonly links: readonly Link[];
 }
@@ -86,6 +91,7 @@ export function initLabSession(lab: Lab): LabSession {
   return refreshDerivedState({
     devices,
     activeDeviceId: lab.topology.devices[0].id,
+    openDeviceIds: [lab.topology.devices[0].id],
     links: lab.topology.links,
   });
 }
@@ -183,13 +189,40 @@ function dispatchByKind(
   }
 }
 
-/** Switch which device the terminal is bound to. Throws on unknown id. */
+/** Switch which device the terminal is bound to. Throws on unknown id.
+ *  Appends `id` to openDeviceIds if it isn't already a tab — the topology
+ *  click path is the only way new tabs appear, so this is the chokepoint. */
 export function setActive(lab: LabSession, id: string): LabSession {
   if (!(id in lab.devices)) {
     throw new Error(`setActive: unknown device id '${id}'`);
   }
-  if (id === lab.activeDeviceId) return lab;
-  return { ...lab, activeDeviceId: id };
+  const openDeviceIds = lab.openDeviceIds.includes(id)
+    ? lab.openDeviceIds
+    : [...lab.openDeviceIds, id];
+  if (id === lab.activeDeviceId && openDeviceIds === lab.openDeviceIds) return lab;
+  return { ...lab, activeDeviceId: id, openDeviceIds };
+}
+
+/** Close one device tab. Removes `id` from openDeviceIds and — if it was the
+ *  active tab — moves activeDeviceId to the neighbor on the LEFT (or the new
+ *  first tab if the closed one was leftmost). The last remaining tab cannot
+ *  be closed: openDeviceIds is invariant non-empty. Unknown id throws so
+ *  miswired callers fail loud rather than silently no-op. */
+export function closeDevice(lab: LabSession, id: string): LabSession {
+  const idx = lab.openDeviceIds.indexOf(id);
+  if (idx === -1) {
+    throw new Error(`closeDevice: '${id}' is not an open tab`);
+  }
+  if (lab.openDeviceIds.length === 1) return lab;
+  const openDeviceIds = [
+    ...lab.openDeviceIds.slice(0, idx),
+    ...lab.openDeviceIds.slice(idx + 1),
+  ];
+  const activeDeviceId =
+    id === lab.activeDeviceId
+      ? openDeviceIds[Math.max(0, idx - 1)]
+      : lab.activeDeviceId;
+  return { ...lab, openDeviceIds, activeDeviceId };
 }
 
 /** Replace one device's session — used by reset() in the terminal layer. */

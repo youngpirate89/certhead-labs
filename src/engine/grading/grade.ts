@@ -33,6 +33,7 @@ export function grade(lab: Lab, source: Session | LabSession): GradeResult {
     : {
         devices: { [source.device.id]: source },
         activeDeviceId: source.device.id,
+        openDeviceIds: [source.device.id],
         links: [],
       };
 

@@ -7,6 +7,7 @@ import {
   initLabSession,
   applyToActive,
   setActive,
+  closeDevice,
   activeSession,
   activePrompt,
   type LabSession,
@@ -25,9 +26,17 @@ export interface UseLabSession extends UseTerminal {
   devices: DeviceTopologyView[];
   /** Id of the device the terminal currently targets. */
   activeDeviceId: string;
+  /** Ordered list of devices the learner has opened — drives the tab bar
+   *  above the terminal. Always non-empty; the initial device is seeded. */
+  openDeviceIds: readonly string[];
   /** Switch the active console — multi-device labs use this; the canvas wires
-   *  it up via TopologyPanel.onSelectDevice. */
+   *  it up via TopologyPanel.onSelectDevice. Also appends to openDeviceIds
+   *  when the target tab isn't already open. */
   setActiveDevice: (id: string) => void;
+  /** Close a device tab. No-op when only one tab remains (last tab can't
+   *  close). If closing the active tab, the neighbor on the left becomes
+   *  active. */
+  closeDevice: (id: string) => void;
   /** Restart the lab from a fresh device state. */
   reset: () => void;
   /** Monotonic ID that changes on every reset. */
@@ -171,6 +180,10 @@ export function useLabSession(lab: Lab): UseLabSession {
     setLabSession((cur) => setActive(cur, id));
   }, []);
 
+  const closeDeviceCallback = useCallback((id: string) => {
+    setLabSession((cur) => closeDevice(cur, id));
+  }, []);
+
   const [resetToken, setResetToken] = useState(0);
   const reset = useCallback(() => {
     setLabSession(initLabSession(lab));
@@ -195,7 +208,9 @@ export function useLabSession(lab: Lab): UseLabSession {
     commandCount,
     devices,
     activeDeviceId: labSession.activeDeviceId,
+    openDeviceIds: labSession.openDeviceIds,
     setActiveDevice,
+    closeDevice: closeDeviceCallback,
     reset,
     resetToken,
   };

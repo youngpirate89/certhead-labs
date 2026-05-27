@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Layout } from '@/components/Layout';
 import { LabBrief } from '@/components/LabBrief';
 import { Terminal } from '@/components/Terminal';
+import { DeviceTabBar } from '@/components/terminal/DeviceTabBar';
 import { TopologyPanel } from '@/components/TopologyPanel';
 import { ObjectivesPanel } from '@/components/ObjectivesPanel';
 import { useLabSession } from '@/engine/terminal/useLabSession';
@@ -99,9 +100,17 @@ export function TryMode() {
       }
       terminal={
         briefDismissed ? (
-          <div className="relative h-full">
-            <Terminal term={session} />
-            {completed && <CompletionCard labId={lab.id} />}
+          <div className="relative flex h-full flex-col">
+            <DeviceTabBar
+              openDeviceIds={session.openDeviceIds}
+              activeDeviceId={session.activeDeviceId}
+              onSelect={session.setActiveDevice}
+              onClose={session.closeDevice}
+            />
+            <div className="relative min-h-0 flex-1">
+              <Terminal term={session} />
+              {completed && <CompletionCard labId={lab.id} />}
+            </div>
           </div>
         ) : (
           <LabBrief

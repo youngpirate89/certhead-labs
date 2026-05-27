@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Layout } from '@/components/Layout';
 import { LabBrief } from '@/components/LabBrief';
 import { Terminal } from '@/components/Terminal';
+import { DeviceTabBar } from '@/components/terminal/DeviceTabBar';
 import { TopologyPanel } from '@/components/TopologyPanel';
 import { ObjectivesPanel } from '@/components/ObjectivesPanel';
 import { useLabSession } from '@/engine/terminal/useLabSession';
@@ -60,7 +61,17 @@ export function PilotMode({ lab }: { lab: Lab }) {
       }
       terminal={
         briefDismissed ? (
-          <Terminal term={session} />
+          <div className="flex h-full flex-col">
+            <DeviceTabBar
+              openDeviceIds={session.openDeviceIds}
+              activeDeviceId={session.activeDeviceId}
+              onSelect={session.setActiveDevice}
+              onClose={session.closeDevice}
+            />
+            <div className="min-h-0 flex-1">
+              <Terminal term={session} />
+            </div>
+          </div>
         ) : (
           <LabBrief
             title={lab.title}

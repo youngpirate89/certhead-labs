@@ -80,7 +80,7 @@ interface DeviceNodeData extends Record<string, unknown> {
 }
 
 const NODE_WIDTH = 200;
-const NODE_GAP = 80;
+const NODE_GAP = 120;
 
 /** Uniform card height across router / switch / workstation. Sized to fit the
  *  tallest current card content (PC: icon + hostname + centered IP + bottom
@@ -374,12 +374,14 @@ function PortLed({
   const cx = endpoint.x - ox;
   const cy = endpoint.y - oy;
   // Iface label sits ABOVE the cable (the CIDR sits BELOW — the two never
-  // share a vertical slot, the A1.6 collision fix). Horizontal anchor grows
-  // INWARD from the LED so the text stays inside the link span; for a 4-5
-  // char iface name and the 80px node-gap, this leaves a ~10px gap between
-  // the two iface labels at the smallest link width.
+  // share a vertical slot, the A1.6 collision fix). Anchor sits well INWARD
+  // of the LED (toward the cable center) so labels stay clear of the card
+  // edges — with NODE_GAP=120 there's ample room in the cable middle for
+  // both labels to sit comfortably without crowding the device. Text still
+  // grows further toward the middle from the anchor via textAnchor=
+  // 'start'/'end'.
   const labelX =
-    endpoint.labelAnchor === 'start' ? cx + LED_OUTER_R + 3 : cx - LED_OUTER_R - 3;
+    endpoint.labelAnchor === 'start' ? cx + LED_OUTER_R + 6 : cx - LED_OUTER_R - 6;
   const labelY = cy - IFACE_LABEL_OFFSET;
   return (
     <g
@@ -752,7 +754,7 @@ function DeviceNode({ data }: NodeProps<Node<DeviceNodeData>>) {
             </span>
           ) : null}
         </div>
-        <span className="pointer-events-none absolute right-2 top-1.5 font-mono text-[9px] uppercase tracking-[0.08em] text-terminal-dim">
+        <span className="pointer-events-none absolute right-2 top-1.5 font-mono text-[9px] uppercase tracking-[0.08em] text-[#9ca3af]">
           {view.platform}
         </span>
 

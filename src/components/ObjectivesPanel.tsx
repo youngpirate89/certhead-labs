@@ -330,7 +330,7 @@ function HintRow({
         className={`w-full rounded px-2 py-1.5 text-left font-sans text-xs transition-colors ${
           available
             ? 'cursor-pointer text-terminal-dim hover:bg-panel-border/50 hover:text-terminal-fg focus:outline-none focus:ring-1 focus:ring-terminal-prompt'
-            : 'cursor-not-allowed text-terminal-dim/70'
+            : 'cursor-not-allowed text-[#9ca3af]'
         }`}
       >
         <span className="font-semibold uppercase tracking-wider">{label}</span>
