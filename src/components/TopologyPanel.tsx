@@ -215,6 +215,12 @@ const LABEL_FONT_SIZE = 9;
  *  than rendering on top of it. For a purely horizontal cable this reduces
  *  to a pure vertical offset (same direction the original code used). */
 const IFACE_LABEL_OFFSET = 18;
+/** Fraction along the cable to pull each iface name label toward the center.
+ *  The label still associates with its own LED + port edge, but sits ~22% in
+ *  from the endpoint so it clears the device card it would otherwise overlap.
+ *  The mirror label uses (1 - this) — symmetric three-label layout
+ *  (iface @ 0.22, CIDR @ 0.5, iface @ 0.78). */
+const IFACE_LABEL_T = 0.22;
 /** Perpendicular pixel offset for the network CIDR label (BELOW the cable).
  *  Same perpendicular logic as IFACE_LABEL_OFFSET but on the opposite side. */
 const NETWORK_LABEL_OFFSET = 18;
@@ -507,10 +513,23 @@ function EdgeOverlay({
           // SW1↔PC-B) the offsets rotate with the cable so neither label
           // renders on top of the line.
           const perp = perpUnitBelow(l.left, l.right);
-          const ifaceDx = -perp.nx * IFACE_LABEL_OFFSET;
-          const ifaceDy = -perp.ny * IFACE_LABEL_OFFSET;
+          const perpDx = -perp.nx * IFACE_LABEL_OFFSET;
+          const perpDy = -perp.ny * IFACE_LABEL_OFFSET;
           const cidrDx = perp.nx * NETWORK_LABEL_OFFSET;
           const cidrDy = perp.ny * NETWORK_LABEL_OFFSET;
+          // Iface labels render at IFACE_LABEL_T along the cable toward the
+          // far end (with the mirror end at 1 - t). This pulls each name
+          // inward from its LED so the text clears the device card it would
+          // otherwise overlap — three-label layout reads iface @ 0.22, CIDR
+          // @ 0.5, iface @ 0.78. The LED itself stays at the endpoint.
+          const leftLabel = {
+            x: l.left.x + (l.right.x - l.left.x) * IFACE_LABEL_T + perpDx,
+            y: l.left.y + (l.right.y - l.left.y) * IFACE_LABEL_T + perpDy,
+          };
+          const rightLabel = {
+            x: l.right.x + (l.left.x - l.right.x) * IFACE_LABEL_T + perpDx,
+            y: l.right.y + (l.left.y - l.right.y) * IFACE_LABEL_T + perpDy,
+          };
           return (
             <g key={l.key} data-link-key={l.key}>
               <line
@@ -527,8 +546,8 @@ function EdgeOverlay({
                 fill={fill}
                 ox={minX}
                 oy={minY}
-                labelDx={ifaceDx}
-                labelDy={ifaceDy}
+                labelX={leftLabel.x - minX}
+                labelY={leftLabel.y - minY}
               />
               <PortLed
                 endpoint={l.right}
@@ -536,8 +555,8 @@ function EdgeOverlay({
                 fill={fill}
                 ox={minX}
                 oy={minY}
-                labelDx={ifaceDx}
-                labelDy={ifaceDy}
+                labelX={rightLabel.x - minX}
+                labelY={rightLabel.y - minY}
               />
               {l.network ? (
                 <text
@@ -561,29 +580,26 @@ function EdgeOverlay({
 }
 
 /** A single port LED + its iface name label. Pure presentational — color is
- *  derived from the link's overall state by the caller. The label is offset
- *  by (`labelDx`, `labelDy`) which the caller computes perpendicular to the
- *  cable direction (see `perpUnitBelow`), so diagonal cables float the
- *  label cleanly off the line. Text anchor is 'middle' because the
- *  perpendicular axis has no preferred reading direction — center-aligning
- *  the label on the perpendicular projection reads consistently across
- *  every cable angle. */
+ *  derived from the link's overall state by the caller. The label is rendered
+ *  at the explicit (`labelX`, `labelY`) anchor (already offset along the
+ *  cable + perpendicular by the caller). Text anchor is 'middle' so the
+ *  iface name reads consistently across every cable angle. */
 function PortLed({
   endpoint,
   linkUp,
   fill,
   ox,
   oy,
-  labelDx,
-  labelDy,
+  labelX,
+  labelY,
 }: {
   readonly endpoint: RenderEndpoint;
   readonly linkUp: boolean;
   readonly fill: string;
   readonly ox: number;
   readonly oy: number;
-  readonly labelDx: number;
-  readonly labelDy: number;
+  readonly labelX: number;
+  readonly labelY: number;
 }) {
   const cx = endpoint.x - ox;
   const cy = endpoint.y - oy;
@@ -595,8 +611,8 @@ function PortLed({
       <circle cx={cx} cy={cy} r={LED_OUTER_R} fill="none" stroke={LED_RING} strokeWidth={1.5} />
       <circle cx={cx} cy={cy} r={LED_INNER_R} fill={fill} />
       <text
-        x={cx + labelDx}
-        y={cy + labelDy}
+        x={labelX}
+        y={labelY}
         textAnchor="middle"
         fontSize={LABEL_FONT_SIZE}
         fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
