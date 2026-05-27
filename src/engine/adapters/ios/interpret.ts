@@ -4,10 +4,14 @@ import {
   type AclEntry,
   type Mode,
   type Session,
+  type SubInterface,
+  nextEngineSeq,
   normaliseInterface,
   fullInterfaceName,
+  isSubInterfaceId,
   isValidIpv4,
   isValidMask,
+  parentInterfaceId,
   prompt as promptFor,
   routingTable,
   deriveRouterId,
@@ -31,7 +35,12 @@ const out = (...lines: string[]): CommandOutput[] =>
 
 /** Config-family modes — the contexts where `do <exec-cmd>` is accepted. */
 function isConfigFamily(mode: Mode): boolean {
-  return mode === 'config' || mode === 'config-if' || mode === 'config-router';
+  return (
+    mode === 'config' ||
+    mode === 'config-if' ||
+    mode === 'config-subif' ||
+    mode === 'config-router'
+  );
 }
 
 /**
@@ -271,6 +280,9 @@ function dispatch(
       if (s.mode === 'config-if') {
         s.mode = 'config';
         s.currentInterface = null;
+      } else if (s.mode === 'config-subif') {
+        s.mode = 'config';
+        s.activeSubIfId = null;
       } else if (s.mode === 'config-router') {
         s.mode = 'config';
       } else if (s.mode === 'config') {
@@ -283,6 +295,7 @@ function dispatch(
     case 'end':
       s.mode = 'priv';
       s.currentInterface = null;
+      s.activeSubIfId = null;
       return { session: s, output: [] };
 
     case 'router':
@@ -299,6 +312,11 @@ function dispatch(
 
     case 'interface':
       return enterInterface(s, args.iface);
+
+    case 'encapsulation':
+      // command shape in config-subif: ['encapsulation', 'dot1q'], args.vlan
+      if (command[1] === 'dot1q') return setEncapsulationDot1q(s, args.vlan);
+      return { session: s, output: err('% Unknown command.') };
 
     case 'description':
       if (s.currentInterface) s.device.interfaces[s.currentInterface].description = args.text;
@@ -338,17 +356,69 @@ function dispatch(
 function enterInterface(s: Session, token: string): ApplyResult {
   const id = normaliseInterface(token);
   if (!id) return { session: s, output: err(`% Invalid input detected at "${token}".`) };
+  if (isSubInterfaceId(id)) {
+    const parent = parentInterfaceId(id);
+    if (!s.device.interfaces[parent]) {
+      // Stay in config — parent must exist before a subif can be created.
+      return {
+        session: s,
+        output: err(`% Parent interface ${fullInterfaceName(parent)} not found`),
+      };
+    }
+    if (!s.device.subInterfaces[id]) {
+      // Lazy creation on first entry — matches IOS, which materialises the
+      // subif as soon as `interface Gi0/0.<n>` is typed. defaults: no
+      // encapsulation, no ip, admin-down (subifs come up only on no shutdown).
+      const sub: SubInterface = {
+        id,
+        parentId: parent,
+        dot1qVlan: null,
+        ip: null,
+        mask: null,
+        adminUp: false,
+        protocolUp: false,
+      };
+      s.device.subInterfaces[id] = sub;
+    }
+    s.mode = 'config-subif';
+    s.activeSubIfId = id;
+    s.currentInterface = null;
+    return { session: s, output: [] };
+  }
   if (!s.device.interfaces[id]) {
     return { session: s, output: err(`% Invalid interface ${fullInterfaceName(id)}`) };
   }
   s.mode = 'config-if';
   s.currentInterface = id;
+  s.activeSubIfId = null;
+  return { session: s, output: [] };
+}
+
+/** `encapsulation dot1q <vlan>` on a subinterface. Range 1-4094. */
+function setEncapsulationDot1q(s: Session, vlanArg: string): ApplyResult {
+  if (s.mode !== 'config-subif' || !s.activeSubIfId) {
+    return { session: s, output: err('% Invalid input detected at "encapsulation".') };
+  }
+  const vlan = Number.parseInt(vlanArg, 10);
+  if (!Number.isFinite(vlan) || String(vlan) !== vlanArg) {
+    return { session: s, output: err(`% Invalid input detected at "${vlanArg}".`) };
+  }
+  if (vlan < 1 || vlan > 4094) {
+    return { session: s, output: err('% VLAN id out of range') };
+  }
+  s.device.subInterfaces[s.activeSubIfId].dot1qVlan = vlan;
   return { session: s, output: [] };
 }
 
 function setIpAddress(s: Session, ip: string, mask: string): ApplyResult {
   if (!isValidIpv4(ip)) return { session: s, output: err(`% Invalid input detected at "${ip}".`) };
   if (!isValidMask(mask)) return { session: s, output: err('% Invalid subnet mask.') };
+  if (s.mode === 'config-subif' && s.activeSubIfId) {
+    const sub = s.device.subInterfaces[s.activeSubIfId];
+    sub.ip = ip;
+    sub.mask = mask;
+    return { session: s, output: [] };
+  }
   if (s.currentInterface) {
     s.device.interfaces[s.currentInterface].ip = ip;
     s.device.interfaces[s.currentInterface].mask = mask;
@@ -357,6 +427,9 @@ function setIpAddress(s: Session, ip: string, mask: string): ApplyResult {
 }
 
 function setAdmin(s: Session, up: boolean): ApplyResult {
+  if (s.mode === 'config-subif' && s.activeSubIfId) {
+    return setSubIfAdmin(s, up);
+  }
   if (!s.currentInterface) return { session: s, output: [] };
   const iface = s.device.interfaces[s.currentInterface];
   const changed = iface.adminUp !== up;
@@ -370,6 +443,61 @@ function setAdmin(s: Session, up: boolean): ApplyResult {
         {
           kind: 'system',
           text: `%LINEPROTO-5-UPDOWN: Line protocol on Interface ${name}, changed state to up`,
+        },
+      ],
+    };
+  }
+  return { session: s, output: [] };
+}
+
+/** `[no] shutdown` on the active subinterface. Subif protocol-up resolves to
+ *  adminUp AND parent physical's protocolUp; the lab-session refresh pass
+ *  re-derives protocolUp after every command, so we set adminUp here and a
+ *  provisional protocolUp matching IOS expectations — the refresh corrects
+ *  it for the real link-state shortly after. Verify-style objectives compare
+ *  `lastShowIpIntBrief` against the per-subif `subIfConfiguredAt` stamp set
+ *  here, so the `no shutdown` IS the moment that arms the verify gate. */
+function setSubIfAdmin(s: Session, up: boolean): ApplyResult {
+  const subId = s.activeSubIfId;
+  if (!subId) return { session: s, output: [] };
+  const sub = s.device.subInterfaces[subId];
+  const changed = sub.adminUp !== up;
+  sub.adminUp = up;
+  const parent = s.device.interfaces[sub.parentId];
+  const parentUp = parent ? parent.adminUp && parent.protocolUp : false;
+  sub.protocolUp = up && parentUp;
+  if (up && changed) {
+    // Stamp so a later `show ip interface brief` can satisfy a verify-style
+    // objective for THIS subif. `shutdown` clears the stamp — verifying after
+    // a shutdown should not count. Uses the engine's monotonic seq counter
+    // (not Date.now()) so the ordering is bulletproof even when commands run
+    // in the same millisecond under test.
+    s.subIfConfiguredAt[subId] = nextEngineSeq();
+    const name = fullInterfaceName(subId);
+    const lines: { kind: 'system'; text: string }[] = [
+      { kind: 'system', text: `%LINK-5-CHANGED: Interface ${name}, changed state to up` },
+    ];
+    if (sub.protocolUp) {
+      lines.push({
+        kind: 'system',
+        text: `%LINEPROTO-5-UPDOWN: Line protocol on Interface ${name}, changed state to up`,
+      });
+    }
+    return { session: s, output: lines };
+  }
+  if (!up && changed) {
+    delete s.subIfConfiguredAt[subId];
+    const name = fullInterfaceName(subId);
+    return {
+      session: s,
+      output: [
+        {
+          kind: 'system',
+          text: `%LINK-5-CHANGED: Interface ${name}, changed state to administratively down`,
+        },
+        {
+          kind: 'system',
+          text: `%LINEPROTO-5-UPDOWN: Line protocol on Interface ${name}, changed state to down`,
         },
       ],
     };
@@ -392,10 +520,24 @@ function negate(s: Session, command: string[], args: Record<string, string>): Ap
       if (command[2] === 'access-group') {
         return clearAccessGroup(s, args.number, command[4] as 'in' | 'out');
       }
-      // `no ip address` (config-if): clear the interface's IP.
-      if (s.currentInterface) {
+      // `no ip address`:
+      //   - in config-subif → clear the active subinterface's IP+mask
+      //   - in config-if    → clear the active physical interface's IP+mask
+      if (s.mode === 'config-subif' && s.activeSubIfId) {
+        const sub = s.device.subInterfaces[s.activeSubIfId];
+        sub.ip = null;
+        sub.mask = null;
+      } else if (s.currentInterface) {
         s.device.interfaces[s.currentInterface].ip = null;
         s.device.interfaces[s.currentInterface].mask = null;
+      }
+      return { session: s, output: [] };
+    case 'encapsulation':
+      // `no encapsulation dot1q <vlan>` — clear the active subif's dot1q tag.
+      // The vlan argument is required by the grammar but IOS doesn't validate
+      // it matches the current tag; we follow that and simply clear.
+      if (s.mode === 'config-subif' && s.activeSubIfId) {
+        s.device.subInterfaces[s.activeSubIfId].dot1qVlan = null;
       }
       return { session: s, output: [] };
     case 'access-list':
@@ -699,7 +841,14 @@ function show(
       return { session: s, output: out(...showIpOspf(s)) };
     }
     if (command[2] === 'interface') {
-      if (command[3] === 'brief') return { session: s, output: out(...showIpIntBrief(s)) };
+      if (command[3] === 'brief') {
+        // Stamp at command-eval time — verify-style objectives (`verify-brief`
+        // in Lab 09) read this against `subIfConfiguredAt` to require the
+        // show to run AFTER the subif came up. Mirrors `lastShowInterfacesTrunk`
+        // on switches (Lab 08). Engine seq, not Date.now() — see state.ts.
+        s.lastShowIpIntBrief = nextEngineSeq();
+        return { session: s, output: out(...showIpIntBrief(s)) };
+      }
       if (args.iface) return showIpInterfaceOne(s, args.iface);
     }
     return { session: s, output: out(...showIpIntBrief(s)) };
@@ -890,24 +1039,53 @@ function showIpIntBrief(s: Session): string[] {
     'Method'.padEnd(7) +
     'Status'.padEnd(22) +
     'Protocol';
-  const rows = Object.values(s.device.interfaces).map((i) => {
-    const ip = i.ip ?? 'unassigned';
-    const method = i.ip ? 'manual' : 'unset';
-    const status = i.adminUp ? 'up' : 'administratively down';
-    // Protocol column tracks line-protocol state. Admin-down forces it down;
-    // otherwise it follows the lab-session-refreshed protocolUp (false when
-    // the cabled peer is admin-down — real IOS shows up/down in that case).
-    const proto = i.adminUp && i.protocolUp ? 'up' : 'down';
-    return (
-      i.name.padEnd(23) +
-      ip.padEnd(16) +
-      'YES '.padEnd(4) +
-      method.padEnd(7) +
-      status.padEnd(22) +
-      proto
-    );
-  });
+  // Group subifs under their parent so the output reads like real IOS — parent
+  // first, then its dot1Q subifs in numeric VLAN-tag order.
+  const subsByParent = new Map<string, string[]>();
+  for (const subId of Object.keys(s.device.subInterfaces)) {
+    const parent = s.device.subInterfaces[subId].parentId;
+    const list = subsByParent.get(parent) ?? [];
+    list.push(subId);
+    subsByParent.set(parent, list);
+  }
+  const subOrder = (a: string, b: string): number => {
+    const ta = s.device.subInterfaces[a].dot1qVlan ?? Number.MAX_SAFE_INTEGER;
+    const tb = s.device.subInterfaces[b].dot1qVlan ?? Number.MAX_SAFE_INTEGER;
+    return ta - tb;
+  };
+  const rows: string[] = [];
+  for (const i of Object.values(s.device.interfaces)) {
+    rows.push(formatIntBriefRow(i.name, i.ip, i.adminUp, i.adminUp && i.protocolUp));
+    const subs = subsByParent.get(i.id);
+    if (!subs) continue;
+    for (const subId of subs.slice().sort(subOrder)) {
+      const sub = s.device.subInterfaces[subId];
+      rows.push(
+        formatIntBriefRow(fullInterfaceName(sub.id), sub.ip, sub.adminUp, sub.protocolUp),
+      );
+    }
+  }
   return [header, ...rows];
+}
+
+function formatIntBriefRow(
+  name: string,
+  ip: string | null,
+  adminUp: boolean,
+  protocolUp: boolean,
+): string {
+  const ipCol = ip ?? 'unassigned';
+  const method = ip ? 'manual' : 'unset';
+  const status = adminUp ? 'up' : 'administratively down';
+  const proto = protocolUp ? 'up' : 'down';
+  return (
+    name.padEnd(23) +
+    ipCol.padEnd(16) +
+    'YES '.padEnd(4) +
+    method.padEnd(7) +
+    status.padEnd(22) +
+    proto
+  );
 }
 
 function maskToCidr(mask: string): number {
@@ -940,7 +1118,20 @@ function syntheticMac(ifaceId: string): string {
 
 function showInterfacesOne(s: Session, ifaceToken: string): ApplyResult {
   const id = normaliseInterface(ifaceToken);
-  if (!id || !s.device.interfaces[id]) {
+  if (!id) return { session: s, output: err(`% Invalid interface ${ifaceToken}`) };
+  if (isSubInterfaceId(id)) {
+    // Lab 09 doesn't require the detailed per-subif block — keeping the
+    // detailed renderer scoped to physical interfaces avoids inventing IOS
+    // output that nobody validates against. Redirect the learner to the
+    // commands that DO show subif state. (Work order §2.6.)
+    return {
+      session: s,
+      output: err(
+        `% show interfaces ${ifaceToken} is not implemented in this lab scope. Use \`show ip interface brief\` or \`show running-config interface ${ifaceToken}\`.`,
+      ),
+    };
+  }
+  if (!s.device.interfaces[id]) {
     return { session: s, output: err(`% Invalid interface ${ifaceToken}`) };
   }
   const i = s.device.interfaces[id];
@@ -965,7 +1156,19 @@ function showInterfacesOne(s: Session, ifaceToken: string): ApplyResult {
 
 function showRunningConfigInterface(s: Session, ifaceToken: string): ApplyResult {
   const id = normaliseInterface(ifaceToken);
-  if (!id || !s.device.interfaces[id]) {
+  if (!id) return { session: s, output: err(`% Invalid interface ${ifaceToken}`) };
+  if (isSubInterfaceId(id)) {
+    const sub = s.device.subInterfaces[id];
+    if (!sub) return { session: s, output: err(`% Invalid interface ${ifaceToken}`) };
+    const lines: string[] = [`interface ${fullInterfaceName(sub.id)}`];
+    if (sub.dot1qVlan !== null) lines.push(` encapsulation dot1Q ${sub.dot1qVlan}`);
+    if (sub.ip && sub.mask) lines.push(` ip address ${sub.ip} ${sub.mask}`);
+    else lines.push(' no ip address');
+    if (!sub.adminUp) lines.push(' shutdown');
+    lines.push('!');
+    return { session: s, output: out(...lines) };
+  }
+  if (!s.device.interfaces[id]) {
     return { session: s, output: err(`% Invalid interface ${ifaceToken}`) };
   }
   const i = s.device.interfaces[id];
@@ -988,6 +1191,16 @@ function showVersion(s: Session): string[] {
 
 function showRunningConfig(s: Session): string[] {
   const lines = ['Building configuration...', '', '!', `hostname ${s.device.hostname}`, '!'];
+  // Group subifs under their parent for the dump — IOS prints each subif as
+  // its own `interface Gi0/0.10` stanza, in numeric VLAN-tag order, directly
+  // after the parent physical's stanza.
+  const subsByParent = new Map<string, string[]>();
+  for (const subId of Object.keys(s.device.subInterfaces)) {
+    const parent = s.device.subInterfaces[subId].parentId;
+    const list = subsByParent.get(parent) ?? [];
+    list.push(subId);
+    subsByParent.set(parent, list);
+  }
   for (const i of Object.values(s.device.interfaces)) {
     lines.push(`interface ${i.name}`);
     if (i.description) lines.push(` description ${i.description}`);
@@ -997,6 +1210,22 @@ function showRunningConfig(s: Session): string[] {
     if (i.accessGroups.out !== null) lines.push(` ip access-group ${i.accessGroups.out} out`);
     if (!i.adminUp) lines.push(' shutdown');
     lines.push('!');
+    const subs = subsByParent.get(i.id);
+    if (!subs) continue;
+    subs.sort(
+      (a, b) =>
+        (s.device.subInterfaces[a].dot1qVlan ?? Number.MAX_SAFE_INTEGER) -
+        (s.device.subInterfaces[b].dot1qVlan ?? Number.MAX_SAFE_INTEGER),
+    );
+    for (const subId of subs) {
+      const sub = s.device.subInterfaces[subId];
+      lines.push(`interface ${fullInterfaceName(sub.id)}`);
+      if (sub.dot1qVlan !== null) lines.push(` encapsulation dot1Q ${sub.dot1qVlan}`);
+      if (sub.ip && sub.mask) lines.push(` ip address ${sub.ip} ${sub.mask}`);
+      else lines.push(' no ip address');
+      if (!sub.adminUp) lines.push(' shutdown');
+      lines.push('!');
+    }
   }
   // Static routes appear between interface blocks and `end` — matches real
   // IOS ordering and ensures a learner running `show running-config` after

@@ -633,3 +633,166 @@ describe('IOS interpreter — ? context help', () => {
     expect(s).toEqual(before);
   });
 });
+
+describe('config-subif — dot1Q subinterface mode', () => {
+  /** Helper: arrive at config-subif on Gi0/0.10 from a freshly-booted router.
+   *  The parent Gi0/0 is admin-up so the subif's protocolUp resolves true
+   *  immediately on `no shutdown` (no lab-session refresh needed in unit tests). */
+  function intoSubif10(): Session {
+    return run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface gi0/0',
+      'no shutdown',
+      'exit',
+      'interface gi0/0.10',
+    ]);
+  }
+
+  it('interface gi0/0.10 from config enters config-subif and creates the subif', () => {
+    const s = intoSubif10();
+    expect(s.mode).toBe('config-subif');
+    expect(s.activeSubIfId).toBe('Gi0/0.10');
+    expect(prompt(s)).toBe('R1(config-subif)#');
+    expect(s.device.subInterfaces['Gi0/0.10']).toMatchObject({
+      id: 'Gi0/0.10',
+      parentId: 'Gi0/0',
+      dot1qVlan: null,
+      ip: null,
+      adminUp: false,
+    });
+  });
+
+  it('interface <subif> with non-existent parent stays in config and prints an error', () => {
+    const s = run(fresh(), ['enable', 'configure terminal']);
+    const { session, output } = applyCommand(s, 'interface gi9/9.10');
+    expect(session.mode).toBe('config');
+    expect(session.activeSubIfId).toBeNull();
+    expect(session.device.subInterfaces['Gi9/9.10']).toBeUndefined();
+    expect(output.some((o) => /Parent interface GigabitEthernet9\/9 not found/.test(o.text))).toBe(
+      true,
+    );
+  });
+
+  it('encapsulation dot1q 10 sets dot1qVlan on the active subif', () => {
+    const s = applyCommand(intoSubif10(), 'encapsulation dot1q 10').session;
+    expect(s.device.subInterfaces['Gi0/0.10'].dot1qVlan).toBe(10);
+  });
+
+  it('encapsulation dot1q 0 / 4095 → range error', () => {
+    const lo = applyCommand(intoSubif10(), 'encapsulation dot1q 0');
+    expect(lo.output[0].text).toMatch(/out of range/);
+    expect(lo.session.device.subInterfaces['Gi0/0.10'].dot1qVlan).toBeNull();
+    const hi = applyCommand(intoSubif10(), 'encapsulation dot1q 4095');
+    expect(hi.output[0].text).toMatch(/out of range/);
+  });
+
+  it('ip address sets ip/mask on the active subif (not on the parent)', () => {
+    const s = applyCommand(
+      intoSubif10(),
+      'ip address 192.168.10.1 255.255.255.0',
+    ).session;
+    expect(s.device.subInterfaces['Gi0/0.10'].ip).toBe('192.168.10.1');
+    expect(s.device.subInterfaces['Gi0/0.10'].mask).toBe('255.255.255.0');
+    expect(s.device.interfaces['Gi0/0'].ip).toBeNull();
+  });
+
+  it('no shutdown sets adminUp true, protocolUp tracks parent', () => {
+    const s = applyCommand(intoSubif10(), 'no shutdown').session;
+    const sub = s.device.subInterfaces['Gi0/0.10'];
+    expect(sub.adminUp).toBe(true);
+    // Parent Gi0/0 is adminUp + protocolUp (default true) in unit tests, so
+    // the subif's protocolUp resolves true immediately.
+    expect(sub.protocolUp).toBe(true);
+    expect(s.subIfConfiguredAt['Gi0/0.10']).toBeGreaterThan(0);
+  });
+
+  it('shutdown sets adminUp/protocolUp false and clears the configured-at stamp', () => {
+    const up = applyCommand(intoSubif10(), 'no shutdown').session;
+    const down = applyCommand(up, 'shutdown').session;
+    expect(down.device.subInterfaces['Gi0/0.10'].adminUp).toBe(false);
+    expect(down.device.subInterfaces['Gi0/0.10'].protocolUp).toBe(false);
+    expect(down.subIfConfiguredAt['Gi0/0.10']).toBeUndefined();
+  });
+
+  it('exit returns to config mode and clears activeSubIfId', () => {
+    const s = applyCommand(intoSubif10(), 'exit').session;
+    expect(s.mode).toBe('config');
+    expect(s.activeSubIfId).toBeNull();
+  });
+
+  it('end returns to priv mode', () => {
+    const s = applyCommand(intoSubif10(), 'end').session;
+    expect(s.mode).toBe('priv');
+    expect(s.activeSubIfId).toBeNull();
+  });
+
+  it('show ip interface brief lists physical and subinterface rows together', () => {
+    const s = run(intoSubif10(), [
+      'encapsulation dot1q 10',
+      'ip address 192.168.10.1 255.255.255.0',
+      'no shutdown',
+      'end',
+      'show ip interface brief',
+    ]);
+    // lastShowIpIntBrief is set to a monotonically-increasing seq AFTER the
+    // subif's configured-at stamp — verify-style objectives compare them.
+    expect(s.lastShowIpIntBrief).toBeGreaterThan(s.subIfConfiguredAt['Gi0/0.10']);
+    const briefOut = applyCommand(s, 'show ip interface brief').output;
+    const text = briefOut.map((o) => o.text).join('\n');
+    expect(text).toMatch(/GigabitEthernet0\/0\b/);
+    expect(text).toMatch(/GigabitEthernet0\/0\.10\s+192\.168\.10\.1\s+YES\s+manual\s+up\s+up/);
+  });
+
+  it('show running-config interface gi0/0.10 renders the subif stanza', () => {
+    const s = run(intoSubif10(), [
+      'encapsulation dot1q 10',
+      'ip address 192.168.10.1 255.255.255.0',
+      'no shutdown',
+      'end',
+    ]);
+    const text = applyCommand(s, 'show running-config interface gi0/0.10')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/interface GigabitEthernet0\/0\.10/);
+    expect(text).toMatch(/encapsulation dot1Q 10/);
+    expect(text).toMatch(/ip address 192\.168\.10\.1 255\.255\.255\.0/);
+    expect(text).not.toMatch(/ shutdown/);
+  });
+
+  it('show running-config interface gi0/0.10 with partial state omits encap/ip', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface gi0/0',
+      'no shutdown',
+      'exit',
+      'interface gi0/0.10',
+      'end',
+    ]);
+    const text = applyCommand(s, 'show running-config interface gi0/0.10')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/interface GigabitEthernet0\/0\.10/);
+    expect(text).not.toMatch(/encapsulation/);
+    expect(text).toMatch(/no ip address/);
+    expect(text).toMatch(/ shutdown/);
+  });
+
+  it('no encapsulation dot1q clears the tag', () => {
+    const s = run(intoSubif10(), [
+      'encapsulation dot1q 10',
+      'no encapsulation dot1q 10',
+    ]);
+    expect(s.device.subInterfaces['Gi0/0.10'].dot1qVlan).toBeNull();
+  });
+
+  it('no ip address in config-subif clears just the subif ip', () => {
+    const s = run(intoSubif10(), [
+      'ip address 192.168.10.1 255.255.255.0',
+      'no ip address',
+    ]);
+    expect(s.device.subInterfaces['Gi0/0.10'].ip).toBeNull();
+    expect(s.device.subInterfaces['Gi0/0.10'].mask).toBeNull();
+  });
+});

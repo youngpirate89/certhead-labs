@@ -249,10 +249,59 @@ const configIfMode: CommandNode = {
   },
 };
 
-// config-subif grammar lands in Section 2 with the encapsulation+ip handlers.
-// Stubbed here so the Mode union stays exhaustive for the GRAMMARS record;
-// Section 2 replaces this with a real keyword tree.
-const configSubIfMode: CommandNode = { children: {} };
+/** config-subif keyword surface — dot1Q router-on-a-stick. Mirrors
+ *  config-if's `ip address` / `shutdown` / `no` / `exit` / `end`, plus the
+ *  subif-only `encapsulation dot1q <vlan>` line. `description` is intentionally
+ *  omitted (not needed for Lab 09; physical iface keeps it).
+ *
+ *  Like config-if, this also accepts `interface <name>` so the learner can hop
+ *  between subifs (or back to a physical interface) without `exit` first —
+ *  the dispatcher's `enterInterface` is mode-agnostic and re-routes correctly. */
+const configSubIfMode: CommandNode = {
+  children: {
+    interface: {
+      help: 'Select another interface to configure',
+      argument: arg('iface', done('Switch to interface configuration')),
+    },
+    encapsulation: {
+      help: 'Set encapsulation type',
+      children: {
+        dot1q: {
+          help: 'IEEE 802.1Q VLAN tagging',
+          argument: arg('vlan', done('Apply dot1Q tag for this subinterface')),
+        },
+      },
+    },
+    ip: {
+      children: {
+        address: {
+          help: 'Set the subinterface IP address',
+          argument: arg('ip', { argument: arg('mask', done('Apply IP and mask')) }),
+        },
+      },
+    },
+    shutdown: done('Administratively shut down the subinterface'),
+    no: {
+      help: 'Negate a command',
+      children: {
+        shutdown: done('Bring the subinterface up'),
+        ip: {
+          children: { address: done('Remove the IP address') },
+        },
+        encapsulation: {
+          children: {
+            dot1q: {
+              help: 'Remove dot1Q encapsulation',
+              argument: arg('vlan', done('Remove the dot1Q tag')),
+            },
+          },
+        },
+      },
+    },
+    exit: done('Exit subinterface configuration'),
+    end: done('Return to privileged EXEC'),
+  },
+};
 
 const GRAMMARS: Record<Mode, CommandNode> = {
   user: userMode,

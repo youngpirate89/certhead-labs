@@ -326,8 +326,11 @@ function refreshOspf(lab: LabSession): LabSession {
   return mutated ? { ...lab, devices } : lab;
 }
 
-/** Recompute `protocolUp` for every interface on one router. Returns the
- *  same session if nothing changed (lets the outer refresh skip a clone). */
+/** Recompute `protocolUp` for every physical interface AND subinterface on one
+ *  router. Returns the same session if nothing changed (lets the outer refresh
+ *  skip a clone). Subif protocolUp resolves to `adminUp && parent.protocolUp`
+ *  — so this MUST run after the physical pass so each subif sees the fresh
+ *  parent state. */
 function refreshRouterProtocolUp(lab: LabSession, s: RouterSession): RouterSession {
   let mutated = false;
   const interfaces: Record<string, RouterSession['device']['interfaces'][string]> = {
@@ -340,8 +343,20 @@ function refreshRouterProtocolUp(lab: LabSession, s: RouterSession): RouterSessi
       mutated = true;
     }
   }
+  const subInterfaces: Record<string, RouterSession['device']['subInterfaces'][string]> = {
+    ...s.device.subInterfaces,
+  };
+  for (const [subId, sub] of Object.entries(s.device.subInterfaces)) {
+    const parent = interfaces[sub.parentId];
+    const parentUp = parent ? parent.adminUp && parent.protocolUp : false;
+    const up = sub.adminUp && parentUp;
+    if (sub.protocolUp !== up) {
+      subInterfaces[subId] = { ...sub, protocolUp: up };
+      mutated = true;
+    }
+  }
   if (!mutated) return s;
-  return { ...s, device: { ...s.device, interfaces } };
+  return { ...s, device: { ...s.device, interfaces, subInterfaces } };
 }
 
 /** Recompute `protocolUp` for every switchport on one switch. Same shape as
