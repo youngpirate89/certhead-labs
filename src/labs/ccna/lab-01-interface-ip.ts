@@ -25,19 +25,19 @@ export const lab01InterfaceIp: Lab = {
   objectives: [
     {
       id: 'ip',
-      text: 'Assign IP 192.168.1.1/24 to GigabitEthernet0/0',
+      text: 'R1 Gi0/0: assign ip address 192.168.1.1 255.255.255.0',
       check: (state) =>
         state.R1.interfaces['Gi0/0'].ip === '192.168.1.1' &&
         state.R1.interfaces['Gi0/0'].mask === '255.255.255.0',
     },
     {
       id: 'noshut',
-      text: 'Bring the interface up with no shutdown',
+      text: 'R1 Gi0/0: bring the interface up with no shutdown',
       check: (state) => state.R1.interfaces['Gi0/0'].adminUp === true,
     },
     {
       id: 'verify',
-      text: 'Verify with show ip interface brief',
+      text: 'R1: run show ip interface brief to confirm Gi0/0 is up/up',
       // History is per-device — lab-01 has one device, R1. Accept the command
       // from priv mode OR via `do` from config-family modes; both forms appear
       // in resolvedHistory as canonical strings.

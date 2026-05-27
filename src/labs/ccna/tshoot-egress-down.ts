@@ -107,7 +107,7 @@ export const tshootEgressDown: Lab = {
       // function still looks for R1 Gi0/2 adminUp (the seed has no other
       // way to satisfy the symptom), so the grading is identical — only
       // the learner-facing wording moves away from spoiling the fix.
-      text: 'Restore WAN connectivity between PC-A and PC-B',
+      text: 'Restore WAN connectivity — PC-A can ping 192.168.2.10',
       check: (state) => state.R1?.interfaces['Gi0/2'].adminUp === true,
     },
     {

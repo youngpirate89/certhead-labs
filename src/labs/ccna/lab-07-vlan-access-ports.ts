@@ -78,7 +78,7 @@ export const lab07VlanAccessPorts: Lab = {
   objectives: [
     {
       id: 'vlans-created',
-      text: 'Create VLAN 10 (Sales) and VLAN 20 (Engineering) on SW1',
+      text: 'SW1: create VLAN 10 named Sales and VLAN 20 named Engineering',
       check: (_state, _history, session) => {
         const sw1 = session.devices.SW1;
         if (sw1?.kind !== 'switch') return false;
@@ -95,7 +95,7 @@ export const lab07VlanAccessPorts: Lab = {
     },
     {
       id: 'ports-assigned',
-      text: 'Assign Fa0/1 to VLAN 10 and Fa0/2 to VLAN 20',
+      text: 'SW1: set Fa0/1 to switchport access vlan 10 and Fa0/2 to switchport access vlan 20',
       check: (_state, _history, session) => {
         const sw1 = session.devices.SW1;
         if (sw1?.kind !== 'switch') return false;
@@ -112,7 +112,7 @@ export const lab07VlanAccessPorts: Lab = {
     },
     {
       id: 'segmentation-verified',
-      text: 'Confirm segmentation: ping PC-B from PC-A, then run show vlan brief on SW1',
+      text: 'PC-A: ping 192.168.20.10 fails, and SW1: run show vlan brief',
       check: (_state, history, session) => {
         // lastPing pattern: the segmentation must be demonstrated by an actual
         // learner-initiated ping. State-permits-the-block alone is not enough.

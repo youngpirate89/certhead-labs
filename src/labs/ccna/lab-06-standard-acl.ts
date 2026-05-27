@@ -76,7 +76,7 @@ export const lab06StandardAcl: Lab = {
   objectives: [
     {
       id: 'acl-defined',
-      text: 'Define ACL 1 to deny PC-A and permit the subnet',
+      text: 'R1: define ACL 1 — deny host 192.168.1.10, then permit 192.168.1.0 0.0.0.255',
       check: (_state, _history, session) => {
         const r1 = session.devices.R1;
         if (r1?.kind !== 'router') return false;
@@ -103,7 +103,7 @@ export const lab06StandardAcl: Lab = {
     },
     {
       id: 'acl-applied',
-      text: 'Apply ACL 1 outbound on the interface facing PC-B',
+      text: 'R1 Gi0/1 (toward PC-B): apply ip access-group 1 out',
       check: (_state, _history, session) => {
         const r1 = session.devices.R1;
         if (r1?.kind !== 'router') return false;
@@ -112,7 +112,7 @@ export const lab06StandardAcl: Lab = {
     },
     {
       id: 'acl-verified',
-      text: 'Verify PC-A is blocked AND inspect the ACL on R1',
+      text: 'PC-A: ping 192.168.2.10 fails, and R1: run show access-lists',
       check: (_state, history, session) => {
         // lastPing pattern: the block must be demonstrated by an actual
         // learner-initiated ping (not state-permits-block alone).

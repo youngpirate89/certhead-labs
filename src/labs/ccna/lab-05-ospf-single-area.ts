@@ -85,7 +85,7 @@ export const lab05OspfSingleArea: Lab = {
   objectives: [
     {
       id: 'ospf-config',
-      text: 'Configure OSPF area 0 on R1 and R2',
+      text: 'R1 & R2: run router ospf 1 and advertise both connected networks in area 0',
       check: (_state, _history, session) => {
         const r1 = session.devices.R1;
         const r2 = session.devices.R2;
@@ -99,7 +99,7 @@ export const lab05OspfSingleArea: Lab = {
     },
     {
       id: 'ospf-neighbor',
-      text: 'Verify OSPF neighbor adjacency is FULL',
+      text: 'R1 or R2: run show ip ospf neighbor and confirm the adjacency is FULL',
       check: (_state, history, session) => {
         // Same pedagogy as lastPing: the learner must run the verification
         // command. Either router's history satisfies — the lab is symmetric.
@@ -120,7 +120,7 @@ export const lab05OspfSingleArea: Lab = {
     },
     {
       id: 'reachability',
-      text: 'Confirm PC-A can reach PC-B',
+      text: 'PC-A: ping 192.168.2.10 succeeds',
       check: (_state, _history, session) => {
         const pca = session.devices['PC-A'];
         if (pca?.kind !== 'pc') return false;

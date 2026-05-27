@@ -87,7 +87,7 @@ export const tshootWanSubnetMismatch: Lab = {
   objectives: [
     {
       id: 'fix-r2-wan',
-      text: 'R2 Gi0/0 is 192.168.12.2/30 (same /30 as R1 Gi0/0)',
+      text: 'Restore full connectivity — PC-A can ping 192.168.2.10',
       check: (state) => {
         const i = state.R2?.interfaces['Gi0/0'];
         return (
@@ -99,7 +99,7 @@ export const tshootWanSubnetMismatch: Lab = {
     },
     {
       id: 'reach-pc-a-to-pc-b',
-      text: 'PC-A can ping PC-B — run `ping 192.168.2.10` from PC-A and confirm a reply',
+      text: 'Confirm end-to-end reachability from PC-A',
       check: (_state, _history, session) => {
         const pca = session.devices['PC-A'];
         if (pca?.kind !== 'pc') return false;

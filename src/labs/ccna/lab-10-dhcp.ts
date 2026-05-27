@@ -73,7 +73,7 @@ export const lab10Dhcp: Lab = {
   objectives: [
     {
       id: 'excluded',
-      text: 'Exclude 192.168.1.1–192.168.1.10 from the DHCP pool',
+      text: 'R1: ip dhcp excluded-address 192.168.1.1 192.168.1.10',
       check: (state) =>
         state.R1?.dhcpExcluded.some(
           (r) => r.start === '192.168.1.1' && r.end === '192.168.1.10',
@@ -81,7 +81,7 @@ export const lab10Dhcp: Lab = {
     },
     {
       id: 'pool-network',
-      text: 'Create pool LAN with network 192.168.1.0/24',
+      text: 'R1: ip dhcp pool LAN — network 192.168.1.0 255.255.255.0',
       check: (state) => {
         const pool = state.R1?.dhcpPools.get('LAN');
         return pool?.network === '192.168.1.0' && pool?.mask === '255.255.255.0';
@@ -89,19 +89,19 @@ export const lab10Dhcp: Lab = {
     },
     {
       id: 'default-router',
-      text: 'Set default-router 192.168.1.1 in pool LAN',
+      text: 'R1 (pool LAN): default-router 192.168.1.1',
       check: (state) =>
         state.R1?.dhcpPools.get('LAN')?.defaultRouter === '192.168.1.1',
     },
     {
       id: 'dns-server',
-      text: 'Set dns-server 8.8.8.8 in pool LAN',
+      text: 'R1 (pool LAN): dns-server 8.8.8.8',
       check: (state) =>
         state.R1?.dhcpPools.get('LAN')?.dnsServer === '8.8.8.8',
     },
     {
       id: 'binding',
-      text: 'PC-A receives a DHCP address in the 192.168.1.0/24 range',
+      text: 'PC-A: receives a DHCP-assigned address in 192.168.1.0/24',
       check: (state) => {
         const binding = state.R1?.dhcpBindings.get('PC-A');
         if (!binding) return false;
@@ -111,7 +111,7 @@ export const lab10Dhcp: Lab = {
     },
     {
       id: 'verify',
-      text: 'Verify with show ip dhcp binding',
+      text: "R1: run show ip dhcp binding and confirm PC-A's lease",
       check: (_state, _history, session) => {
         const r1 = session.devices.R1;
         if (r1?.kind !== 'router') return false;

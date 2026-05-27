@@ -94,7 +94,7 @@ export const lab08VlanTrunking: Lab = {
   objectives: [
     {
       id: 'trunk-configured',
-      text: 'Configure the link between SW1 and SW2 as a trunk',
+      text: 'SW1 Fa0/24 & SW2 Fa0/24: set switchport mode trunk on both ends',
       check: (_state, _history, session) => {
         const sw1 = session.devices.SW1;
         const sw2 = session.devices.SW2;
@@ -107,7 +107,7 @@ export const lab08VlanTrunking: Lab = {
     },
     {
       id: 'trunk-verified',
-      text: 'Verify VLAN 10 is active on the trunk (run `show interfaces trunk`)',
+      text: 'SW1 or SW2: run show interfaces trunk and confirm VLAN 10 is allowed on Fa0/24',
       check: (_state, _history, session) => {
         const sw1 = session.devices.SW1;
         const sw2 = session.devices.SW2;
@@ -137,7 +137,7 @@ export const lab08VlanTrunking: Lab = {
     },
     {
       id: 'reachability',
-      text: 'PC-A can ping PC-B — run `ping 192.168.10.20` from PC-A and confirm a reply',
+      text: 'PC-A: ping 192.168.10.20 succeeds (traffic crosses the trunk)',
       check: (_state, _history, session) => {
         const pca = session.devices['PC-A'];
         if (pca?.kind !== 'pc') return false;

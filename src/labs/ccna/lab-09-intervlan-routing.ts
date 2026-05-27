@@ -135,12 +135,12 @@ export const lab09IntervlanRouting: Lab = {
   objectives: [
     {
       id: 'subif10-encap',
-      text: 'Configure Gi0/0.10 with encapsulation dot1q 10',
+      text: 'R1 Gi0/0.10: set encapsulation dot1q 10',
       check: (state) => state.R1?.subInterfaces['Gi0/0.10']?.dot1qVlan === 10,
     },
     {
       id: 'subif10-ip',
-      text: 'Assign 192.168.10.1/24 to Gi0/0.10',
+      text: 'R1 Gi0/0.10: assign ip address 192.168.10.1 255.255.255.0 (then no shutdown)',
       check: (state) => {
         const sub = state.R1?.subInterfaces['Gi0/0.10'];
         return sub?.ip === '192.168.10.1' && sub?.mask === '255.255.255.0';
@@ -148,12 +148,12 @@ export const lab09IntervlanRouting: Lab = {
     },
     {
       id: 'subif20-encap',
-      text: 'Configure Gi0/0.20 with encapsulation dot1q 20',
+      text: 'R1 Gi0/0.20: set encapsulation dot1q 20',
       check: (state) => state.R1?.subInterfaces['Gi0/0.20']?.dot1qVlan === 20,
     },
     {
       id: 'subif20-ip',
-      text: 'Assign 192.168.20.1/24 to Gi0/0.20',
+      text: 'R1 Gi0/0.20: assign ip address 192.168.20.1 255.255.255.0 (then no shutdown)',
       check: (state) => {
         const sub = state.R1?.subInterfaces['Gi0/0.20'];
         return sub?.ip === '192.168.20.1' && sub?.mask === '255.255.255.0';
@@ -161,7 +161,7 @@ export const lab09IntervlanRouting: Lab = {
     },
     {
       id: 'verify-brief',
-      text: 'Verify the subinterfaces are up by running `show ip interface brief` on R1',
+      text: 'R1: run show ip interface brief and confirm both subinterfaces are up/up',
       check: (_state, _history, session) => {
         const r1 = session.devices.R1;
         if (r1?.kind !== 'router') return false;
@@ -176,7 +176,7 @@ export const lab09IntervlanRouting: Lab = {
     },
     {
       id: 'ping-cross-vlan',
-      text: 'Confirm cross-VLAN reachability — `ping 192.168.20.10` from PC-A',
+      text: 'PC-A: ping 192.168.20.10 succeeds (routed across VLANs at R1)',
       check: (_state, _history, session) => {
         const pca = session.devices['PC-A'];
         if (pca?.kind !== 'pc') return false;

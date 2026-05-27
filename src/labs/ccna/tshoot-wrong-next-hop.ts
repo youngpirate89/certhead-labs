@@ -85,7 +85,7 @@ export const tshootWrongNextHop: Lab = {
   objectives: [
     {
       id: 'fix-r2-next-hop',
-      text: 'R2 has a static route to 192.168.1.0/24 via 192.168.12.1',
+      text: 'Restore full connectivity — PC-A can ping 192.168.2.10',
       check: (_state, _history, session) => {
         const r2 = session.devices.R2;
         if (r2?.kind !== 'router') return false;
@@ -99,7 +99,7 @@ export const tshootWrongNextHop: Lab = {
     },
     {
       id: 'reach-pc-a-to-pc-b',
-      text: 'PC-A can ping PC-B — run `ping 192.168.2.10` from PC-A and confirm a reply',
+      text: 'Confirm end-to-end reachability from PC-A',
       check: (_state, _history, session) => {
         const pca = session.devices['PC-A'];
         if (pca?.kind !== 'pc') return false;
