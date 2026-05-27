@@ -72,4 +72,44 @@ describe('routerAdapter', () => {
     // Gi0/1 untouched.
     expect(view.interfaces[1].status).toBe('admin-down');
   });
+
+  it('toTopologyView treats a no-IP physical hosting active subifs as up (router-on-a-stick parent)', () => {
+    // Lab 09 cold-run regression: Gi0/0 is the trunk attachment, no IP of its
+    // own; the L3 lives on Gi0/0.10 / Gi0/0.20. Status should resolve to 'up'
+    // (green LED) once admin-up + at least one subif exists, NOT 'no-ip'.
+    const s = [
+      'enable',
+      'configure terminal',
+      'interface gi0/0',
+      'no shutdown',
+      'exit',
+      'interface gi0/0.10',
+      'encapsulation dot1q 10',
+      'ip address 192.168.10.1 255.255.255.0',
+      'no shutdown',
+    ].reduce(
+      (acc, line) => routerAdapter.applyCommand(acc, line).session,
+      routerAdapter.buildDevice(SPEC),
+    );
+    const view = routerAdapter.toTopologyView(s);
+    expect(view.interfaces[0]).toEqual({
+      id: 'Gi0/0',
+      name: 'GigabitEthernet0/0',
+      status: 'up',
+      ip: null,
+      mask: null,
+    });
+  });
+
+  it('toTopologyView keeps no-ip warning when the physical has no IP and no subifs', () => {
+    // The fix above must not affect the canonical no-ip-warning case — a
+    // physical that the learner brought up but never assigned an IP to and
+    // never put subifs on top of should still amber-warn.
+    const s = ['enable', 'configure terminal', 'interface gi0/0', 'no shutdown'].reduce(
+      (acc, line) => routerAdapter.applyCommand(acc, line).session,
+      routerAdapter.buildDevice(SPEC),
+    );
+    const view = routerAdapter.toTopologyView(s);
+    expect(view.interfaces[0].status).toBe('no-ip');
+  });
 });
