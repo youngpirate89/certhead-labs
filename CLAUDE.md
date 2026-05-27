@@ -4,7 +4,7 @@
 > the question-bank product. Do not conflate the two; they have different
 > architectures, different priorities, and different timelines.
 >
-> Last updated: 2026-05-27
+> Last updated: 2026-05-28
 
 ---
 
@@ -51,11 +51,11 @@ This project is **explicitly subordinate to CertHead's launch sequence.** Work o
 
 ---
 
-## 🎯 CURRENT FOCUS — CATALOG AT 9 LABS, ALL COMMITTED
+## 🎯 CURRENT FOCUS — CATALOG AT 10 LABS, ALL COMMITTED
 
-Status: Engine has generalized well past the original troubleshooting-pilot scope. Switch + VLAN + trunking landed; on-demand hint reveal landed; catalog is at 9 labs, all committed (Lab 08 VLAN trunking signed off by human cold-run and committed at 0542053).
+Status: Engine has generalized well past the original troubleshooting-pilot scope. Switch + VLAN + trunking landed; on-demand hint reveal landed; DHCP server landed; "See Solution" disclosure landed across the entire catalog. Catalog is at 10 labs, all committed (Lab 10 DHCP signed off by human cold-run; solution field now standard across every catalog lab).
 
-**Catalog (9 labs):**
+**Catalog (10 labs):**
 - Lab 01: Interface IP — free lab, live at `/try` ✅
 - Lab 02: Tshoot — wrong return route ✅
 - Lab 03: Tshoot — wrong next-hop ✅
@@ -66,22 +66,24 @@ Status: Engine has generalized well past the original troubleshooting-pilot scop
 - Lab 07: VLAN access ports (create VLANs, assign ports, verify segmentation) ✅
 - Lab 08: VLAN trunking across two switches (configure trunk, verify, cross-switch reachability) ✅
 - Lab 09: Inter-VLAN Routing — Router-on-a-Stick (ROAS) ✅
+- Lab 10: DHCP server — exclude range, pool config, binding, verify ✅
 
 **Engine capabilities now span:**
-- **Router:** interface config, static routes, OSPF single-area (neighbor state + O routes), standard ACLs (numbered 1–99, `ip access-group`, ACL evaluation in `canReach`), subinterfaces with config-subif mode (`interface Gi0/0.10`), `encapsulation dot1q <vlan>` (native option), subif-aware `canReach` for inter-VLAN routing, full show suite incl. `show run interface <iface>`.
+- **Router:** interface config, static routes, OSPF single-area (neighbor state + O routes), standard ACLs (numbered 1–99, `ip access-group`, ACL evaluation in `canReach`), subinterfaces with config-subif mode (`interface Gi0/0.10`), `encapsulation dot1q <vlan>` (native option), subif-aware `canReach` for inter-VLAN routing, DHCP server (`ip dhcp pool`, `ip dhcp excluded-address`, `network` / `default-router` / `dns-server` / `lease` in config-dhcp mode), deterministic binding allocator that propagates ip/mask/gateway into DHCP-client PCs, full show suite incl. `show run interface <iface>` and `show ip dhcp pool|binding|conflict`.
 - **Switch:** VLAN database, access + trunk ports, native VLAN, `switchport trunk allowed vlan`, VLAN-aware forwarding (same-VLAN reachable, different-VLAN blocked, trunk-aware across switches), `show vlan`, `show interfaces trunk`, `show run interface <iface>`. Verify-style objectives (e.g. `show interfaces trunk`) use a `lastShowInterfacesTrunk` session field written at command-eval time (mirrors PC `lastPing`) so they require an observe-after-configure action and cannot auto-complete from state alone.
-- **PC:** ping (4 packets, engine-wide), tracert (streamed 150ms/hop, cancel-on-reset), ipconfig, redirect tier for out-of-scope commands.
+- **PC:** ping (4 packets, engine-wide), tracert (streamed 150ms/hop, cancel-on-reset), ipconfig (with `(DHCP request pending)` and `/all DHCP Enabled: Yes` for `dhcpMode` PCs), redirect tier for out-of-scope commands.
 - **Terminal:** streaming with input-lock, `[sim]` dim failure sentences, reset cancels in-flight streams.
 - **Terminal panel:** `FloatingTerminalPanel` — single tabbed panel, draggable, drag-to-resize (right/bottom/corner), minimizes to snap-bar at bottom-center of viewport. Replaces per-device panels.
 - **CLI theming:** Settings pill button, `TerminalThemePanel` with PuTTY-world bg/text color presets (Solarized Dark, Tomorrow Night, Monokai, Zenburn, Gruvbox, Matrix green), font size slider 12–18px, persists to localStorage.
-- **Topology:** topology-first layout (canvas dominates viewport, terminal floats over it), device-specific icons (`RouterIcon`, `SwitchIcon`, `WorkstationIcon`) via `DeviceIcon` dispatcher, port-edge LEDs on cable-facing card edges (`EdgePortDot`) initialized from `startingState` on lab load, perpendicular label offset for diagonal cable edges, uniform card height 120px, IP centered, prompt line removed from cards, `NODE_GAP` tuned, interface label offset tuned, platform badge and hint contrast at `#9ca3af`.
+- **Topology:** topology-first layout (canvas dominates viewport, terminal floats over it), device-specific icons (`RouterIcon`, `SwitchIcon`, `WorkstationIcon`) via `DeviceIcon` dispatcher, port-edge LEDs on cable-facing card edges (`EdgePortDot`) initialized from `startingState` on lab load, perpendicular label offset for diagonal cable edges, interface name labels pulled to 22%/78% along cables to clear card edges (3-label layout: source-iface @ 0.22, CIDR @ 0.5, target-iface @ 0.78), uniform card height 120px, IP centered, prompt line removed from cards, `NODE_GAP` tuned, platform badge and hint contrast at `#9ca3af`.
 - **Hint system:** on-demand reveal — timer gates *availability*, learner clicks to reveal (deliberate flip from auto-print, which interrupted learners mid-typing).
+- **Solution disclosure:** every catalog lab ships a `solution: LabSolution` block. `LabSolution = { steps: SolutionStep[] }`, step = `{ device, commands, note? }`. Collapsible "See Solution" panel under the hints — closed by default, muted text + chevron, no warning copy. **Solution field is now the catalog convention — every new lab MUST provide one.** The type stays optional so pilot/throwaway labs can omit it.
 
-446 tests passing, tsc clean, prod build clean. Free lab unchanged and live.
+578 tests passing, tsc clean, prod build clean. Free lab unchanged and live.
 
 **CertHead state (drives the next move):** Live exams: CCNA, N10-009, SY0-701. Paid subscribers: 0 — pre-launch, building catalog depth in private is the +4–12 week phase, fully in-bounds. Nothing deployed beyond the free lab; catalog registry, `/embed`, custom domain, and the landing-page link to `/try` all still gated on the ≥300-paid bar.
 
-**Next — Lab 10: check CLAUDE.md strategic sequencing rules before starting.**
+**Next — Lab 11: check CLAUDE.md strategic sequencing rules before starting. Authoring checklist: starting state + objectives + hints + `solution: LabSolution` block (mandatory per the catalog convention).**
 
 ---
 
