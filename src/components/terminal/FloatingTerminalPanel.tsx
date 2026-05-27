@@ -73,6 +73,10 @@ const TITLE_BAR_HEIGHT = 36;
  *  handle is generous (16x16) so the diagonal grab is easy to find. */
 const RESIZE_EDGE_HIT = 8;
 const RESIZE_CORNER_HIT = 16;
+/** Width of the snap-bar shown while minimized. Narrower than the smallest
+ *  open-panel width so the minimized state reads clearly as "shrunk", not
+ *  "still full-size". */
+const MINIMIZED_WIDTH = 320;
 /** Minimum visible title-bar pixels when constrained to viewport edges. */
 const MIN_VISIBLE_PX = 80;
 
@@ -239,35 +243,72 @@ export function FloatingTerminalPanel({
     : openDeviceIds[0];
   const term = forDevice(visibleDeviceId);
 
+  // Minimized snap-bar: docked bottom-center of the viewport, fixed width,
+  // unaffected by pos/size. The full-panel pos/size remain in state so the
+  // restore returns the window to exactly where the learner left it.
+  const panelStyle: React.CSSProperties = minimized
+    ? {
+        left: '50%',
+        bottom: 0,
+        transform: 'translateX(-50%)',
+        width: MINIMIZED_WIDTH,
+        height: TITLE_BAR_HEIGHT,
+      }
+    : {
+        left: pos.x,
+        top: pos.y,
+        width: size.w,
+        height: size.h,
+      };
+
+  const tabCount = openDeviceIds.length;
+  const minimizedLabel = `Terminal — ${tabCount} ${tabCount === 1 ? 'device' : 'devices'}`;
+
   return (
     <div
       role="dialog"
       aria-label="Terminal"
       data-floating-terminal-panel
+      data-floating-terminal-minimized={minimized ? 'true' : 'false'}
       className="fixed z-30 flex flex-col rounded-md border border-panel-border bg-[#0d1117] shadow-2xl"
-      style={{
-        left: pos.x,
-        top: pos.y,
-        width: size.w,
-        height: minimized ? TITLE_BAR_HEIGHT : size.h,
-      }}
+      style={panelStyle}
     >
       <div
-        onPointerDown={onTitlePointerDown}
-        onPointerMove={onTitlePointerMove}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
-        className="flex h-[36px] shrink-0 cursor-move select-none items-center justify-between border-b border-panel-border bg-panel-header px-3"
+        // Drag handler only attaches when NOT minimized — the snap-bar is
+        // pinned to bottom-center and clicking it must restore, not drag.
+        onPointerDown={minimized ? undefined : onTitlePointerDown}
+        onPointerMove={minimized ? undefined : onTitlePointerMove}
+        onPointerUp={minimized ? undefined : endDrag}
+        onPointerCancel={minimized ? undefined : endDrag}
+        onClick={minimized ? () => setMinimized(false) : undefined}
+        role={minimized ? 'button' : undefined}
+        aria-label={minimized ? 'Restore terminal panel' : undefined}
+        tabIndex={minimized ? 0 : undefined}
+        onKeyDown={
+          minimized
+            ? (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setMinimized(false);
+                }
+              }
+            : undefined
+        }
+        className={`flex h-[36px] shrink-0 select-none items-center justify-between border-b border-panel-border bg-panel-header px-3 ${
+          minimized ? 'cursor-pointer' : 'cursor-move'
+        }`}
         data-floating-terminal-title
       >
-        <span className="font-sans text-sm font-semibold text-terminal-fg">
-          Terminal
+        <span className="truncate font-sans text-sm font-semibold text-terminal-fg">
+          {minimized ? minimizedLabel : 'Terminal'}
         </span>
         <div
           className="flex items-center gap-1"
-          // Buttons must not start a drag — stop the pointerdown before it
-          // reaches the title bar's handler.
+          // Buttons must not start a drag AND must not bubble a click up to
+          // the snap-bar's restore handler — both pointerdown and click are
+          // stopped here so the icon hits don't restore-by-accident.
           onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
         >
           <PanelIconButton
             label={minimized ? 'Restore terminal' : 'Minimize terminal'}

@@ -208,6 +208,72 @@ describe('FloatingTerminalPanel', () => {
     expect(panel.style.height).toBe('420px');
   });
 
+  it('minimized snap-bar uses 320px width and docks bottom-center via CSS transform', () => {
+    const { container } = renderPanel();
+    fireEvent.click(screen.getByRole('button', { name: 'Minimize terminal' }));
+    const panel = container.querySelector(
+      '[data-floating-terminal-panel]',
+    ) as HTMLElement;
+    expect(panel.getAttribute('data-floating-terminal-minimized')).toBe('true');
+    expect(panel.style.width).toBe('320px');
+    expect(panel.style.left).toBe('50%');
+    expect(panel.style.transform).toContain('translateX(-50%)');
+    expect(panel.style.bottom).toBe('0px');
+  });
+
+  it('minimized snap-bar shows "Terminal — N devices" with the open tab count', () => {
+    renderPanel({ openDeviceIds: ['R1', 'PC-A', 'PC-B'], activeDeviceId: 'R1' });
+    fireEvent.click(screen.getByRole('button', { name: 'Minimize terminal' }));
+    expect(screen.getByText('Terminal — 3 devices')).toBeInTheDocument();
+  });
+
+  it('minimized snap-bar uses singular "device" when only one tab is open', () => {
+    renderPanel({ openDeviceIds: ['R1'], activeDeviceId: 'R1' });
+    fireEvent.click(screen.getByRole('button', { name: 'Minimize terminal' }));
+    expect(screen.getByText('Terminal — 1 device')).toBeInTheDocument();
+  });
+
+  it('clicking anywhere on the minimized snap-bar restores the panel', () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole('button', { name: 'Minimize terminal' }));
+    expect(screen.queryByLabelText('Terminal input')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Restore terminal panel' }));
+    expect(screen.getByLabelText('Terminal input')).toBeInTheDocument();
+  });
+
+  it('clicking close-all on the minimized snap-bar does NOT restore the panel', () => {
+    const { onCloseAll } = renderPanel();
+    fireEvent.click(screen.getByRole('button', { name: 'Minimize terminal' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close all terminals' }));
+    // The click should bubble to onCloseAll only — the snap-bar's restore
+    // handler must not fire when an inner button is the click target.
+    expect(onCloseAll).toHaveBeenCalledTimes(1);
+    // Panel is still in minimized state in our test (the parent would now
+    // empty openDeviceIds and hide it; here we assert local state).
+    const minimizeBtn = screen.queryByRole('button', { name: 'Minimize terminal' });
+    expect(minimizeBtn).toBeNull();
+    expect(screen.getByRole('button', { name: 'Restore terminal' })).toBeInTheDocument();
+  });
+
+  it('restore returns the panel to its prior position and size (state preserved)', () => {
+    const { container } = renderPanel();
+    const panel = container.querySelector(
+      '[data-floating-terminal-panel]',
+    ) as HTMLElement;
+    const beforeLeft = panel.style.left;
+    const beforeTop = panel.style.top;
+    const beforeWidth = panel.style.width;
+    const beforeHeight = panel.style.height;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Minimize terminal' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restore terminal' }));
+
+    expect(panel.style.left).toBe(beforeLeft);
+    expect(panel.style.top).toBe(beforeTop);
+    expect(panel.style.width).toBe(beforeWidth);
+    expect(panel.style.height).toBe(beforeHeight);
+  });
+
   it('renders the Terminal for whichever device is activeDeviceId', () => {
     const forDevice = vi.fn((id: string) =>
       id === 'R1' ? stubTerm('R1>') : stubTerm('PC-A$'),
