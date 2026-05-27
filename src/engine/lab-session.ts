@@ -33,9 +33,10 @@ export interface LabSession {
   /** Which device the terminal is currently bound to. Always a key in devices. */
   readonly activeDeviceId: string;
   /** Devices the learner has opened a console for, in tab order. Drives the
-   *  per-device tab bar above the terminal. Always non-empty: seeded with the
-   *  initial active device, appended on first setActive, never emptied by
-   *  closeDevice (the last tab cannot be closed). */
+   *  shared FloatingTerminalPanel's tab strip. Seeded with the initial active
+   *  device, appended on `setActive` when a new device is selected; may be
+   *  emptied by closing every tab (the panel hides in that state and
+   *  re-shows the next time the learner clicks a device in the topology). */
   readonly openDeviceIds: readonly string[];
   /** Cables between device interfaces — authored by the lab, not learners. */
   readonly links: readonly Link[];
@@ -226,24 +227,34 @@ export function setActive(lab: LabSession, id: string): LabSession {
 
 /** Close one device tab. Removes `id` from openDeviceIds and — if it was the
  *  active tab — moves activeDeviceId to the neighbor on the LEFT (or the new
- *  first tab if the closed one was leftmost). The last remaining tab cannot
- *  be closed: openDeviceIds is invariant non-empty. Unknown id throws so
+ *  first tab if the closed one was leftmost). Closing the last open tab
+ *  leaves openDeviceIds empty and activeDeviceId pointing at the just-closed
+ *  device id: the panel hides while empty, and a subsequent `setActive` (from
+ *  a topology click) re-opens that device's tab. Unknown id throws so
  *  miswired callers fail loud rather than silently no-op. */
 export function closeDevice(lab: LabSession, id: string): LabSession {
   const idx = lab.openDeviceIds.indexOf(id);
   if (idx === -1) {
     throw new Error(`closeDevice: '${id}' is not an open tab`);
   }
-  if (lab.openDeviceIds.length === 1) return lab;
   const openDeviceIds = [
     ...lab.openDeviceIds.slice(0, idx),
     ...lab.openDeviceIds.slice(idx + 1),
   ];
   const activeDeviceId =
-    id === lab.activeDeviceId
+    id === lab.activeDeviceId && openDeviceIds.length > 0
       ? openDeviceIds[Math.max(0, idx - 1)]
       : lab.activeDeviceId;
   return { ...lab, openDeviceIds, activeDeviceId };
+}
+
+/** Close every open device tab. Empties openDeviceIds and leaves
+ *  activeDeviceId on its current value — still a valid device id in
+ *  `devices`, so banner/prompt lookups stay safe; the panel hides while
+ *  the list is empty and re-opens via the topology click → setActive path. */
+export function closeAllDevices(lab: LabSession): LabSession {
+  if (lab.openDeviceIds.length === 0) return lab;
+  return { ...lab, openDeviceIds: [] };
 }
 
 /** Replace one device's session — used by reset() in the terminal layer. */

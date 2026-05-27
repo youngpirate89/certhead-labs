@@ -3,7 +3,7 @@ import { Layout } from '@/components/Layout';
 import { LabBrief } from '@/components/LabBrief';
 import { TopologyPanel } from '@/components/TopologyPanel';
 import { ObjectivesPanel } from '@/components/ObjectivesPanel';
-import { FloatingDevicePanel } from '@/components/terminal/FloatingDevicePanel';
+import { FloatingTerminalPanel } from '@/components/terminal/FloatingTerminalPanel';
 import { useLabSession } from '@/engine/terminal/useLabSession';
 import { lab01InterfaceIp } from '@/labs/ccna/lab-01-interface-ip';
 import { initAnalytics, track } from '@/analytics/posthog';
@@ -17,14 +17,12 @@ const REGISTER_URL = 'https://certhead.com/register?source=free-lab';
  * PostHog funnel events only: viewed -> started -> completed -> cta_clicked.
  *
  * Layout is topology-first: the canvas fills the viewport, the objectives
- * sidebar pins to the right. Per-device terminals appear as floating panels
- * mounted at the document root (FloatingDevicePanel), one per
- * `session.openDeviceIds` entry.
+ * sidebar pins to the right. Every open device's CLI lives inside one
+ * shared FloatingTerminalPanel — one window, one tab per open device.
  */
 export function TryMode() {
   const lab = lab01InterfaceIp;
   const session = useLabSession(lab);
-  const focus = usePanelFocus();
 
   useEffect(() => {
     initAnalytics();
@@ -70,15 +68,13 @@ export function TryMode() {
     track('hint_shown', { labId: lab.id, hintIndex: index });
   }
 
-  // Topology click: open the device's panel (append to openDeviceIds if new,
-  // bump its z-index either way). Already-open + minimized panels restore
-  // via the panel's effect on incoming z-index increases.
+  // Topology click: open the device's tab in the shared terminal panel
+  // (appends to openDeviceIds if new, marks it active either way).
   const handleSelectDevice = useCallback(
     (id: string) => {
       session.setActiveDevice(id);
-      focus.bringToFront(id);
     },
-    [session, focus],
+    [session],
   );
 
   const platformById = useMemo(() => {
@@ -86,6 +82,7 @@ export function TryMode() {
     for (const d of lab.topology.devices) m.set(d.id, d.platform);
     return m;
   }, [lab]);
+  const platformLabel = useCallback((id: string) => platformById.get(id), [platformById]);
 
   return (
     <>
@@ -117,19 +114,17 @@ export function TryMode() {
         }
       />
 
-      {briefDismissed &&
-        session.openDeviceIds.map((id, i) => (
-          <FloatingDevicePanel
-            key={id}
-            deviceId={id}
-            platformLabel={platformById.get(id)}
-            term={session.forDevice(id)}
-            index={i}
-            initialZ={focus.zFor(id)}
-            onClose={session.closeDevice}
-            onFocus={focus.bringToFront}
-          />
-        ))}
+      {briefDismissed && (
+        <FloatingTerminalPanel
+          openDeviceIds={session.openDeviceIds}
+          activeDeviceId={session.activeDeviceId}
+          forDevice={session.forDevice}
+          platformLabel={platformLabel}
+          onSelectDevice={session.setActiveDevice}
+          onCloseDevice={session.closeDevice}
+          onCloseAll={session.closeAllDevices}
+        />
+      )}
 
       {!briefDismissed && (
         <div className="fixed inset-0 z-40 bg-[#070a0e]/85 backdrop-blur-sm">
@@ -147,30 +142,6 @@ export function TryMode() {
       {completed && <CompletionBanner labId={lab.id} />}
     </>
   );
-}
-
-/** Shared focus + z-index manager for floating panels. Single counter that
- *  increments on every focus event; each panel reads its assigned counter
- *  value as a z-index, so the most-recently-focused panel always sits on
- *  top. Floor of `Z_BASE` keeps panels above the topology canvas (z=0) but
- *  below any modal overlay (z=40). */
-const Z_BASE = 20;
-function usePanelFocus() {
-  const [zMap, setZMap] = useState<Record<string, number>>({});
-  const counterRef = useRef(0);
-
-  const bringToFront = useCallback((id: string) => {
-    counterRef.current += 1;
-    const next = counterRef.current;
-    setZMap((cur) => ({ ...cur, [id]: next }));
-  }, []);
-
-  const zFor = useCallback(
-    (id: string) => Z_BASE + (zMap[id] ?? 0),
-    [zMap],
-  );
-
-  return { bringToFront, zFor };
 }
 
 /** Completion banner — same content as the previous in-terminal CompletionCard.

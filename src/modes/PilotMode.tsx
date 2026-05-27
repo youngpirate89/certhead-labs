@@ -1,9 +1,9 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Layout } from '@/components/Layout';
 import { LabBrief } from '@/components/LabBrief';
 import { TopologyPanel } from '@/components/TopologyPanel';
 import { ObjectivesPanel } from '@/components/ObjectivesPanel';
-import { FloatingDevicePanel } from '@/components/terminal/FloatingDevicePanel';
+import { FloatingTerminalPanel } from '@/components/terminal/FloatingTerminalPanel';
 import { useLabSession } from '@/engine/terminal/useLabSession';
 import type { Lab } from '@/engine/types';
 
@@ -11,13 +11,12 @@ import type { Lab } from '@/engine/types';
  * Pilot/dev view for labs not on the public /try path.
  *
  * Mirrors TryMode minus analytics + the upgrade CTA. Brief overlays the
- * canvas until dismissed; objectives live in the right-side sidebar.
- * Per-device terminals appear as floating panels (FloatingDevicePanel)
- * mounted at the document root, one per `session.openDeviceIds` entry.
+ * canvas until dismissed; objectives live in the right-side sidebar. Every
+ * open device's CLI lives inside one shared FloatingTerminalPanel — one
+ * window, one tab per open device.
  */
 export function PilotMode({ lab }: { lab: Lab }) {
   const session = useLabSession(lab);
-  const focus = usePanelFocus();
 
   const [briefDismissed, setBriefDismissed] = useState(false);
   const [labStartedAt, setLabStartedAt] = useState<number | null>(null);
@@ -47,9 +46,8 @@ export function PilotMode({ lab }: { lab: Lab }) {
   const handleSelectDevice = useCallback(
     (id: string) => {
       session.setActiveDevice(id);
-      focus.bringToFront(id);
     },
-    [session, focus],
+    [session],
   );
 
   const platformById = useMemo(() => {
@@ -57,6 +55,7 @@ export function PilotMode({ lab }: { lab: Lab }) {
     for (const d of lab.topology.devices) m.set(d.id, d.platform);
     return m;
   }, [lab]);
+  const platformLabel = useCallback((id: string) => platformById.get(id), [platformById]);
 
   return (
     <>
@@ -88,19 +87,17 @@ export function PilotMode({ lab }: { lab: Lab }) {
         }
       />
 
-      {briefDismissed &&
-        session.openDeviceIds.map((id, i) => (
-          <FloatingDevicePanel
-            key={id}
-            deviceId={id}
-            platformLabel={platformById.get(id)}
-            term={session.forDevice(id)}
-            index={i}
-            initialZ={focus.zFor(id)}
-            onClose={session.closeDevice}
-            onFocus={focus.bringToFront}
-          />
-        ))}
+      {briefDismissed && (
+        <FloatingTerminalPanel
+          openDeviceIds={session.openDeviceIds}
+          activeDeviceId={session.activeDeviceId}
+          forDevice={session.forDevice}
+          platformLabel={platformLabel}
+          onSelectDevice={session.setActiveDevice}
+          onCloseDevice={session.closeDevice}
+          onCloseAll={session.closeAllDevices}
+        />
+      )}
 
       {!briefDismissed && (
         <div className="fixed inset-0 z-40 bg-[#070a0e]/85 backdrop-blur-sm">
@@ -119,26 +116,3 @@ export function PilotMode({ lab }: { lab: Lab }) {
   );
 }
 
-/** Shared focus + z-index manager for floating panels. Single counter that
- *  increments on every focus event; each panel reads its assigned counter
- *  value as a z-index, so the most-recently-focused panel always sits on
- *  top. Floor of `Z_BASE` keeps panels above the topology canvas (z=0) but
- *  below any modal overlay (z=40). */
-const Z_BASE = 20;
-function usePanelFocus() {
-  const [zMap, setZMap] = useState<Record<string, number>>({});
-  const counterRef = useRef(0);
-
-  const bringToFront = useCallback((id: string) => {
-    counterRef.current += 1;
-    const next = counterRef.current;
-    setZMap((cur) => ({ ...cur, [id]: next }));
-  }, []);
-
-  const zFor = useCallback(
-    (id: string) => Z_BASE + (zMap[id] ?? 0),
-    [zMap],
-  );
-
-  return { bringToFront, zFor };
-}

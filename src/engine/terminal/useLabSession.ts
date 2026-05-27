@@ -8,6 +8,7 @@ import {
   applyToDevice,
   setActive,
   closeDevice,
+  closeAllDevices,
   promptFor,
   type LabSession,
   type DeviceSession,
@@ -32,10 +33,13 @@ export interface UseLabSession extends UseTerminal {
   /** Open/focus a device's CLI. Adds to openDeviceIds if not present and
    *  sets it active. */
   setActiveDevice: (id: string) => void;
-  /** Close a device's floating panel. No-op when only one is open (the last
-   *  panel can't close). If closing the active id, the neighbor on the left
-   *  becomes active. */
+  /** Close a single tab in the shared terminal panel. If closing the active
+   *  id, the neighbor on the left becomes active. Closing the last open
+   *  tab empties openDeviceIds and the panel hides until a topology click
+   *  re-opens it. */
   closeDevice: (id: string) => void;
+  /** Close every open tab — empties openDeviceIds and hides the panel. */
+  closeAllDevices: () => void;
   /** Restart the lab from a fresh device state. */
   reset: () => void;
   /** Monotonic ID that changes on every reset. */
@@ -195,6 +199,10 @@ export function useLabSession(lab: Lab): UseLabSession {
     setLabSession((cur) => closeDevice(cur, id));
   }, []);
 
+  const closeAllDevicesCallback = useCallback(() => {
+    setLabSession((cur) => closeAllDevices(cur));
+  }, []);
+
   const [resetToken, setResetToken] = useState(0);
   const reset = useCallback(() => {
     setLabSession(initLabSession(lab));
@@ -222,6 +230,7 @@ export function useLabSession(lab: Lab): UseLabSession {
     openDeviceIds: labSession.openDeviceIds,
     setActiveDevice,
     closeDevice: closeDeviceCallback,
+    closeAllDevices: closeAllDevicesCallback,
     reset,
     resetToken,
   };
