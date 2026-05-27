@@ -209,16 +209,15 @@ const LABEL_COLOR = '#7c8a9c';
 const LED_OUTER_R = 5;
 const LED_INNER_R = 3;
 const LABEL_FONT_SIZE = 9;
-/** Vertical baseline offset for the iface name — ABOVE the cable. The LED
- *  sits ON the cable, so the offset has to clear the LED's outer ring plus the
- *  font's full ascent (LABEL_FONT_SIZE) for a visible gap. */
-const IFACE_LABEL_OFFSET = 12;
-/** Vertical baseline offset for the network CIDR — BELOW the cable. Offset is
- *  intentionally larger than IFACE_LABEL_OFFSET because BELOW the cable the
- *  baseline measures to the TOP of the glyph: we need LED_OUTER_R + ascent
- *  clearance for the digits to clear the LED. The label sitting BELOW (rather
- *  than ABOVE, alongside the iface labels) is the A1.6 fix — see commit. */
-const NETWORK_LABEL_OFFSET = 16;
+/** Perpendicular pixel offset for the iface name label (ABOVE the cable).
+ *  Applied along the perpendicular to the cable direction so diagonal cables
+ *  (e.g. Lab 09 SW1↔PC-A, SW1↔PC-B) keep the label clear of the line rather
+ *  than rendering on top of it. For a purely horizontal cable this reduces
+ *  to a pure vertical offset (same direction the original code used). */
+const IFACE_LABEL_OFFSET = 18;
+/** Perpendicular pixel offset for the network CIDR label (BELOW the cable).
+ *  Same perpendicular logic as IFACE_LABEL_OFFSET but on the opposite side. */
+const NETWORK_LABEL_OFFSET = 18;
 
 interface RenderEndpoint {
   readonly deviceId: string;
@@ -226,8 +225,6 @@ interface RenderEndpoint {
   /** Pixel coords in flow space — LED center sits exactly here. */
   readonly x: number;
   readonly y: number;
-  /** Where the iface label anchors relative to the LED. */
-  readonly labelAnchor: 'start' | 'end';
 }
 
 interface RenderLink {
@@ -243,19 +240,16 @@ interface RenderLink {
   readonly network: string | null;
 }
 
-/** Where to place an LED + label for one endpoint, given the device's
- *  top-left corner, the edge of the card the cable comes out of, and the
- *  port's slot index on that edge (out of `totalOnEdge`). The slot index
+/** Where to place an LED for one endpoint, given the device's top-left
+ *  corner, the edge of the card the cable comes out of, and the port's
+ *  slot index on that edge (out of `totalOnEdge`). The slot index
  *  distributes multi-port edges evenly along the edge — e.g. SW1's bottom
  *  edge with 2 spokes in Lab 09 puts the two LEDs at 1/3 and 2/3 of the
  *  edge instead of stacking them both at the midpoint.
  *
- *  `labelAnchor` is the SVG text-anchor for the iface name — `start` keeps
- *  the text to the RIGHT of the LED (used at the left/top/bottom edges so
- *  the label reads outward into the cable middle), `end` puts it to the
- *  LEFT (used at the right edge for the same reason). Vertical edges
- *  inherit `start` so labels lean rightward — readable, and avoids the
- *  card overlap that a centered anchor would create for top/bottom LEDs. */
+ *  Label positioning (iface name + CIDR) is computed downstream from the
+ *  cable's direction vector, not from `edge` — that way diagonal cables
+ *  get a perpendicular offset that floats the label cleanly off the line. */
 function endpointFor(
   dev: { x: number; y: number },
   deviceId: string,
@@ -269,36 +263,22 @@ function endpointFor(
   const frac = totalOnEdge > 0 ? (slot + 1) / (totalOnEdge + 1) : 0.5;
   switch (edge) {
     case 'left':
-      return {
-        deviceId,
-        ifaceId,
-        x: dev.x,
-        y: dev.y + NODE_HEIGHT * frac,
-        labelAnchor: 'end',
-      };
+      return { deviceId, ifaceId, x: dev.x, y: dev.y + NODE_HEIGHT * frac };
     case 'right':
       return {
         deviceId,
         ifaceId,
         x: dev.x + NODE_WIDTH,
         y: dev.y + NODE_HEIGHT * frac,
-        labelAnchor: 'start',
       };
     case 'top':
-      return {
-        deviceId,
-        ifaceId,
-        x: dev.x + NODE_WIDTH * frac,
-        y: dev.y,
-        labelAnchor: 'start',
-      };
+      return { deviceId, ifaceId, x: dev.x + NODE_WIDTH * frac, y: dev.y };
     case 'bottom':
       return {
         deviceId,
         ifaceId,
         x: dev.x + NODE_WIDTH * frac,
         y: dev.y + NODE_HEIGHT,
-        labelAnchor: 'start',
       };
     default:
       // No edge mapping — fall back to the right edge midpoint so the cable
@@ -308,43 +288,38 @@ function endpointFor(
         ifaceId,
         x: dev.x + NODE_WIDTH,
         y: dev.y + NODE_HEIGHT / 2,
-        labelAnchor: 'start',
       };
   }
 }
 
-/** Perpendicular pixel offset for a CIDR label so it sits beside the cable
- *  rather than directly on it. Returns (dx, dy) to add to the cable midpoint.
- *
- *  For a purely horizontal cable, this resolves to (0, offset) — identical
- *  to the previous pure-vertical offset. For diagonal cables (e.g. Lab 09
- *  SW1↔PC-A, SW1↔PC-B) the offset rotates with the cable so the label
- *  always clears the line.
+/** Perpendicular unit vector to the cable AB, pointing to the "below" side
+ *  (positive y in SVG coordinates). For a purely horizontal cable this is
+ *  (0, 1) — labels offset along this vector sit BELOW the cable; labels
+ *  offset along its negation sit ABOVE. For diagonal cables (e.g. Lab 09
+ *  SW1↔PC-A, SW1↔PC-B) the vector rotates with the cable so a label's
+ *  fixed perpendicular offset always clears the line.
  *
  *  The perpendicular has two candidate directions (±90° from the cable);
- *  we pick the one with a non-negative y component so labels consistently
- *  sit on the lower side of the cable (or to the right for purely vertical
- *  cables). Keeps placement predictable as cables rotate.
+ *  we canonicalise to the one with a non-negative y component so the
+ *  "above"/"below" placement is consistent as cables rotate.
  *
- *  Degenerate case (coincident endpoints): falls back to a pure vertical
- *  offset — same direction the previous always-vertical code used.
- */
-function perpLabelOffset(
+ *  Degenerate case (coincident endpoints): falls back to (0, 1) — pure
+ *  vertical, same direction the previous always-vertical code used. */
+function perpUnitBelow(
   a: { x: number; y: number },
   b: { x: number; y: number },
-  offset: number,
-): { dx: number; dy: number } {
+): { nx: number; ny: number } {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   const len = Math.hypot(dx, dy);
-  if (len === 0) return { dx: 0, dy: offset };
+  if (len === 0) return { nx: 0, ny: 1 };
   let nx = -dy / len;
   let ny = dx / len;
   if (ny < 0) {
     nx = -nx;
     ny = -ny;
   }
-  return { dx: nx * offset, dy: ny * offset };
+  return { nx, ny };
 }
 
 /** Derive the CIDR network from the first endpoint that has an IP+mask pair.
@@ -476,23 +451,28 @@ function EdgeOverlay({
   }
   if (renderLinks.length === 0) return null;
 
-  // Bounding box of all rendered geometry — cable + LEDs + the iface labels
-  // ABOVE the cable + the CIDR label perpendicular to the cable. Allowances:
-  //   padTop    = iface label baseline above the cable + font ascent + slack
-  //   padBottom = CIDR label baseline below the cable + descender slack
-  //   padX      = LED + iface label runs inward but a CIDR centered on a short
-  //               link can extend past the LEDs; AND diagonal cables push the
-  //               CIDR label perpendicularly, which adds horizontal reach up
-  //               to NETWORK_LABEL_OFFSET past the endpoint extremes.
+  // Bounding box of all rendered geometry — cable + LEDs + the iface label
+  // (perpendicular ABOVE the cable, at each endpoint) + the CIDR label
+  // (perpendicular BELOW the cable, at midpoint). The labels rotate with the
+  // cable direction so the SVG must accommodate label extent in any direction
+  // around the endpoints; padding is uniform on all sides for that reason.
+  //   - perp offset + font cap (`LABEL_FONT_SIZE`) covers a label whose
+  //     perpendicular projection points straight up/down/left/right.
+  //   - text-anchor on the iface labels is 'middle' so each label extends
+  //     ~half its rendered width on each side of its anchor point; allow a
+  //     fixed extra for typical iface ids like `GigabitEthernet0/0`.
+  // The outer `overflow:visible` on the SVG element is the final safety net
+  // if any label edges past these allowances — nothing actually clips.
   const xs = renderLinks.flatMap((l) => [l.left.x, l.right.x]);
   const ys = renderLinks.flatMap((l) => [l.left.y, l.right.y]);
-  const padTop = IFACE_LABEL_OFFSET + LABEL_FONT_SIZE + 4;
-  const padBottom = NETWORK_LABEL_OFFSET + 4;
-  const padX = LED_OUTER_R + 24 + NETWORK_LABEL_OFFSET;
+  const labelOffset = Math.max(IFACE_LABEL_OFFSET, NETWORK_LABEL_OFFSET);
+  const TEXT_HALF_WIDTH = 36; // half width of a long iface label, slack inclusive
+  const padY = labelOffset + LABEL_FONT_SIZE + 4;
+  const padX = labelOffset + TEXT_HALF_WIDTH + LED_OUTER_R;
   const minX = Math.min(...xs) - padX;
   const maxX = Math.max(...xs) + padX;
-  const minY = Math.min(...ys) - padTop;
-  const maxY = Math.max(...ys) + padBottom;
+  const minY = Math.min(...ys) - padY;
+  const maxY = Math.max(...ys) + padY;
   const w = maxX - minX;
   const h = maxY - minY;
 
@@ -514,16 +494,18 @@ function EdgeOverlay({
           const fill = l.linkUp ? LED_GREEN : LED_RED;
           const midX = (l.left.x + l.right.x) / 2;
           const midY = (l.left.y + l.right.y) / 2;
-          // CIDR label sits PERPENDICULAR to the cable, offset by
-          // NETWORK_LABEL_OFFSET. For a purely horizontal cable this
-          // resolves to a straight vertical offset (matching the previous
-          // behavior). For diagonal cables (Lab 09 SW1↔PC-A / SW1↔PC-B)
-          // it pushes the label off the cable line rather than rendering
-          // on top of it. The perpendicular direction is chosen so the
-          // label sits on the y-positive side of the cable (visually
-          // "below" on the page) whenever the cable isn't purely vertical
-          // — keeps label placement predictable as cables rotate.
-          const labelOffset = perpLabelOffset(l.left, l.right, NETWORK_LABEL_OFFSET);
+          // Single perpendicular unit vector per cable drives both labels.
+          // CIDR label takes the perpendicular "below" side; iface labels
+          // take its negation ("above" side). For horizontal cables the
+          // unit vector is (0, 1), reducing to a pure vertical offset that
+          // matches the previous behavior. For diagonals (Lab 09 SW1↔PC-A,
+          // SW1↔PC-B) the offsets rotate with the cable so neither label
+          // renders on top of the line.
+          const perp = perpUnitBelow(l.left, l.right);
+          const ifaceDx = -perp.nx * IFACE_LABEL_OFFSET;
+          const ifaceDy = -perp.ny * IFACE_LABEL_OFFSET;
+          const cidrDx = perp.nx * NETWORK_LABEL_OFFSET;
+          const cidrDy = perp.ny * NETWORK_LABEL_OFFSET;
           return (
             <g key={l.key} data-link-key={l.key}>
               <line
@@ -534,12 +516,28 @@ function EdgeOverlay({
                 stroke={CABLE_STROKE}
                 strokeWidth={1.5}
               />
-              <PortLed endpoint={l.left} linkUp={l.linkUp} fill={fill} ox={minX} oy={minY} />
-              <PortLed endpoint={l.right} linkUp={l.linkUp} fill={fill} ox={minX} oy={minY} />
+              <PortLed
+                endpoint={l.left}
+                linkUp={l.linkUp}
+                fill={fill}
+                ox={minX}
+                oy={minY}
+                labelDx={ifaceDx}
+                labelDy={ifaceDy}
+              />
+              <PortLed
+                endpoint={l.right}
+                linkUp={l.linkUp}
+                fill={fill}
+                ox={minX}
+                oy={minY}
+                labelDx={ifaceDx}
+                labelDy={ifaceDy}
+              />
               {l.network ? (
                 <text
-                  x={midX - minX + labelOffset.dx}
-                  y={midY - minY + labelOffset.dy}
+                  x={midX - minX + cidrDx}
+                  y={midY - minY + cidrDy}
                   textAnchor="middle"
                   fontSize={LABEL_FONT_SIZE}
                   fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
@@ -558,32 +556,32 @@ function EdgeOverlay({
 }
 
 /** A single port LED + its iface name label. Pure presentational — color is
- *  derived from the link's overall state by the caller. */
+ *  derived from the link's overall state by the caller. The label is offset
+ *  by (`labelDx`, `labelDy`) which the caller computes perpendicular to the
+ *  cable direction (see `perpUnitBelow`), so diagonal cables float the
+ *  label cleanly off the line. Text anchor is 'middle' because the
+ *  perpendicular axis has no preferred reading direction — center-aligning
+ *  the label on the perpendicular projection reads consistently across
+ *  every cable angle. */
 function PortLed({
   endpoint,
   linkUp,
   fill,
   ox,
   oy,
+  labelDx,
+  labelDy,
 }: {
   readonly endpoint: RenderEndpoint;
   readonly linkUp: boolean;
   readonly fill: string;
   readonly ox: number;
   readonly oy: number;
+  readonly labelDx: number;
+  readonly labelDy: number;
 }) {
   const cx = endpoint.x - ox;
   const cy = endpoint.y - oy;
-  // Iface label sits ABOVE the cable (the CIDR sits BELOW — the two never
-  // share a vertical slot, the A1.6 collision fix). Anchor sits well INWARD
-  // of the LED (toward the cable center) so labels stay clear of the card
-  // edges — with NODE_GAP=120 there's ample room in the cable middle for
-  // both labels to sit comfortably without crowding the device. Text still
-  // grows further toward the middle from the anchor via textAnchor=
-  // 'start'/'end'.
-  const labelX =
-    endpoint.labelAnchor === 'start' ? cx + LED_OUTER_R + 6 : cx - LED_OUTER_R - 6;
-  const labelY = cy - IFACE_LABEL_OFFSET;
   return (
     <g
       data-led-endpoint={`${endpoint.deviceId}:${endpoint.ifaceId}`}
@@ -592,9 +590,9 @@ function PortLed({
       <circle cx={cx} cy={cy} r={LED_OUTER_R} fill="none" stroke={LED_RING} strokeWidth={1.5} />
       <circle cx={cx} cy={cy} r={LED_INNER_R} fill={fill} />
       <text
-        x={labelX}
-        y={labelY}
-        textAnchor={endpoint.labelAnchor}
+        x={cx + labelDx}
+        y={cy + labelDy}
+        textAnchor="middle"
         fontSize={LABEL_FONT_SIZE}
         fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
         fill={LABEL_COLOR}
