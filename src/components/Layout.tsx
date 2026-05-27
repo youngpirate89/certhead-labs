@@ -8,6 +8,13 @@ import type { ReactNode } from 'react';
  * canvas underneath stays free to pan and zoom regardless of how many panels
  * are open.
  *
+ * Sidebar contract (Section 3 wiring):
+ *  - Fixed `SIDEBAR_WIDTH` px wide, never shrinks (shrink-0)
+ *  - Full main height (no fixed pixel height — grows with the viewport)
+ *  - `overflow-hidden` on the aside so a long hint list cannot trigger a
+ *    full-page scroll; ObjectivesPanel handles its own internal scroll via
+ *    the body's `overflow-y-auto`
+ *
  * Predecessor was a stacked three-region layout (topology band on top, then
  * a draggable divider, then terminal | objectives). That model couldn't grow
  * past two devices comfortably — the terminal had to share vertical room with

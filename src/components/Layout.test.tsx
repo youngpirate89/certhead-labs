@@ -75,4 +75,26 @@ describe('Layout', () => {
     const objectives = container.querySelector('[data-region="objectives"]');
     expect(objectives?.className).toContain('shrink-0');
   });
+
+  it('objectives sidebar is overflow-hidden so a long hint list does NOT trigger page scroll', () => {
+    // ObjectivesPanel handles its own internal scroll; the aside must clip
+    // any overflow so the document body stays unscrollable.
+    const { container } = renderSample();
+    const objectives = container.querySelector('[data-region="objectives"]');
+    expect(objectives?.className).toContain('overflow-hidden');
+  });
+
+  it('objectives sidebar fills the full main height (h-full)', () => {
+    const { container } = renderSample();
+    const objectives = container.querySelector('[data-region="objectives"]');
+    expect(objectives?.className).toContain('h-full');
+  });
+
+  it('main row uses flex so topology and sidebar are side-by-side, not stacked', () => {
+    const { container } = renderSample();
+    const main = container.querySelector('main');
+    expect(main?.className).toContain('flex');
+    // No `flex-col` — siblings flow horizontally in the row.
+    expect(main?.className).not.toContain('flex-col');
+  });
 });
