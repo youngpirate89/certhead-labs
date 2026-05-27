@@ -313,6 +313,40 @@ function endpointFor(
   }
 }
 
+/** Perpendicular pixel offset for a CIDR label so it sits beside the cable
+ *  rather than directly on it. Returns (dx, dy) to add to the cable midpoint.
+ *
+ *  For a purely horizontal cable, this resolves to (0, offset) — identical
+ *  to the previous pure-vertical offset. For diagonal cables (e.g. Lab 09
+ *  SW1↔PC-A, SW1↔PC-B) the offset rotates with the cable so the label
+ *  always clears the line.
+ *
+ *  The perpendicular has two candidate directions (±90° from the cable);
+ *  we pick the one with a non-negative y component so labels consistently
+ *  sit on the lower side of the cable (or to the right for purely vertical
+ *  cables). Keeps placement predictable as cables rotate.
+ *
+ *  Degenerate case (coincident endpoints): falls back to a pure vertical
+ *  offset — same direction the previous always-vertical code used.
+ */
+function perpLabelOffset(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  offset: number,
+): { dx: number; dy: number } {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy);
+  if (len === 0) return { dx: 0, dy: offset };
+  let nx = -dy / len;
+  let ny = dx / len;
+  if (ny < 0) {
+    nx = -nx;
+    ny = -ny;
+  }
+  return { dx: nx * offset, dy: ny * offset };
+}
+
 /** Derive the CIDR network from the first endpoint that has an IP+mask pair.
  *  Returns null when neither endpoint is configured enough to compute one. */
 function deriveNetwork(
@@ -443,16 +477,18 @@ function EdgeOverlay({
   if (renderLinks.length === 0) return null;
 
   // Bounding box of all rendered geometry — cable + LEDs + the iface labels
-  // ABOVE the cable + the CIDR label BELOW the cable. Allowances:
+  // ABOVE the cable + the CIDR label perpendicular to the cable. Allowances:
   //   padTop    = iface label baseline above the cable + font ascent + slack
   //   padBottom = CIDR label baseline below the cable + descender slack
   //   padX      = LED + iface label runs inward but a CIDR centered on a short
-  //               link can extend a few px past the LEDs; allow for that here.
+  //               link can extend past the LEDs; AND diagonal cables push the
+  //               CIDR label perpendicularly, which adds horizontal reach up
+  //               to NETWORK_LABEL_OFFSET past the endpoint extremes.
   const xs = renderLinks.flatMap((l) => [l.left.x, l.right.x]);
   const ys = renderLinks.flatMap((l) => [l.left.y, l.right.y]);
   const padTop = IFACE_LABEL_OFFSET + LABEL_FONT_SIZE + 4;
   const padBottom = NETWORK_LABEL_OFFSET + 4;
-  const padX = LED_OUTER_R + 24;
+  const padX = LED_OUTER_R + 24 + NETWORK_LABEL_OFFSET;
   const minX = Math.min(...xs) - padX;
   const maxX = Math.max(...xs) + padX;
   const minY = Math.min(...ys) - padTop;
@@ -478,6 +514,16 @@ function EdgeOverlay({
           const fill = l.linkUp ? LED_GREEN : LED_RED;
           const midX = (l.left.x + l.right.x) / 2;
           const midY = (l.left.y + l.right.y) / 2;
+          // CIDR label sits PERPENDICULAR to the cable, offset by
+          // NETWORK_LABEL_OFFSET. For a purely horizontal cable this
+          // resolves to a straight vertical offset (matching the previous
+          // behavior). For diagonal cables (Lab 09 SW1↔PC-A / SW1↔PC-B)
+          // it pushes the label off the cable line rather than rendering
+          // on top of it. The perpendicular direction is chosen so the
+          // label sits on the y-positive side of the cable (visually
+          // "below" on the page) whenever the cable isn't purely vertical
+          // — keeps label placement predictable as cables rotate.
+          const labelOffset = perpLabelOffset(l.left, l.right, NETWORK_LABEL_OFFSET);
           return (
             <g key={l.key} data-link-key={l.key}>
               <line
@@ -492,8 +538,8 @@ function EdgeOverlay({
               <PortLed endpoint={l.right} linkUp={l.linkUp} fill={fill} ox={minX} oy={minY} />
               {l.network ? (
                 <text
-                  x={midX - minX}
-                  y={midY - minY + NETWORK_LABEL_OFFSET}
+                  x={midX - minX + labelOffset.dx}
+                  y={midY - minY + labelOffset.dy}
                   textAnchor="middle"
                   fontSize={LABEL_FONT_SIZE}
                   fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
