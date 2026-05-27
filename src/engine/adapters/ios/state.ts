@@ -11,14 +11,16 @@ import { connectedRoutes, type Route } from './routing';
 /** CLI mode stack levels. `config-subif` is the subinterface variant of
  *  `config-if` — entered by `interface gi0/0.10` from `config`, holds the
  *  active subinterface id, and accepts the same `ip address` / `shutdown`
- *  commands plus `encapsulation dot1q <vlan>`. */
+ *  commands plus `encapsulation dot1q <vlan>`. `config-dhcp` is the per-pool
+ *  configuration mode entered by `ip dhcp pool <name>` from `config`. */
 export type Mode =
   | 'user'
   | 'priv'
   | 'config'
   | 'config-if'
   | 'config-subif'
-  | 'config-router';
+  | 'config-router'
+  | 'config-dhcp';
 
 /** A single `network <prefix> <wildcard> area <area-id>` statement. */
 export interface OspfNetwork {
@@ -67,6 +69,37 @@ export interface Acl {
   readonly number: number;
   readonly type: 'standard';
   entries: AclEntry[];
+}
+
+/** A DHCP pool — the per-pool configuration entered in config-dhcp mode.
+ *  `network`/`mask` define the address range; `defaultRouter`/`dnsServer`
+ *  are advertised to clients. `leaseTime` is accepted by the IOS grammar
+ *  but no objective reads it — kept here so a learner running `lease 1`
+ *  doesn't see an error. */
+export interface DhcpPool {
+  readonly name: string;
+  network: string | null;
+  mask: string | null;
+  defaultRouter: string | null;
+  dnsServer: string | null;
+  leaseDays: number | null;
+}
+
+/** A single `ip dhcp excluded-address <start> [end]` range. `end === start`
+ *  encodes a single-host exclusion (the IOS short form). */
+export interface DhcpExcludedRange {
+  readonly start: string;
+  readonly end: string;
+}
+
+/** One DHCP binding — a client whose address has been allocated from a pool.
+ *  Deterministic: a client with the same id, pool, and excluded set always
+ *  gets the same IP. Recomputed by the lab-session DHCP refresh pass after
+ *  every config change. */
+export interface DhcpBinding {
+  readonly clientId: string;
+  readonly ip: string;
+  readonly poolName: string;
 }
 
 export interface InterfaceState {
@@ -134,6 +167,17 @@ export interface DeviceState {
    *  for deterministic `show access-lists` rendering. Empty until the learner
    *  defines an ACL with `access-list <n> permit|deny ...`. */
   acls: Map<number, Acl>;
+  /** DHCP pools keyed by pool name. Insertion order preserved for
+   *  deterministic `show ip dhcp pool` rendering. Empty until the learner
+   *  creates a pool with `ip dhcp pool <name>`. */
+  dhcpPools: Map<string, DhcpPool>;
+  /** Global `ip dhcp excluded-address` ranges in insertion order. The DHCP
+   *  binding-allocator skips any IP that falls inside one of these ranges. */
+  dhcpExcluded: DhcpExcludedRange[];
+  /** Active DHCP bindings keyed by client id (the requesting device's lab id).
+   *  Rewritten by the LabSession's DHCP refresh pass after any change to
+   *  pools, excluded ranges, or DHCP-client topology. */
+  dhcpBindings: Map<string, DhcpBinding>;
 }
 
 export interface Session {
@@ -146,6 +190,14 @@ export interface Session {
    *  e.g. 'Gi0/0.10'). Null outside config-subif — keeps the dispatcher
    *  symmetric with `currentInterface`. */
   activeSubIfId: string | null;
+  /** The DHCP pool name being edited in config-dhcp mode. Null outside
+   *  config-dhcp — symmetric with `currentInterface` / `activeSubIfId`. */
+  activeDhcpPool: string | null;
+  /** Monotonic engine-seq stamp updated each time the learner runs `show ip
+   *  dhcp binding`. Verify-style objectives compare this against 0 to require
+   *  the show command to actually have been run (mirrors `lastShowIpIntBrief`
+   *  and `lastShowInterfacesTrunk`). */
+  lastShowDhcpBinding: number;
   /** Monotonic stamp (Date.now()) updated each time the learner runs
    *  `show ip interface brief` on this router. Verify-style objectives compare
    *  this against `subIfConfiguredAt[...]` to require the show to run AFTER
@@ -278,7 +330,9 @@ export function createSession(device: DeviceState): Session {
     mode: 'user',
     currentInterface: null,
     activeSubIfId: null,
+    activeDhcpPool: null,
     lastShowIpIntBrief: 0,
+    lastShowDhcpBinding: 0,
     subIfConfiguredAt: {},
     device: cloneDevice(device),
     history: [],
@@ -345,6 +399,9 @@ export function buildDevice(spec: {
     subInterfaces: {},
     ospf: { process: null, routerId: null, networks: [], neighbors: new Map() },
     acls: new Map(),
+    dhcpPools: new Map(),
+    dhcpExcluded: [],
+    dhcpBindings: new Map(),
   };
 }
 
@@ -385,5 +442,7 @@ export function prompt(session: Session): string {
       return `${h}(config-subif)#`;
     case 'config-router':
       return `${h}(config-router)#`;
+    case 'config-dhcp':
+      return `${h}(config-dhcp)#`;
   }
 }

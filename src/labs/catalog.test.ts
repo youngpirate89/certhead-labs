@@ -12,6 +12,7 @@ const CATALOG_IDS = [
   'ccna-lab07-vlan-access-ports',
   'ccna-lab08-vlan-trunking',
   'ccna-lab09-intervlan-routing',
+  'ccna-lab10-dhcp-server',
   'ccna-tshoot-return-route',
   'ccna-tshoot-wrong-next-hop',
   'ccna-tshoot-wan-subnet-mismatch',

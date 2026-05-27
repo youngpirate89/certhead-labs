@@ -19,9 +19,19 @@ import { routerAdapter } from './adapters/router';
 import { pcAdapter, type PcSession } from './adapters/pc';
 import { switchAdapter } from './adapters/switch';
 import type { CommandOutput, DeviceAdapter, DeviceKind } from './adapters/types';
-import type { Session as RouterSession } from './adapters/ios/state';
+import type {
+  DhcpBinding,
+  DhcpPool,
+  Session as RouterSession,
+} from './adapters/ios/state';
 import type { SwitchSession } from './adapters/ios/switch-state';
 import { recomputeOspf } from './adapters/ios/ospf';
+import {
+  findPoolForIp,
+  recomputeBindings,
+  type DhcpClientRequest,
+} from './adapters/ios/dhcp';
+import { ipInSubnet, networkAddress } from './adapters/ios/routing';
 import type { Lab, LabDevice, Link } from './types';
 
 /** Discriminated union of every adapter's session. router + pc + switch. */
@@ -99,11 +109,14 @@ export function initLabSession(lab: Lab): LabSession {
 
 /** Run every "derived-from-state" pass in dependency order: protocolUp/nicUp
  *  first (interface link health), then OSPF adjacency (which depends on the
- *  fresh adminUp + the just-updated peer adminUp), then a second nicUp pass
- *  is unnecessary because OSPF doesn't change interface state. */
+ *  fresh adminUp + the just-updated peer adminUp), then DHCP — bindings need
+ *  the current router pool config + the freshly-evaluated PC nicUp / link
+ *  topology, and they end with another nicUp tweak (the PC's ip lands from
+ *  the binding, but that doesn't change link health, so no third pass). */
 function refreshDerivedState(lab: LabSession): LabSession {
   const linkUp = refreshNicUp(lab);
-  return refreshOspf(linkUp);
+  const ospf = refreshOspf(linkUp);
+  return refreshDhcp(ospf);
 }
 
 /** Apply a list of seed commands to one device with `record:false`. Router
@@ -362,6 +375,164 @@ function refreshOspf(lab: LabSession): LabSession {
     }
   }
   return mutated ? { ...lab, devices } : lab;
+}
+
+/**
+ * Recompute DHCP bindings across every router AND propagate the resulting
+ * ip/mask/gateway into the DHCP-client PCs. Same shape as refreshOspf:
+ * pure, returns the same LabSession when nothing changed.
+ *
+ * Client discovery — for each PC with `dhcpMode: true`, walk the link from
+ * the PC's NIC to find the cabled router AND the router's interface IP+mask
+ * that sits on the PC's link. Pick the router's pool whose network covers
+ * that interface IP. Result: a `DhcpClientRequest` for the matching
+ * (router, pool) pair. PCs cabled to switches walk through the L2 broadcast
+ * domain (Lab 09 router-on-a-stick pattern) to find the matching router
+ * subinterface — same `findRouterGatewayThroughSwitch` approach used by
+ * reachability would be overkill here; Lab 10 keeps it simple with a direct
+ * PC↔Router cable, and the BFS path is left for when a future lab needs it.
+ */
+function refreshDhcp(lab: LabSession): LabSession {
+  // Group DHCP-client PCs by the router they should request from. PCs with
+  // dhcpMode but no resolvable router stay unbound (their ip/mask/gateway
+  // remain null — ipconfig shows "DHCP request pending").
+  const requestsByRouter = new Map<string, DhcpClientRequest[]>();
+  const pcResolution = new Map<
+    string,
+    { routerId: string; poolName: string } | null
+  >();
+
+  for (const [id, s] of Object.entries(lab.devices)) {
+    if (s.kind !== 'pc' || !s.dhcpMode) continue;
+    const resolved = resolveDhcpClientPool(lab, s);
+    pcResolution.set(id, resolved);
+    if (!resolved) continue;
+    const list = requestsByRouter.get(resolved.routerId) ?? [];
+    list.push({ clientId: id, poolName: resolved.poolName });
+    requestsByRouter.set(resolved.routerId, list);
+  }
+
+  // Recompute bindings on each affected router. Routers with no DHCP
+  // clients in this lab still need their existing bindings cleared (e.g.
+  // a PC just removed from the topology).
+  let mutated = false;
+  const devices: Record<string, DeviceSession> = { ...lab.devices };
+
+  const bindingsByRouter = new Map<string, Map<string, DhcpBinding>>();
+  for (const [id, s] of Object.entries(lab.devices)) {
+    if (s.kind !== 'router') continue;
+    const requests = requestsByRouter.get(id) ?? [];
+    const newBindings = recomputeBindings(
+      s.device.dhcpPools,
+      s.device.dhcpExcluded,
+      requests,
+    );
+    bindingsByRouter.set(id, newBindings);
+    if (!bindingsEqual(s.device.dhcpBindings, newBindings)) {
+      devices[id] = {
+        ...s,
+        device: { ...s.device, dhcpBindings: newBindings },
+      };
+      mutated = true;
+    }
+  }
+
+  // Propagate bindings into the PC sessions: ip/mask/gateway take the
+  // matching pool's values. PCs without a resolved binding (no pool ready,
+  // pool exhausted, unreachable router) get cleared back to null so
+  // ipconfig reads "DHCP request pending".
+  for (const [id, s] of Object.entries(lab.devices)) {
+    if (s.kind !== 'pc' || !s.dhcpMode) continue;
+    const resolution = pcResolution.get(id) ?? null;
+    let nextIp: string | null = null;
+    let nextMask: string | null = null;
+    let nextGateway: string | null = null;
+    if (resolution) {
+      const router = lab.devices[resolution.routerId];
+      const binding = bindingsByRouter.get(resolution.routerId)?.get(id);
+      if (router?.kind === 'router' && binding) {
+        const pool = router.device.dhcpPools.get(binding.poolName);
+        nextIp = binding.ip;
+        nextMask = pool?.mask ?? null;
+        nextGateway = pool?.defaultRouter ?? null;
+      }
+    }
+    if (s.ip !== nextIp || s.mask !== nextMask || s.gateway !== nextGateway) {
+      devices[id] = { ...s, ip: nextIp, mask: nextMask, gateway: nextGateway };
+      mutated = true;
+    }
+  }
+
+  return mutated ? { ...lab, devices } : lab;
+}
+
+/** True if two binding maps describe the same set (same clientIds → same
+ *  ip/poolName). Used to skip a no-op router-state replace. */
+function bindingsEqual(
+  a: ReadonlyMap<string, DhcpBinding>,
+  b: ReadonlyMap<string, DhcpBinding>,
+): boolean {
+  if (a.size !== b.size) return false;
+  for (const [k, va] of a) {
+    const vb = b.get(k);
+    if (!vb) return false;
+    if (vb.ip !== va.ip || vb.poolName !== va.poolName) return false;
+  }
+  return true;
+}
+
+/** For a DHCP-client PC, find the (router, pool) it should request from.
+ *  Walks the PC's cable to the neighbor router (Lab 10 has direct cabling;
+ *  switch-fronted DHCP isn't in scope yet), reads the cabled router
+ *  interface's IP+mask, and picks the router pool whose network covers it.
+ *  Returns null when the cable doesn't land on a router or no pool matches —
+ *  the PC stays unbound in that case. */
+function resolveDhcpClientPool(
+  lab: LabSession,
+  pc: PcSession,
+): { routerId: string; poolName: string } | null {
+  for (const link of lab.links) {
+    let myIface: string | null = null;
+    let peer: { deviceId: string; iface: string } | null = null;
+    if (link.a.deviceId === pc.id && link.a.iface === pc.nic) {
+      myIface = link.a.iface;
+      peer = link.b;
+    } else if (link.b.deviceId === pc.id && link.b.iface === pc.nic) {
+      myIface = link.b.iface;
+      peer = link.a;
+    }
+    if (!myIface || !peer) continue;
+    const neighbor = lab.devices[peer.deviceId];
+    if (!neighbor || neighbor.kind !== 'router') return null;
+    const iface = neighbor.device.interfaces[peer.iface];
+    if (!iface || !iface.ip || !iface.mask) return null;
+    const pool = pickPoolForIfaceSubnet(neighbor.device.dhcpPools, iface.ip, iface.mask);
+    if (!pool) return null;
+    return { routerId: neighbor.device.id, poolName: pool.name };
+  }
+  return null;
+}
+
+/** Pick the pool whose network exactly matches the cabled router interface's
+ *  subnet. The router-interface IP must sit inside the pool's network AND
+ *  the pool's mask must match the interface's mask — otherwise a /24 pool
+ *  could accidentally serve a /30 P2P link. */
+function pickPoolForIfaceSubnet(
+  pools: ReadonlyMap<string, DhcpPool>,
+  ifaceIp: string,
+  ifaceMask: string,
+): DhcpPool | null {
+  for (const pool of pools.values()) {
+    if (!pool.network || !pool.mask) continue;
+    if (pool.mask !== ifaceMask) continue;
+    if (ipInSubnet(ifaceIp, networkAddress(pool.network, pool.mask), pool.mask)) {
+      return pool;
+    }
+  }
+  // Fall back to "any pool whose network covers the iface IP" so a
+  // mask-mismatched but otherwise covering pool still matches. Same loop
+  // shape, looser predicate — favors the strict match above.
+  return findPoolForIp(pools, ifaceIp);
 }
 
 /** Recompute `protocolUp` for every physical interface AND subinterface on one

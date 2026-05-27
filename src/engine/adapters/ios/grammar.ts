@@ -33,6 +33,14 @@ const showSubtree: CommandNode = {
             neighbor: done('OSPF neighbor table'),
           },
         },
+        dhcp: {
+          help: 'DHCP server status',
+          children: {
+            pool: done('DHCP pool details'),
+            binding: done('Active DHCP bindings'),
+            conflict: done('Address conflicts (none in simulation)'),
+          },
+        },
       },
     },
     // `show interfaces` either dumps every interface (terminal here) OR takes a
@@ -125,6 +133,39 @@ const noAccessListSubtree: CommandNode = {
   argument: arg('number', done('Remove all entries in this ACL')),
 };
 
+/** `ip dhcp pool <name>` — enters config-dhcp for the named pool. */
+const ipDhcpPoolSubtree: CommandNode = {
+  help: 'Create or edit a DHCP pool',
+  argument: arg('name', done('Enter DHCP pool configuration')),
+};
+
+/** `ip dhcp excluded-address <start> [end]` — reserves a host or range so
+ *  the allocator skips it. Single-host form omits the end argument; the
+ *  resolver lets the optional second argument fall through cleanly because
+ *  the inner argument node is itself terminal. */
+const ipDhcpExcludedSubtree: CommandNode = {
+  help: 'Reserve addresses so DHCP does not hand them out',
+  argument: arg('start', {
+    terminal: true,
+    help: 'Single-host exclusion',
+    argument: arg('end', done('Range exclusion (start..end inclusive)')),
+  }),
+};
+
+const ipConfigSubtree: CommandNode = {
+  help: 'IP configuration commands',
+  children: {
+    route: ipRouteSubtree,
+    dhcp: {
+      help: 'DHCP server configuration',
+      children: {
+        pool: ipDhcpPoolSubtree,
+        'excluded-address': ipDhcpExcludedSubtree,
+      },
+    },
+  },
+};
+
 const configMode: CommandNode = {
   children: {
     interface: {
@@ -135,10 +176,7 @@ const configMode: CommandNode = {
       help: 'Set the device hostname',
       argument: arg('name', done('Apply hostname')),
     },
-    ip: {
-      help: 'IP configuration commands',
-      children: { route: ipRouteSubtree },
-    },
+    ip: ipConfigSubtree,
     'access-list': accessListSubtree,
     router: {
       help: 'Enable a routing process',
@@ -153,7 +191,18 @@ const configMode: CommandNode = {
       help: 'Negate a command',
       children: {
         hostname: done('Reset hostname to default'),
-        ip: { children: { route: ipRouteSubtree } },
+        ip: {
+          children: {
+            route: ipRouteSubtree,
+            dhcp: {
+              help: 'Remove DHCP server configuration',
+              children: {
+                pool: ipDhcpPoolSubtree,
+                'excluded-address': ipDhcpExcludedSubtree,
+              },
+            },
+          },
+        },
         'access-list': noAccessListSubtree,
       },
     },
@@ -303,6 +352,42 @@ const configSubIfMode: CommandNode = {
   },
 };
 
+/** config-dhcp keyword surface — the per-pool config entered by
+ *  `ip dhcp pool <name>` from config. Real IOS exposes a much larger set of
+ *  options; we scope to the four CCNA learners are tested on (network,
+ *  default-router, dns-server, lease) plus their `no` negations. */
+const configDhcpMode: CommandNode = {
+  children: {
+    network: {
+      help: 'Pool network and mask',
+      argument: arg('ip', { argument: arg('mask', done('Apply pool network')) }),
+    },
+    'default-router': {
+      help: 'Default gateway advertised to clients',
+      argument: arg('ip', done('Apply default-router')),
+    },
+    'dns-server': {
+      help: 'DNS server advertised to clients',
+      argument: arg('ip', done('Apply DNS server')),
+    },
+    lease: {
+      help: 'Lease duration in days',
+      argument: arg('days', done('Apply lease duration')),
+    },
+    no: {
+      help: 'Negate a command',
+      children: {
+        network: done('Clear pool network and mask'),
+        'default-router': done('Clear default-router'),
+        'dns-server': done('Clear DNS server'),
+        lease: done('Reset lease duration'),
+      },
+    },
+    exit: done('Exit DHCP pool configuration'),
+    end: done('Return to privileged EXEC'),
+  },
+};
+
 const GRAMMARS: Record<Mode, CommandNode> = {
   user: userMode,
   priv: privMode,
@@ -310,6 +395,7 @@ const GRAMMARS: Record<Mode, CommandNode> = {
   'config-if': configIfMode,
   'config-subif': configSubIfMode,
   'config-router': configRouterMode,
+  'config-dhcp': configDhcpMode,
 };
 
 export function grammarFor(mode: Mode): CommandNode {

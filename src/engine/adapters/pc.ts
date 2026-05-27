@@ -68,6 +68,11 @@ export interface PcSession {
   ip: string | null;
   mask: string | null;
   gateway: string | null;
+  /** True when the PC is a DHCP client — its `ip`/`mask`/`gateway` come from
+   *  the connected router's matching DHCP binding, not the lab's static spec.
+   *  Lab-session DHCP refresh pass writes those fields whenever a binding
+   *  resolves; clears them back to null when the binding falls away. */
+  readonly dhcpMode: boolean;
   /** True when the PC's NIC is cabled to an up neighbor interface. Refreshed
    *  by the LabSession layer whenever device state changes. */
   nicUp: boolean;
@@ -230,14 +235,19 @@ export const pcAdapter: DeviceAdapter<PcSession> = {
 
   buildDevice(spec: LabDevice): PcSession {
     const nic = spec.interfaces[0] ?? 'Eth0';
+    const dhcpMode = spec.pc?.dhcp === true;
     return {
       kind: 'pc',
       id: spec.id,
       hostname: spec.id,
       nic,
-      ip: spec.pc?.ip ?? null,
-      mask: spec.pc?.mask ?? null,
-      gateway: spec.pc?.gateway ?? null,
+      // DHCP clients start with no addressing; the lab-session DHCP refresh
+      // pass populates ip/mask/gateway when a binding resolves. Static specs
+      // still take their values from spec.pc.
+      ip: dhcpMode ? null : spec.pc?.ip ?? null,
+      mask: dhcpMode ? null : spec.pc?.mask ?? null,
+      gateway: dhcpMode ? null : spec.pc?.gateway ?? null,
+      dhcpMode,
       nicUp: false,
       history: [],
       resolvedHistory: [],
@@ -1048,7 +1058,10 @@ function errLine(text: string): CommandOutput[] {
 }
 
 /** Render Windows-style `ipconfig` output. `all` adds the Host Name +
- *  Description fields we actually model — nothing fabricated. */
+ *  Description fields we actually model — nothing fabricated. When the PC
+ *  is a DHCP client (dhcpMode), the IPv4 line reads `(DHCP request pending)`
+ *  while no binding exists and an extra `DHCP Enabled: Yes` line appears in
+ *  the `/all` output. */
 function renderIpconfig(s: PcSession, all: boolean): CommandOutput[] {
   const out: CommandOutput[] = [];
   if (all) {
@@ -1062,8 +1075,12 @@ function renderIpconfig(s: PcSession, all: boolean): CommandOutput[] {
   out.push({ kind: 'output', text: '' });
   if (all) {
     out.push({ kind: 'output', text: `   Description . . . . . . . . . . . : Workstation` });
+    if (s.dhcpMode) {
+      out.push({ kind: 'output', text: `   DHCP Enabled. . . . . . . . . . . : Yes` });
+    }
   }
-  out.push({ kind: 'output', text: `   IPv4 Address. . . . . . . . . . . : ${s.ip ?? '(none)'}` });
+  const ipLabel = s.dhcpMode && !s.ip ? '(DHCP request pending)' : s.ip ?? '(none)';
+  out.push({ kind: 'output', text: `   IPv4 Address. . . . . . . . . . . : ${ipLabel}` });
   out.push({ kind: 'output', text: `   Subnet Mask . . . . . . . . . . . : ${s.mask ?? '(none)'}` });
   out.push({ kind: 'output', text: `   Default Gateway . . . . . . . . . : ${s.gateway ?? '(none)'}` });
   out.push({

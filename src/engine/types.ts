@@ -65,6 +65,11 @@ export interface LabDevice {
     readonly ip?: string;
     readonly mask?: string;
     readonly gateway?: string;
+    /** Lab 10: this PC starts with no static IP and pulls its addressing
+     *  from the connected router's DHCP server. `ip`/`mask`/`gateway`
+     *  are ignored when `dhcp` is true — the values come from the matching
+     *  binding instead. */
+    readonly dhcp?: boolean;
   };
   /** Optional per-device topology position. When ALL devices in a lab carry
    *  this, the renderer uses these coordinates verbatim instead of the

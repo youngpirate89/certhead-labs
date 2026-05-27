@@ -2,6 +2,7 @@ import { tokenize, resolve, complete } from '@/engine/parser';
 import { grammarFor } from './grammar';
 import {
   type AclEntry,
+  type DhcpPool,
   type Mode,
   type Session,
   type SubInterface,
@@ -16,7 +17,7 @@ import {
   routingTable,
   deriveRouterId,
 } from './state';
-import { type Route, maskLength, networkAddress } from './routing';
+import { type Route, ipToInt, maskLength, networkAddress } from './routing';
 import type {
   ApplyOptions,
   CommandOutput,
@@ -39,7 +40,8 @@ function isConfigFamily(mode: Mode): boolean {
     mode === 'config' ||
     mode === 'config-if' ||
     mode === 'config-subif' ||
-    mode === 'config-router'
+    mode === 'config-router' ||
+    mode === 'config-dhcp'
   );
 }
 
@@ -285,6 +287,9 @@ function dispatch(
         s.activeSubIfId = null;
       } else if (s.mode === 'config-router') {
         s.mode = 'config';
+      } else if (s.mode === 'config-dhcp') {
+        s.mode = 'config';
+        s.activeDhcpPool = null;
       } else if (s.mode === 'config') {
         s.mode = 'priv';
       } else if (s.mode === 'priv') {
@@ -296,15 +301,13 @@ function dispatch(
       s.mode = 'priv';
       s.currentInterface = null;
       s.activeSubIfId = null;
+      s.activeDhcpPool = null;
       return { session: s, output: [] };
 
     case 'router':
       // command = ['router', 'ospf'], args.pid = process id
       if (command[1] === 'ospf') return enterRouterOspf(s, args.pid);
       return { session: s, output: err('% Unknown command.') };
-
-    case 'network':
-      return addOspfNetwork(s, args.prefix, args.wildcard, args.area);
 
     case 'hostname':
       s.device.hostname = args.name;
@@ -336,7 +339,26 @@ function dispatch(
       if (command[1] === 'access-group') {
         return setAccessGroup(s, args.number, command[3] as 'in' | 'out');
       }
+      if (command[1] === 'dhcp') {
+        if (command[2] === 'pool') return enterDhcpPool(s, args.name);
+        if (command[2] === 'excluded-address') return addDhcpExcluded(s, args.start, args.end);
+      }
       return { session: s, output: err('% Incomplete command.') };
+
+    case 'network':
+      // In config-router this is an OSPF network statement; in config-dhcp it's
+      // the pool's network/mask. Discriminate on the active mode.
+      if (s.mode === 'config-dhcp') return setDhcpNetwork(s, args.ip, args.mask);
+      return addOspfNetwork(s, args.prefix, args.wildcard, args.area);
+
+    case 'default-router':
+      return setDhcpDefaultRouter(s, args.ip);
+
+    case 'dns-server':
+      return setDhcpDnsServer(s, args.ip);
+
+    case 'lease':
+      return setDhcpLease(s, args.days);
 
     case 'access-list':
       // command = ['access-list', '<num>', 'permit'|'deny', ...source-form]
@@ -520,6 +542,12 @@ function negate(s: Session, command: string[], args: Record<string, string>): Ap
       if (command[2] === 'access-group') {
         return clearAccessGroup(s, args.number, command[4] as 'in' | 'out');
       }
+      if (command[2] === 'dhcp') {
+        if (command[3] === 'pool') return removeDhcpPool(s, args.name);
+        if (command[3] === 'excluded-address') {
+          return removeDhcpExcluded(s, args.start, args.end);
+        }
+      }
       // `no ip address`:
       //   - in config-subif → clear the active subinterface's IP+mask
       //   - in config-if    → clear the active physical interface's IP+mask
@@ -543,7 +571,16 @@ function negate(s: Session, command: string[], args: Record<string, string>): Ap
     case 'access-list':
       return removeAcl(s, args.number);
     case 'network':
+      // `no network` discriminates by mode the same way the positive form does
+      // (config-router → OSPF network; config-dhcp → pool network).
+      if (s.mode === 'config-dhcp') return clearDhcpNetwork(s);
       return removeOspfNetwork(s, args.prefix, args.wildcard, args.area);
+    case 'default-router':
+      return clearDhcpDefaultRouter(s);
+    case 'dns-server':
+      return clearDhcpDnsServer(s);
+    case 'lease':
+      return clearDhcpLease(s);
     default:
       return { session: s, output: err('% Incomplete command.') };
   }
@@ -709,6 +746,149 @@ function removeOspfNetwork(
   return { session: s, output: [] };
 }
 
+// ---------- DHCP server: pool config + excluded addresses ----------
+
+/** `ip dhcp pool <name>` — creates the pool if absent, enters config-dhcp. */
+function enterDhcpPool(s: Session, name: string): ApplyResult {
+  if (!name) return { session: s, output: err('% Pool name required.') };
+  if (!s.device.dhcpPools.has(name)) {
+    s.device.dhcpPools.set(name, {
+      name,
+      network: null,
+      mask: null,
+      defaultRouter: null,
+      dnsServer: null,
+      leaseDays: null,
+    });
+  }
+  s.mode = 'config-dhcp';
+  s.activeDhcpPool = name;
+  return { session: s, output: [] };
+}
+
+function removeDhcpPool(s: Session, name: string): ApplyResult {
+  if (!name) return { session: s, output: err('% Pool name required.') };
+  s.device.dhcpPools.delete(name);
+  return { session: s, output: [] };
+}
+
+/** `ip dhcp excluded-address <start> [end]` — `end` is optional (single host). */
+function addDhcpExcluded(s: Session, start: string, end: string | undefined): ApplyResult {
+  if (!isValidIpv4(start)) {
+    return { session: s, output: err(`% Invalid input detected at "${start}".`) };
+  }
+  const resolvedEnd = end ?? start;
+  if (!isValidIpv4(resolvedEnd)) {
+    return { session: s, output: err(`% Invalid input detected at "${resolvedEnd}".`) };
+  }
+  if (ipToInt(resolvedEnd) < ipToInt(start)) {
+    return { session: s, output: err('% End address must be >= start address.') };
+  }
+  // Dedup identical (start, end) entries so script replay doesn't accumulate.
+  const dupe = s.device.dhcpExcluded.find(
+    (r) => r.start === start && r.end === resolvedEnd,
+  );
+  if (!dupe) s.device.dhcpExcluded.push({ start, end: resolvedEnd });
+  return { session: s, output: [] };
+}
+
+function removeDhcpExcluded(
+  s: Session,
+  start: string,
+  end: string | undefined,
+): ApplyResult {
+  if (!isValidIpv4(start)) {
+    return { session: s, output: err(`% Invalid input detected at "${start}".`) };
+  }
+  const resolvedEnd = end ?? start;
+  const before = s.device.dhcpExcluded.length;
+  s.device.dhcpExcluded = s.device.dhcpExcluded.filter(
+    (r) => !(r.start === start && r.end === resolvedEnd),
+  );
+  if (s.device.dhcpExcluded.length === before) {
+    return { session: s, output: err('% Not found.') };
+  }
+  return { session: s, output: [] };
+}
+
+/** Pull the active DHCP pool for mutation in config-dhcp mode. Returns null
+ *  if the mode/active id is somehow desynchronised — the caller emits a
+ *  generic IOS error in that case, which should not happen in practice
+ *  because the grammar only surfaces these commands in config-dhcp. */
+function activeDhcpPool(s: Session): DhcpPool | null {
+  if (s.mode !== 'config-dhcp' || !s.activeDhcpPool) return null;
+  return s.device.dhcpPools.get(s.activeDhcpPool) ?? null;
+}
+
+function setDhcpNetwork(s: Session, ip: string, mask: string): ApplyResult {
+  const pool = activeDhcpPool(s);
+  if (!pool) return { session: s, output: err('% No active DHCP pool.') };
+  if (!isValidIpv4(ip)) return { session: s, output: err(`% Invalid input detected at "${ip}".`) };
+  if (!isValidMask(mask)) return { session: s, output: err('% Invalid subnet mask.') };
+  // Normalize the network address — IOS accepts a host IP and silently
+  // applies the mask; we mirror that so `network 192.168.1.123 255.255.255.0`
+  // stores `192.168.1.0`.
+  pool.network = networkAddress(ip, mask);
+  pool.mask = mask;
+  return { session: s, output: [] };
+}
+
+function clearDhcpNetwork(s: Session): ApplyResult {
+  const pool = activeDhcpPool(s);
+  if (!pool) return { session: s, output: err('% No active DHCP pool.') };
+  pool.network = null;
+  pool.mask = null;
+  return { session: s, output: [] };
+}
+
+function setDhcpDefaultRouter(s: Session, ip: string): ApplyResult {
+  const pool = activeDhcpPool(s);
+  if (!pool) return { session: s, output: err('% No active DHCP pool.') };
+  if (!isValidIpv4(ip)) return { session: s, output: err(`% Invalid input detected at "${ip}".`) };
+  pool.defaultRouter = ip;
+  return { session: s, output: [] };
+}
+
+function clearDhcpDefaultRouter(s: Session): ApplyResult {
+  const pool = activeDhcpPool(s);
+  if (!pool) return { session: s, output: err('% No active DHCP pool.') };
+  pool.defaultRouter = null;
+  return { session: s, output: [] };
+}
+
+function setDhcpDnsServer(s: Session, ip: string): ApplyResult {
+  const pool = activeDhcpPool(s);
+  if (!pool) return { session: s, output: err('% No active DHCP pool.') };
+  if (!isValidIpv4(ip)) return { session: s, output: err(`% Invalid input detected at "${ip}".`) };
+  pool.dnsServer = ip;
+  return { session: s, output: [] };
+}
+
+function clearDhcpDnsServer(s: Session): ApplyResult {
+  const pool = activeDhcpPool(s);
+  if (!pool) return { session: s, output: err('% No active DHCP pool.') };
+  pool.dnsServer = null;
+  return { session: s, output: [] };
+}
+
+function setDhcpLease(s: Session, daysArg: string): ApplyResult {
+  const pool = activeDhcpPool(s);
+  if (!pool) return { session: s, output: err('% No active DHCP pool.') };
+  const days = Number.parseInt(daysArg, 10);
+  if (!Number.isFinite(days) || String(days) !== daysArg || days < 0) {
+    return { session: s, output: err(`% Invalid input detected at "${daysArg}".`) };
+  }
+  pool.leaseDays = days;
+  return { session: s, output: [] };
+}
+
+function clearDhcpLease(s: Session): ApplyResult {
+  const pool = activeDhcpPool(s);
+  if (!pool) return { session: s, output: err('% No active DHCP pool.') };
+  pool.leaseDays = null;
+  return { session: s, output: [] };
+}
+
 /** Parse the standard-ACL number argument. Range is 1-99 (extended is out of
  *  scope; the spec calls it explicitly). Returns null and emits the IOS error
  *  caller-side. */
@@ -839,6 +1019,21 @@ function show(
         return { session: s, output: out(...showIpOspfNeighbor(s)) };
       }
       return { session: s, output: out(...showIpOspf(s)) };
+    }
+    if (command[2] === 'dhcp') {
+      if (command[3] === 'pool') return { session: s, output: out(...showIpDhcpPool(s)) };
+      if (command[3] === 'binding') {
+        const hasBindings = s.device.dhcpBindings.size > 0;
+        // Stamp the verify-objective gate only when the show ran AFTER at
+        // least one binding existed. An empty-binding run shows the % line
+        // but doesn't satisfy the gate — the learner needs the configure
+        // step to land first (mirrors lastShowInterfacesTrunk semantics).
+        if (hasBindings) s.lastShowDhcpBinding = nextEngineSeq();
+        return { session: s, output: out(...showIpDhcpBinding(s)) };
+      }
+      if (command[3] === 'conflict') {
+        return { session: s, output: out(...showIpDhcpConflict()) };
+      }
     }
     if (command[2] === 'interface') {
       if (command[3] === 'brief') {
@@ -1029,6 +1224,62 @@ function uniqueAreas(s: Session): number[] {
   const seen = new Set<number>();
   for (const n of s.device.ospf.networks) seen.add(n.area);
   return [...seen];
+}
+
+/** Render `show ip dhcp pool`. Empty case mirrors IOS verbatim. Each pool
+ *  prints a four-line stanza: network/mask, default gateway, DNS, lease. */
+function showIpDhcpPool(s: Session): string[] {
+  if (s.device.dhcpPools.size === 0) {
+    return ['No DHCP pools configured.'];
+  }
+  const lines: string[] = [];
+  let first = true;
+  for (const pool of s.device.dhcpPools.values()) {
+    if (!first) lines.push('');
+    first = false;
+    lines.push(`Pool ${pool.name} :`);
+    if (pool.network && pool.mask) {
+      lines.push(` Network           : ${pool.network} ${pool.mask}`);
+    } else {
+      lines.push(' Network           : not configured');
+    }
+    lines.push(` Default router    : ${pool.defaultRouter ?? 'not configured'}`);
+    lines.push(` DNS server        : ${pool.dnsServer ?? 'not configured'}`);
+    const leaseDays = pool.leaseDays ?? 1;
+    lines.push(` Lease             : ${leaseDays} days 0 hours 0 minutes`);
+  }
+  return lines;
+}
+
+/** Render `show ip dhcp binding`. The IP-address column is left-aligned at
+ *  width 17 (matches IOS's column layout — wide enough for /16 octets); the
+ *  Client-ID/Hardware-address/User-name column uses the clientId verbatim
+ *  (the engine doesn't model MACs). Lease expiration is `--` for our
+ *  ephemeral bindings; Type is always `Automatic` (no manual reservations). */
+function showIpDhcpBinding(s: Session): string[] {
+  if (s.device.dhcpBindings.size === 0) {
+    return ['% There is no binding.'];
+  }
+  const lines: string[] = [
+    'IP address       Client-ID/              Lease expiration        Type',
+    '                 Hardware address/',
+    '                 User name',
+  ];
+  for (const b of s.device.dhcpBindings.values()) {
+    lines.push(
+      `${b.ip.padEnd(17)}${b.clientId.padEnd(24)}--                      Automatic`,
+    );
+  }
+  return lines;
+}
+
+/** Render `show ip dhcp conflict`. Static — the engine doesn't model
+ *  conflicts. Matches the IOS empty-table output verbatim. */
+function showIpDhcpConflict(): string[] {
+  return [
+    'IP address        Detection method   Detection time          VRF',
+    '% There are no entries in the database.',
+  ];
 }
 
 function showIpIntBrief(s: Session): string[] {
