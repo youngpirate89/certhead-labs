@@ -5,11 +5,10 @@ import { pcAdapter } from '@/engine/adapters/pc';
 import { switchAdapter } from '@/engine/adapters/switch';
 import {
   initLabSession,
-  applyToActive,
+  applyToDevice,
   setActive,
   closeDevice,
-  activeSession,
-  activePrompt,
+  promptFor,
   type LabSession,
   type DeviceSession,
 } from '@/engine/lab-session';
@@ -26,16 +25,16 @@ export interface UseLabSession extends UseTerminal {
   devices: DeviceTopologyView[];
   /** Id of the device the terminal currently targets. */
   activeDeviceId: string;
-  /** Ordered list of devices the learner has opened — drives the tab bar
-   *  above the terminal. Always non-empty; the initial device is seeded. */
+  /** Ordered list of devices the learner has opened — drives the floating
+   *  panels (one panel per id). Always non-empty; the initial device is
+   *  seeded. */
   openDeviceIds: readonly string[];
-  /** Switch the active console — multi-device labs use this; the canvas wires
-   *  it up via TopologyPanel.onSelectDevice. Also appends to openDeviceIds
-   *  when the target tab isn't already open. */
+  /** Open/focus a device's CLI. Adds to openDeviceIds if not present and
+   *  sets it active. */
   setActiveDevice: (id: string) => void;
-  /** Close a device tab. No-op when only one tab remains (last tab can't
-   *  close). If closing the active tab, the neighbor on the left becomes
-   *  active. */
+  /** Close a device's floating panel. No-op when only one is open (the last
+   *  panel can't close). If closing the active id, the neighbor on the left
+   *  becomes active. */
   closeDevice: (id: string) => void;
   /** Restart the lab from a fresh device state. */
   reset: () => void;
@@ -105,7 +104,7 @@ function viewFor(s: DeviceSession): DeviceTopologyView {
   }
 }
 
-/** Dispatch context-help to the active device's adapter. */
+/** Dispatch context-help to a specific device's adapter. */
 function helpFor(s: DeviceSession, partial: string): CommandOutput[] {
   switch (s.kind) {
     case 'router':
@@ -117,7 +116,7 @@ function helpFor(s: DeviceSession, partial: string): CommandOutput[] {
   }
 }
 
-/** Dispatch tab-completion to the active device's adapter. */
+/** Dispatch tab-completion to a specific device's adapter. */
 function completeFor(s: DeviceSession, partial: string): string | null {
   switch (s.kind) {
     case 'router':
@@ -131,7 +130,7 @@ function completeFor(s: DeviceSession, partial: string): string | null {
 
 /**
  * Runs a lab: owns the multi-device LabSession, drives the terminal against
- * the active device, and grades objectives live after every command.
+ * each open device, and grades objectives live after every command.
  */
 export function useLabSession(lab: Lab): UseLabSession {
   const [labSession, setLabSession] = useState<LabSession>(() => initLabSession(lab));
@@ -139,8 +138,8 @@ export function useLabSession(lab: Lab): UseLabSession {
   const labRef = useRef(labSession);
   labRef.current = labSession;
 
-  const execute = useCallback((raw: string): ExecResult => {
-    const { session: next, output, stream } = applyToActive(labRef.current, raw);
+  const execute = useCallback((deviceId: string, raw: string): ExecResult => {
+    const { session: next, output, stream } = applyToDevice(labRef.current, deviceId, raw);
     setLabSession(next);
     return {
       lines: output.map((o) => ({ kind: o.kind, text: o.text })),
@@ -148,18 +147,30 @@ export function useLabSession(lab: Lab): UseLabSession {
     };
   }, []);
 
-  const help = useCallback((partialLine: string): OutputLine[] => {
-    return helpFor(activeSession(labRef.current), partialLine).map((o) => ({
-      kind: o.kind,
-      text: o.text,
-    }));
+  const help = useCallback((deviceId: string, partialLine: string): OutputLine[] => {
+    const s = labRef.current.devices[deviceId];
+    if (!s) return [];
+    return helpFor(s, partialLine).map((o) => ({ kind: o.kind, text: o.text }));
   }, []);
 
-  const complete = useCallback((partialLine: string): string | null => {
-    return completeFor(activeSession(labRef.current), partialLine);
+  const complete = useCallback((deviceId: string, partialLine: string): string | null => {
+    const s = labRef.current.devices[deviceId];
+    if (!s) return null;
+    return completeFor(s, partialLine);
   }, []);
 
   const bannersByDeviceId = useMemo(() => bannersForLab(lab), [lab]);
+
+  // Per-device prompts — recomputed every session change so floating panels
+  // pick up mode transitions (enable → priv, configure terminal → config, etc.)
+  // independently of which device is "active" for the legacy single-CLI path.
+  const promptsByDeviceId = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const [id, s] of Object.entries(labSession.devices)) {
+      out[id] = promptFor(s);
+    }
+    return out;
+  }, [labSession]);
 
   const term = useTerminal({
     activeId: labSession.activeDeviceId,
@@ -167,7 +178,7 @@ export function useLabSession(lab: Lab): UseLabSession {
     execute,
     help,
     complete,
-    prompt: activePrompt(labSession),
+    promptsByDeviceId,
   });
 
   const { objectives, allMet } = useMemo(() => grade(lab, labSession), [lab, labSession]);

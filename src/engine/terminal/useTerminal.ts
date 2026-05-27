@@ -4,15 +4,20 @@ import { useCallback, useEffect, useReducer, useRef } from 'react';
  * Multi-device terminal primitive (presentation layer).
  *
  * Holds one terminal slice per device — scrollback, input buffer, and command
- * history are all per-device. The hook exposes the slice of whichever device
- * is currently active; switching the active id swaps the visible buffer +
- * prompt without losing any device's scrollback or history. For an N=1 lab
- * (the free lab) this collapses to a single slice and behaves exactly like
- * the previous single-device hook.
+ * history are all per-device. The hook exposes two views over the same shared
+ * state:
  *
- * It is intentionally decoupled from the parser: the caller supplies an
- * {@link Executor} that turns a raw line into output. The terminal does not
- * know about IOS, bash, or grading.
+ *   1. Active-device shortcuts (`input`, `lines`, `submit`, etc.) target
+ *      whichever device the lab session reports as active. Single-CLI labs
+ *      and the test suite use this surface.
+ *
+ *   2. `forDevice(id)` returns a per-device view scoped to that device. Each
+ *      floating panel mounts one `Terminal` bound to its own deviceId so
+ *      typing/submitting in panel A doesn't churn panel B.
+ *
+ * The hook is intentionally decoupled from the parser: the caller supplies an
+ * {@link Executor} that turns a (deviceId, raw) pair into output. The terminal
+ * does not know about IOS, bash, or grading.
  */
 
 export type LineKind = 'input' | 'output' | 'error' | 'system';
@@ -41,7 +46,10 @@ export interface ExecResult {
   readonly stream?: AsyncIterable<OutputLine>;
 }
 
-export type Executor = (raw: string) => ExecResult;
+/** Apply a command line to a specific device. The deviceId is passed in so
+ *  per-panel terminals can submit against their own device regardless of
+ *  which one the lab session considers "active". */
+export type Executor = (deviceId: string, raw: string) => ExecResult;
 
 /** One device's terminal state. */
 interface DeviceTerminalState {
@@ -206,33 +214,37 @@ function reducer(state: State, action: Action): State {
   return { ...state, [action.id]: updated };
 }
 
-/** Returns the help lines to print for an in-progress (pre-Enter) line. */
-export type HelpProvider = (partialLine: string) => OutputLine[];
+/** Returns the help lines to print for an in-progress (pre-Enter) line on a
+ *  specific device. */
+export type HelpProvider = (deviceId: string, partialLine: string) => OutputLine[];
 
 /** Returns the completed line on a unique match, or null to leave input alone.
  *  Mirrors real IOS: ambiguous prefix → null (do NOTHING; `?` is for listing). */
-export type CompletionProvider = (partialLine: string) => string | null;
+export type CompletionProvider = (deviceId: string, partialLine: string) => string | null;
 
 export interface UseTerminalOptions {
-  /** The device whose slice is exposed by the hook. */
+  /** The device whose slice the active-device shortcut fields target. */
   activeId: string;
   /** Initial scrollback per device — built once on mount. */
   bannersByDeviceId: Record<string, OutputLine[]>;
-  /** Resolves a raw command line into output (targets the active device). */
+  /** Resolves a (deviceId, raw) pair into output. */
   execute: Executor;
-  /** The current prompt string for the active device, e.g. `R1#`. */
-  prompt: string;
+  /** Per-device prompt strings, derived from current session state. */
+  promptsByDeviceId: Record<string, string>;
   /** Returns context-help lines for the current input. Drives IOS-style `?`. */
   help?: HelpProvider;
   /** Tab-complete the current input. Returns null to leave it alone. */
   complete?: CompletionProvider;
 }
 
-export interface UseTerminal {
+/** The per-device view consumed by `Terminal.tsx`. Both the active-device
+ *  shortcut fields on `UseTerminal` and the value returned from
+ *  `UseTerminal.forDevice(id)` satisfy this shape. */
+export interface TerminalView {
   lines: TerminalLine[];
   input: string;
   prompt: string;
-  /** True while the active device is draining a streamed command's tail.
+  /** True while this device is draining a streamed command's tail.
    *  Terminal.tsx disables the input element and ignores Enter/Tab/? while
    *  this is set; submit() is a no-op. */
   busy: boolean;
@@ -246,15 +258,21 @@ export interface UseTerminal {
   requestHelp: () => void;
   /** Tab-complete the current input. No-op on ambiguous / no-partial cases. */
   tabComplete: () => void;
+}
+
+export interface UseTerminal extends TerminalView {
   /** Reset every device's terminal slice — used by lab reset. */
   resetAll: (bannersByDeviceId: Record<string, OutputLine[]>) => void;
+  /** Per-device view. Floating panels each call this with their own id so
+   *  multiple device CLIs can be open at once with independent state. */
+  forDevice: (id: string) => TerminalView;
 }
 
 export function useTerminal({
   activeId,
   bannersByDeviceId,
   execute,
-  prompt,
+  promptsByDeviceId,
   help,
   complete,
 }: UseTerminalOptions): UseTerminal {
@@ -265,9 +283,6 @@ export function useTerminal({
     }
     return initial;
   });
-
-  // Defensive fallback — should never happen for a well-formed LabSession.
-  const slice = state[activeId] ?? initSlice(bannersByDeviceId[activeId] ?? []);
 
   // Track mount state so a slow stream (e.g., tracert) finishing after the
   // component unmounts doesn't dispatch into a torn-down reducer. dispatch
@@ -288,78 +303,71 @@ export function useTerminal({
   // path is what makes Reset feel instantaneous.
   const cancelTokensRef = useRef<Set<{ cancelled: boolean }>>(new Set());
 
-  const setInput = useCallback(
-    (value: string) => {
-      if (slice.busy) return;
-      dispatch({ type: 'setInput', id: activeId, value });
+  /** Build the per-device view for any deviceId — same shape as the legacy
+   *  single-device UseTerminal but parameterised. Recreated per render; the
+   *  closures correctly capture each render's `slice` / `prompt`. */
+  const forDevice = useCallback(
+    (id: string): TerminalView => {
+      const slice = state[id] ?? initSlice(bannersByDeviceId[id] ?? []);
+      const prompt = promptsByDeviceId[id] ?? '';
+
+      return {
+        lines: slice.lines,
+        input: slice.input,
+        prompt,
+        busy: slice.busy,
+        setInput: (value: string) => {
+          if (slice.busy) return;
+          dispatch({ type: 'setInput', id, value });
+        },
+        submit: () => {
+          if (slice.busy) return;
+          const result = execute(id, slice.input);
+          dispatch({ type: 'submit', id, prompt, result });
+          // Optional async tail: keep this device busy (input disabled) until
+          // the stream is exhausted, then flip back. The closure captures
+          // `id` so hop lines from a tracert started on PC-A land on PC-A's
+          // slice even if the learner clicks over to a router mid-trace.
+          // `token` is the cancellation signal — resetAll flips its
+          // `cancelled` flag to abort the loop without waiting for the next
+          // sleep to resolve.
+          if (result.stream) {
+            const token = { cancelled: false };
+            cancelTokensRef.current.add(token);
+            dispatch({ type: 'setBusy', id, busy: true });
+            void (async () => {
+              try {
+                for await (const line of result.stream!) {
+                  if (!mountedRef.current || token.cancelled) return;
+                  dispatch({ type: 'print', id, lines: [line] });
+                }
+              } finally {
+                cancelTokensRef.current.delete(token);
+                if (mountedRef.current && !token.cancelled) {
+                  dispatch({ type: 'setBusy', id, busy: false });
+                }
+              }
+            })();
+          }
+        },
+        recallPrev: () => dispatch({ type: 'recallPrev', id }),
+        recallNext: () => dispatch({ type: 'recallNext', id }),
+        print: (lines: OutputLine[]) => dispatch({ type: 'print', id, lines }),
+        clear: () => dispatch({ type: 'clear', id }),
+        requestHelp: () => {
+          if (!help) return;
+          const lines = help(id, slice.input);
+          dispatch({ type: 'inlineHelp', id, prompt, raw: slice.input, lines });
+        },
+        tabComplete: () => {
+          if (!complete) return;
+          const next = complete(id, slice.input);
+          if (next !== null) dispatch({ type: 'setInput', id, value: next });
+        },
+      };
     },
-    [activeId, slice.busy],
+    [state, bannersByDeviceId, promptsByDeviceId, execute, help, complete],
   );
-
-  const submit = useCallback(() => {
-    if (slice.busy) return;
-    const result = execute(slice.input);
-    dispatch({ type: 'submit', id: activeId, prompt, result });
-
-    // Optional async tail: keep the device busy (input disabled) until the
-    // stream is exhausted, then flip back. The closure captures activeId so
-    // hop lines from a tracert started on PC-A land on PC-A's slice even if
-    // the learner clicks over to a router mid-trace. The `token` is the
-    // cancellation signal — resetAll flips its `cancelled` flag to abort the
-    // loop without waiting for the next sleep to resolve.
-    if (result.stream) {
-      const id = activeId;
-      const token = { cancelled: false };
-      cancelTokensRef.current.add(token);
-      dispatch({ type: 'setBusy', id, busy: true });
-      void (async () => {
-        try {
-          for await (const line of result.stream!) {
-            if (!mountedRef.current || token.cancelled) return;
-            dispatch({ type: 'print', id, lines: [line] });
-          }
-        } finally {
-          cancelTokensRef.current.delete(token);
-          // Only clear busy if THIS stream wasn't cancelled — when resetAll
-          // fires, it rebuilds the slice (busy already false in the fresh
-          // slice) and dispatching setBusy here would be a no-op write into
-          // the new slice. Harmless either way; guarding keeps it tidy.
-          if (mountedRef.current && !token.cancelled) {
-            dispatch({ type: 'setBusy', id, busy: false });
-          }
-        }
-      })();
-    }
-  }, [execute, prompt, slice.input, slice.busy, activeId]);
-
-  const recallPrev = useCallback(
-    () => dispatch({ type: 'recallPrev', id: activeId }),
-    [activeId],
-  );
-  const recallNext = useCallback(
-    () => dispatch({ type: 'recallNext', id: activeId }),
-    [activeId],
-  );
-  const print = useCallback(
-    (lines: OutputLine[]) => dispatch({ type: 'print', id: activeId, lines }),
-    [activeId],
-  );
-  const clear = useCallback(
-    () => dispatch({ type: 'clear', id: activeId }),
-    [activeId],
-  );
-
-  const requestHelp = useCallback(() => {
-    if (!help) return;
-    const lines = help(slice.input);
-    dispatch({ type: 'inlineHelp', id: activeId, prompt, raw: slice.input, lines });
-  }, [help, prompt, slice.input, activeId]);
-
-  const tabComplete = useCallback(() => {
-    if (!complete) return;
-    const next = complete(slice.input);
-    if (next !== null) dispatch({ type: 'setInput', id: activeId, value: next });
-  }, [complete, slice.input, activeId]);
 
   const resetAll = useCallback(
     (banners: Record<string, OutputLine[]>) => {
@@ -374,19 +382,13 @@ export function useTerminal({
     [],
   );
 
+  // Active-device shortcuts — same shape Terminal.tsx and the existing tests
+  // consume. forDevice(activeId) is the single source of truth.
+  const active = forDevice(activeId);
+
   return {
-    lines: slice.lines,
-    input: slice.input,
-    prompt,
-    busy: slice.busy,
-    setInput,
-    submit,
-    recallPrev,
-    recallNext,
-    print,
-    clear,
-    requestHelp,
-    tabComplete,
+    ...active,
     resetAll,
+    forDevice,
   };
 }

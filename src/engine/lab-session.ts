@@ -132,7 +132,7 @@ function applySeedLine(s: DeviceSession, raw: string): DeviceSession {
 }
 
 /**
- * Apply a command to the ACTIVE device. Returns a new LabSession with that
+ * Apply a command to a specific device. Returns a new LabSession with that
  * device's session replaced — all other devices are untouched (no global
  * state). PC nicUp is refreshed afterward, since a router interface going
  * admin-up/down on this turn can flip a PC's link state.
@@ -140,7 +140,39 @@ function applySeedLine(s: DeviceSession, raw: string): DeviceSession {
  * Adapters receive the full LabSession via the `ctx` arg so cross-device
  * commands (today: `ping` on the pc adapter, which calls canReach) can
  * read the topology without leaking concerns into per-device state.
+ *
+ * Floating panels (each bound to one device) call this directly with their
+ * own deviceId. The single-active legacy path goes through `applyToActive`
+ * which is now a thin wrapper.
  */
+export function applyToDevice(
+  lab: LabSession,
+  deviceId: string,
+  raw: string,
+): {
+  session: LabSession;
+  output: CommandOutput[];
+  stream?: AsyncIterable<CommandOutput>;
+} {
+  const cur = lab.devices[deviceId];
+  if (!cur) {
+    throw new Error(`applyToDevice: unknown device id '${deviceId}'`);
+  }
+  const result = dispatchByKind(cur, raw, lab);
+  const next: LabSession = {
+    ...lab,
+    devices: { ...lab.devices, [deviceId]: result.session },
+  };
+  return {
+    session: refreshDerivedState(next),
+    output: result.output,
+    stream: result.stream,
+  };
+}
+
+/** Back-compat shortcut: apply a command to whichever device is currently
+ *  active. Floating panels carry their own deviceId so they call
+ *  `applyToDevice` directly. */
 export function applyToActive(
   lab: LabSession,
   raw: string,
@@ -149,18 +181,7 @@ export function applyToActive(
   output: CommandOutput[];
   stream?: AsyncIterable<CommandOutput>;
 } {
-  const id = lab.activeDeviceId;
-  const cur = lab.devices[id];
-  const result = dispatchByKind(cur, raw, lab);
-  const next: LabSession = {
-    ...lab,
-    devices: { ...lab.devices, [id]: result.session },
-  };
-  return {
-    session: refreshDerivedState(next),
-    output: result.output,
-    stream: result.stream,
-  };
+  return applyToDevice(lab, lab.activeDeviceId, raw);
 }
 
 /** Kind-dispatch helper so TS narrows on the discriminator. */
@@ -245,7 +266,13 @@ export function activeSession(lab: LabSession): DeviceSession {
 
 /** Convenience: the prompt string for the active device. */
 export function activePrompt(lab: LabSession): string {
-  const s = activeSession(lab);
+  return promptFor(activeSession(lab));
+}
+
+/** Render the prompt for any device session. Used by useTerminal to surface
+ *  per-device prompts (floating panels show their own device's prompt, not
+ *  the activeDeviceId's). */
+export function promptFor(s: DeviceSession): string {
   switch (s.kind) {
     case 'router':
       return routerAdapter.prompt(s);

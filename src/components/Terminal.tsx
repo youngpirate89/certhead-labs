@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import type { UseTerminal, TerminalLine } from '@/engine/terminal/useTerminal';
+import type { TerminalView, TerminalLine } from '@/engine/terminal/useTerminal';
 import { loadTheme, saveTheme, type TerminalTheme } from '@/engine/terminal/terminalTheme';
 import TerminalThemePanel from './terminal/TerminalThemePanel';
 
@@ -16,7 +16,10 @@ const lineColor: Record<TerminalLine['kind'], string> = {
 const themedKinds = new Set<TerminalLine['kind']>(['input', 'output']);
 
 interface TerminalProps {
-  term: UseTerminal;
+  /** Per-device terminal view — either the active-device shortcuts from
+   *  useLabSession (single-CLI legacy path) or a `forDevice(id)` view
+   *  scoped to one floating panel. */
+  term: TerminalView;
 }
 
 export function Terminal({ term }: TerminalProps) {
