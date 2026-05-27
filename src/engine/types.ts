@@ -66,6 +66,13 @@ export interface LabDevice {
     readonly mask?: string;
     readonly gateway?: string;
   };
+  /** Optional per-device topology position. When ALL devices in a lab carry
+   *  this, the renderer uses these coordinates verbatim instead of the
+   *  default left-to-right row layout — required for non-linear topologies
+   *  like the Lab 09 router-on-a-stick T-shape (SW1 as a center hub with
+   *  three spokes). x/y are in flow-canvas pixel space, matching NODE_WIDTH
+   *  + NODE_GAP from TopologyPanel. */
+  readonly position?: { readonly x: number; readonly y: number };
 }
 
 /** One end of a cable: a (deviceId, iface) pair. */

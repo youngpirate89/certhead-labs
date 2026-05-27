@@ -51,6 +51,13 @@ interface TopologyPanelProps {
   readonly onSelectDevice?: (id: string) => void;
   /** Links between device interfaces — drawn as edges in the canvas. */
   readonly links?: readonly Link[];
+  /** Optional per-device topology positions. When ALL devices in `devices`
+   *  have a position entry here, the renderer uses these coordinates verbatim
+   *  instead of the default left-to-right row layout — required for non-linear
+   *  topologies like the Lab 09 router-on-a-stick T-shape. If any device is
+   *  missing a position, the linear default is used for all devices (mixing
+   *  the two layouts would be confusing). */
+  readonly positions?: ReadonlyMap<string, { readonly x: number; readonly y: number }>;
   /** Allow plain mouse-wheel to zoom the canvas. Default true for /try and
    *  pilot routes where the topology is the primary content. The /embed
    *  surface (later commit) will pass false so scrolling inside the iframe
@@ -99,58 +106,95 @@ const ROW_INSET_X = 20;
 /** Vertical inset to center the node row inside the canvas at first paint. */
 const ROW_INSET_Y = Math.round((INITIAL_CANVAS_HEIGHT - NODE_HEIGHT) / 2);
 
+type PortEdge = 'left' | 'right' | 'top' | 'bottom';
+
+/** Compute the canvas-space position for every device. If `overrides` covers
+ *  ALL devices, use those verbatim — that's the per-lab T-shape / hub-spoke
+ *  path. If any device is missing an override, fall back to the linear
+ *  left-to-right row at y=0 for ALL devices (mixing the two layouts would
+ *  produce a confusing canvas). */
+function computePositions(
+  devices: readonly { id: string }[],
+  overrides: ReadonlyMap<string, { x: number; y: number }> | undefined,
+): Map<string, { x: number; y: number }> {
+  const positions = new Map<string, { x: number; y: number }>();
+  const allOverridden =
+    overrides !== undefined && devices.every((d) => overrides.has(d.id));
+  if (allOverridden) {
+    for (const d of devices) positions.set(d.id, overrides!.get(d.id)!);
+    return positions;
+  }
+  for (let i = 0; i < devices.length; i++) {
+    positions.set(devices[i].id, { x: i * (NODE_WIDTH + NODE_GAP), y: 0 });
+  }
+  return positions;
+}
+
+/** Per-link, per-endpoint port-edge selection. Compares device centers:
+ *  - if |dy| dominates (neighbor is significantly above/below), use top/bottom
+ *  - otherwise use left/right based on dx sign
+ *
+ *  The vertical threshold is half NODE_HEIGHT: anything closer in y is treated
+ *  as effectively-horizontal so the existing linear-row labs (Lab 08 PC↔SW↔SW
+ *  ↔PC, all y=0) keep their familiar left/right rendering. */
+function portEdgesFor(
+  posA: { x: number; y: number },
+  posB: { x: number; y: number },
+): { a: PortEdge | null; b: PortEdge | null } {
+  const dx = posB.x - posA.x;
+  const dy = posB.y - posA.y;
+  const verticalDominant = Math.abs(dy) >= NODE_HEIGHT / 2;
+  if (verticalDominant) {
+    if (dy > 0) return { a: 'bottom', b: 'top' };
+    if (dy < 0) return { a: 'top', b: 'bottom' };
+  }
+  if (dx > 0) return { a: 'right', b: 'left' };
+  if (dx < 0) return { a: 'left', b: 'right' };
+  // Same coordinates (degenerate) — leave both off the map so they fall to
+  // the bottom row, matching the previous behavior.
+  return { a: null, b: null };
+}
+
 function layoutNodes(
   devices: readonly DeviceTopologyView[],
   links: readonly Link[],
+  positions: Map<string, { x: number; y: number }>,
   activeId: string,
   onSelect: (id: string) => void,
 ): Node<DeviceNodeData>[] {
-  // Per-device map: interface id → which edge of the card faces its neighbor.
-  // Mirrors EdgeOverlay's anchor logic. For each link, compare the two
-  // devices' x coordinates directly and assign from each device's own
-  // perspective:
-  //   - port on the LOWER-x device faces RIGHT toward its neighbor
-  //   - port on the HIGHER-x device faces LEFT toward its neighbor
-  // Strict `<` / `>` — same-x devices (degenerate case, never happens in the
-  // current linear layout) leave both ports off the map so they fall back to
-  // the card's bottom row. Unlinked interfaces also stay off the map.
-  const xOf = new Map(
-    devices.map((d, i) => [d.id, i * (NODE_WIDTH + NODE_GAP)] as const),
-  );
-  const portEdgesByDevice = new Map<string, Map<string, 'left' | 'right' | 'top' | 'bottom'>>();
+  const portEdgesByDevice = new Map<string, Map<string, PortEdge>>();
   for (const d of devices) portEdgesByDevice.set(d.id, new Map());
   for (const link of links) {
-    const aX = xOf.get(link.a.deviceId);
-    const bX = xOf.get(link.b.deviceId);
-    if (aX == null || bX == null) continue;
-    if (aX < bX) {
-      portEdgesByDevice.get(link.a.deviceId)!.set(link.a.iface, 'right');
-      portEdgesByDevice.get(link.b.deviceId)!.set(link.b.iface, 'left');
-    } else if (aX > bX) {
-      portEdgesByDevice.get(link.a.deviceId)!.set(link.a.iface, 'left');
-      portEdgesByDevice.get(link.b.deviceId)!.set(link.b.iface, 'right');
-    }
+    const posA = positions.get(link.a.deviceId);
+    const posB = positions.get(link.b.deviceId);
+    if (!posA || !posB) continue;
+    const { a, b } = portEdgesFor(posA, posB);
+    if (a) portEdgesByDevice.get(link.a.deviceId)!.set(link.a.iface, a);
+    if (b) portEdgesByDevice.get(link.b.deviceId)!.set(link.b.iface, b);
   }
-  return devices.map((d, i) => ({
-    id: d.id,
-    type: 'device',
-    position: { x: i * (NODE_WIDTH + NODE_GAP), y: 0 },
-    sourcePosition: Position.Right,
-    targetPosition: Position.Left,
-    draggable: false,
-    selectable: false,
-    // Explicit dimensions so React Flow can position edges without waiting for
-    // ResizeObserver — `isNodeInitialized` accepts `initialWidth` as a signal
-    // the node's size is already known.
-    initialWidth: NODE_WIDTH,
-    initialHeight: NODE_HEIGHT,
-    data: {
-      view: d,
-      active: d.id === activeId,
-      onClick: () => onSelect(d.id),
-      portEdges: portEdgesByDevice.get(d.id) ?? new Map(),
-    },
-  }));
+  return devices.map((d) => {
+    const pos = positions.get(d.id) ?? { x: 0, y: 0 };
+    return {
+      id: d.id,
+      type: 'device',
+      position: pos,
+      sourcePosition: Position.Right,
+      targetPosition: Position.Left,
+      draggable: false,
+      selectable: false,
+      // Explicit dimensions so React Flow can position edges without waiting
+      // for ResizeObserver — `isNodeInitialized` accepts `initialWidth` as a
+      // signal the node's size is already known.
+      initialWidth: NODE_WIDTH,
+      initialHeight: NODE_HEIGHT,
+      data: {
+        view: d,
+        active: d.id === activeId,
+        onClick: () => onSelect(d.id),
+        portEdges: portEdgesByDevice.get(d.id) ?? new Map(),
+      },
+    };
+  });
 }
 
 // Cable + LED palette. LED colors mirror PortIndicator's "up" (terminal-prompt
@@ -199,6 +243,76 @@ interface RenderLink {
   readonly network: string | null;
 }
 
+/** Where to place an LED + label for one endpoint, given the device's
+ *  top-left corner, the edge of the card the cable comes out of, and the
+ *  port's slot index on that edge (out of `totalOnEdge`). The slot index
+ *  distributes multi-port edges evenly along the edge — e.g. SW1's bottom
+ *  edge with 2 spokes in Lab 09 puts the two LEDs at 1/3 and 2/3 of the
+ *  edge instead of stacking them both at the midpoint.
+ *
+ *  `labelAnchor` is the SVG text-anchor for the iface name — `start` keeps
+ *  the text to the RIGHT of the LED (used at the left/top/bottom edges so
+ *  the label reads outward into the cable middle), `end` puts it to the
+ *  LEFT (used at the right edge for the same reason). Vertical edges
+ *  inherit `start` so labels lean rightward — readable, and avoids the
+ *  card overlap that a centered anchor would create for top/bottom LEDs. */
+function endpointFor(
+  dev: { x: number; y: number },
+  deviceId: string,
+  ifaceId: string,
+  edge: PortEdge | null,
+  slot: number,
+  totalOnEdge: number,
+): RenderEndpoint {
+  // Fractional position along the edge — first port at 1/(N+1), last at
+  // N/(N+1), so even spacing with margin from the corners.
+  const frac = totalOnEdge > 0 ? (slot + 1) / (totalOnEdge + 1) : 0.5;
+  switch (edge) {
+    case 'left':
+      return {
+        deviceId,
+        ifaceId,
+        x: dev.x,
+        y: dev.y + NODE_HEIGHT * frac,
+        labelAnchor: 'end',
+      };
+    case 'right':
+      return {
+        deviceId,
+        ifaceId,
+        x: dev.x + NODE_WIDTH,
+        y: dev.y + NODE_HEIGHT * frac,
+        labelAnchor: 'start',
+      };
+    case 'top':
+      return {
+        deviceId,
+        ifaceId,
+        x: dev.x + NODE_WIDTH * frac,
+        y: dev.y,
+        labelAnchor: 'start',
+      };
+    case 'bottom':
+      return {
+        deviceId,
+        ifaceId,
+        x: dev.x + NODE_WIDTH * frac,
+        y: dev.y + NODE_HEIGHT,
+        labelAnchor: 'start',
+      };
+    default:
+      // No edge mapping — fall back to the right edge midpoint so the cable
+      // still draws somewhere reasonable (degenerate topology case).
+      return {
+        deviceId,
+        ifaceId,
+        x: dev.x + NODE_WIDTH,
+        y: dev.y + NODE_HEIGHT / 2,
+        labelAnchor: 'start',
+      };
+  }
+}
+
 /** Derive the CIDR network from the first endpoint that has an IP+mask pair.
  *  Returns null when neither endpoint is configured enough to compute one. */
 function deriveNetwork(
@@ -240,12 +354,48 @@ function EdgeOverlay({
   const byId = new Map(devices.map((d) => [d.id, d]));
   const viewById = new Map(deviceViews.map((v) => [v.id, v]));
 
+  // Pre-pass: for each (device, edge), collect the list of (iface, link-index)
+  // pairs in link declaration order. Used so multi-port edges (Lab 09 SW1
+  // bottom = Gi0/1 + Gi0/2) get distributed slots instead of overlapping LEDs.
+  type SlotKey = string; // `${deviceId}|${edge}`
+  const edgeIfaceLists = new Map<SlotKey, string[]>();
+  const linkEdges: ({ a: PortEdge | null; b: PortEdge | null } | null)[] = [];
+  for (const link of links) {
+    const aDev = byId.get(link.a.deviceId);
+    const bDev = byId.get(link.b.deviceId);
+    if (!aDev || !bDev) {
+      linkEdges.push(null);
+      continue;
+    }
+    const edges = portEdgesFor(aDev, bDev);
+    linkEdges.push(edges);
+    if (edges.a) {
+      const k = `${link.a.deviceId}|${edges.a}`;
+      const list = edgeIfaceLists.get(k) ?? [];
+      if (!list.includes(link.a.iface)) list.push(link.a.iface);
+      edgeIfaceLists.set(k, list);
+    }
+    if (edges.b) {
+      const k = `${link.b.deviceId}|${edges.b}`;
+      const list = edgeIfaceLists.get(k) ?? [];
+      if (!list.includes(link.b.iface)) list.push(link.b.iface);
+      edgeIfaceLists.set(k, list);
+    }
+  }
+  const slotIndex = (deviceId: string, edge: PortEdge | null, iface: string) => {
+    if (!edge) return { slot: 0, total: 1 };
+    const list = edgeIfaceLists.get(`${deviceId}|${edge}`) ?? [];
+    const slot = list.indexOf(iface);
+    return { slot: slot < 0 ? 0 : slot, total: Math.max(1, list.length) };
+  };
+
   const renderLinks: RenderLink[] = [];
   for (let i = 0; i < links.length; i++) {
     const link = links[i];
     const aDev = byId.get(link.a.deviceId);
     const bDev = byId.get(link.b.deviceId);
-    if (!aDev || !bDev) continue;
+    const edges = linkEdges[i];
+    if (!aDev || !bDev || !edges) continue;
     const aView = viewById.get(link.a.deviceId);
     const bView = viewById.get(link.b.deviceId);
     if (!aView || !bView) continue;
@@ -253,29 +403,33 @@ function EdgeOverlay({
     const bIface = bView.interfaces.find((iv) => iv.id === link.b.iface);
     if (!aIface || !bIface) continue;
 
-    // Order endpoints by x so "left" is always the smaller-x device. Each LED
-    // anchors at its OWN device's facing edge: right edge of the left device,
-    // left edge of the right device.
+    // Position each LED on its device's edge using the precomputed slot info.
+    // For multi-port edges (Lab 09 SW1 bottom: Gi0/1 + Gi0/2) this spreads
+    // them along the edge instead of stacking them on the midpoint.
+    const aSlot = slotIndex(link.a.deviceId, edges.a, link.a.iface);
+    const bSlot = slotIndex(link.b.deviceId, edges.b, link.b.iface);
+    const aEndpoint = endpointFor(
+      aDev,
+      link.a.deviceId,
+      link.a.iface,
+      edges.a,
+      aSlot.slot,
+      aSlot.total,
+    );
+    const bEndpoint = endpointFor(
+      bDev,
+      link.b.deviceId,
+      link.b.iface,
+      edges.b,
+      bSlot.slot,
+      bSlot.total,
+    );
+    // Order endpoints by x so the "left" / "right" naming in RenderLink still
+    // means smaller-x / larger-x. For vertical cables (dx === 0) either
+    // assignment is fine; defer to the original "a is left" tie-break.
     const aIsLeft = aDev.x <= bDev.x;
-    const leftDev = aIsLeft ? aDev : bDev;
-    const rightDev = aIsLeft ? bDev : aDev;
-    const leftLink = aIsLeft ? link.a : link.b;
-    const rightLink = aIsLeft ? link.b : link.a;
-    const yMid = leftDev.y + NODE_HEIGHT / 2;
-    const left: RenderEndpoint = {
-      deviceId: leftLink.deviceId,
-      ifaceId: leftLink.iface,
-      x: leftDev.x + NODE_WIDTH,
-      y: yMid,
-      labelAnchor: 'start',
-    };
-    const right: RenderEndpoint = {
-      deviceId: rightLink.deviceId,
-      ifaceId: rightLink.iface,
-      x: rightDev.x,
-      y: yMid,
-      labelAnchor: 'end',
-    };
+    const left = aIsLeft ? aEndpoint : bEndpoint;
+    const right = aIsLeft ? bEndpoint : aEndpoint;
     const linkUp = aIface.status === 'up' && bIface.status === 'up';
     const network = deriveNetwork(aIface, bIface);
     renderLinks.push({
@@ -323,6 +477,7 @@ function EdgeOverlay({
         {renderLinks.map((l) => {
           const fill = l.linkUp ? LED_GREEN : LED_RED;
           const midX = (l.left.x + l.right.x) / 2;
+          const midY = (l.left.y + l.right.y) / 2;
           return (
             <g key={l.key} data-link-key={l.key}>
               <line
@@ -338,7 +493,7 @@ function EdgeOverlay({
               {l.network ? (
                 <text
                   x={midX - minX}
-                  y={l.left.y - minY + NETWORK_LABEL_OFFSET}
+                  y={midY - minY + NETWORK_LABEL_OFFSET}
                   textAnchor="middle"
                   fontSize={LABEL_FONT_SIZE}
                   fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
@@ -560,6 +715,7 @@ export function TopologyPanel({
   activeDeviceId,
   onSelectDevice,
   links,
+  positions,
   zoomOnScroll = true,
 }: TopologyPanelProps) {
   const handleSelect = useMemo(
@@ -567,9 +723,17 @@ export function TopologyPanel({
     [onSelectDevice],
   );
 
+  // Single source of truth for per-device canvas-space positions. layoutNodes
+  // and EdgeOverlay both read these — keeps the cable geometry and the node
+  // placement in lockstep.
+  const positionMap = useMemo(
+    () => computePositions(devices, positions),
+    [devices, positions],
+  );
+
   const nodes = useMemo(
-    () => layoutNodes(devices, links ?? [], activeDeviceId, handleSelect),
-    [devices, links, activeDeviceId, handleSelect],
+    () => layoutNodes(devices, links ?? [], positionMap, activeDeviceId, handleSelect),
+    [devices, links, positionMap, activeDeviceId, handleSelect],
   );
 
   // Edges are drawn as an overlay SVG (see EdgeOverlay) inside the React Flow
@@ -579,21 +743,36 @@ export function TopologyPanel({
   // sacrificing the visible link.
   const positionedDevices = useMemo(
     () =>
-      devices.map((d, i) => ({
-        id: d.id,
-        x: i * (NODE_WIDTH + NODE_GAP),
-        y: 0,
-      })),
-    [devices],
+      devices.map((d) => {
+        const p = positionMap.get(d.id) ?? { x: 0, y: 0 };
+        return { id: d.id, x: p.x, y: p.y };
+      }),
+    [devices, positionMap],
   );
 
-  // Canvas wrapper fills the full band width — CanvasAutoFit centers the node
-  // row inside it via the React Flow viewport translate, so single-device labs
-  // sit centered while multi-device labs use the full breathing room. Only
-  // rowWidth is needed downstream (for CanvasAutoFit's contentWidth); the
-  // previous max-width cap is gone.
-  const rowWidth =
-    devices.length * NODE_WIDTH + Math.max(0, devices.length - 1) * NODE_GAP;
+  // Bounding box of the layout — for CanvasAutoFit's zoom-to-fit calculation.
+  // For the default linear row this collapses to the original (rowWidth,
+  // NODE_HEIGHT); for T-shapes / hub-spokes (Lab 09) it captures both axes.
+  const { contentWidth, contentHeight } = useMemo(() => {
+    if (devices.length === 0) {
+      return { contentWidth: NODE_WIDTH, contentHeight: NODE_HEIGHT };
+    }
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const d of devices) {
+      const p = positionMap.get(d.id) ?? { x: 0, y: 0 };
+      if (p.x < minX) minX = p.x;
+      if (p.x + NODE_WIDTH > maxX) maxX = p.x + NODE_WIDTH;
+      if (p.y < minY) minY = p.y;
+      if (p.y + NODE_HEIGHT > maxY) maxY = p.y + NODE_HEIGHT;
+    }
+    return {
+      contentWidth: Math.max(1, maxX - minX),
+      contentHeight: Math.max(1, maxY - minY),
+    };
+  }, [devices, positionMap]);
 
   // Ref handed to CanvasAutoFit — observing this element catches both
   // viewport resizes AND the Layout divider drag (which changes the parent
@@ -673,8 +852,8 @@ export function TopologyPanel({
           <CanvasControls />
           <CanvasAutoFit
             containerRef={canvasWrapperRef}
-            contentWidth={rowWidth}
-            contentHeight={NODE_HEIGHT}
+            contentWidth={contentWidth}
+            contentHeight={contentHeight}
           />
         </div>
       </div>
@@ -694,7 +873,11 @@ function DeviceNode({ data }: NodeProps<Node<DeviceNodeData>>) {
   const pcIp = view.kind === 'pc' ? view.interfaces[0]?.ip ?? null : null;
   const leftPorts = view.interfaces.filter((i) => portEdges.get(i.id) === 'left');
   const rightPorts = view.interfaces.filter((i) => portEdges.get(i.id) === 'right');
-  const bottomPorts = view.interfaces.filter((i) => !portEdges.has(i.id));
+  const topPorts = view.interfaces.filter((i) => portEdges.get(i.id) === 'top');
+  const bottomEdgePorts = view.interfaces.filter((i) => portEdges.get(i.id) === 'bottom');
+  // No portEdges entry → port is unconnected; rendered as a stacked
+  // PortIndicator in the card's bottom row (the free-lab fallback).
+  const unconnectedPorts = view.interfaces.filter((i) => !portEdges.has(i.id));
   return (
     <div className="relative">
       {/* Handles for edges — visually hidden but still measurable for edge
@@ -758,9 +941,9 @@ function DeviceNode({ data }: NodeProps<Node<DeviceNodeData>>) {
           {view.platform}
         </span>
 
-        {bottomPorts.length > 0 ? (
+        {unconnectedPorts.length > 0 ? (
           <div className="flex items-end justify-center gap-1.5">
-            {bottomPorts.map((i) => (
+            {unconnectedPorts.map((i) => (
               <PortIndicator key={i.id} deviceId={view.id} iface={i} />
             ))}
           </div>
@@ -783,6 +966,26 @@ function DeviceNode({ data }: NodeProps<Node<DeviceNodeData>>) {
           >
             {rightPorts.map((i) => (
               <EdgePortDot key={i.id} deviceId={view.id} iface={i} position="right" />
+            ))}
+          </div>
+        ) : null}
+        {topPorts.length > 0 ? (
+          <div
+            className="pointer-events-none absolute top-0 left-1/2 flex -translate-x-1/2 flex-row gap-2"
+            data-port-edge="top"
+          >
+            {topPorts.map((i) => (
+              <EdgePortDot key={i.id} deviceId={view.id} iface={i} position="top" />
+            ))}
+          </div>
+        ) : null}
+        {bottomEdgePorts.length > 0 ? (
+          <div
+            className="pointer-events-none absolute bottom-0 left-1/2 flex -translate-x-1/2 flex-row gap-2"
+            data-port-edge="bottom"
+          >
+            {bottomEdgePorts.map((i) => (
+              <EdgePortDot key={i.id} deviceId={view.id} iface={i} position="bottom" />
             ))}
           </div>
         ) : null}
@@ -854,7 +1057,7 @@ function EdgePortDot({
 }: {
   deviceId: string;
   iface: InterfaceTopologyView;
-  position: 'left' | 'right';
+  position: 'left' | 'right' | 'top' | 'bottom';
 }) {
   return (
     <span

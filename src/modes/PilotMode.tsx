@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Layout } from '@/components/Layout';
 import { LabBrief } from '@/components/LabBrief';
 import { Terminal } from '@/components/Terminal';
@@ -33,6 +33,18 @@ export function PilotMode({ lab }: { lab: Lab }) {
     setLabStartedAt(Date.now());
   }
 
+  // Per-lab topology positions: collected here from the lab spec so the
+  // renderer can lay out non-linear topologies (Lab 09 router-on-a-stick).
+  // The renderer falls back to its linear default when this map is empty
+  // or doesn't cover every device.
+  const positions = useMemo(() => {
+    const m = new Map<string, { x: number; y: number }>();
+    for (const d of lab.topology.devices) {
+      if (d.position) m.set(d.id, d.position);
+    }
+    return m;
+  }, [lab]);
+
   return (
     <Layout
       examLabel={lab.exam}
@@ -43,6 +55,7 @@ export function PilotMode({ lab }: { lab: Lab }) {
           activeDeviceId={session.activeDeviceId}
           onSelectDevice={session.setActiveDevice}
           links={lab.topology.links}
+          positions={positions}
         />
       }
       objectives={
