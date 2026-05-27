@@ -107,7 +107,7 @@ export const lab11NatPat: Lab = {
   objectives: [
     {
       id: 'acl',
-      text: 'Define ACL 1 to permit the 192.168.1.0/24 LAN subnet',
+      text: 'R1: define ACL 1 permitting 192.168.1.0 0.0.0.255',
       check: (state) => {
         const acl = state.R1?.acls.get(1);
         if (!acl) return false;
@@ -121,17 +121,17 @@ export const lab11NatPat: Lab = {
     },
     {
       id: 'nat-inside',
-      text: 'Mark Gi0/0 as ip nat inside',
+      text: 'R1 Gi0/0 (LAN): apply ip nat inside',
       check: (state) => state.R1?.interfaces['Gi0/0']?.natRole === 'inside',
     },
     {
       id: 'nat-outside',
-      text: 'Mark Gi0/1 as ip nat outside',
+      text: 'R1 Gi0/1 (WAN): apply ip nat outside',
       check: (state) => state.R1?.interfaces['Gi0/1']?.natRole === 'outside',
     },
     {
       id: 'overload',
-      text: 'Apply ip nat inside source list 1 interface Gi0/1 overload',
+      text: 'R1: apply ip nat inside source list 1 interface GigabitEthernet0/1 overload',
       check: (state) =>
         state.R1?.natStatements.some(
           (s) =>
@@ -142,7 +142,7 @@ export const lab11NatPat: Lab = {
     },
     {
       id: 'reachable',
-      text: 'PC-A can ping the ISP at 203.0.113.2',
+      text: 'PC-A: ping 203.0.113.2 succeeds (traffic translated at R1)',
       check: (_state, _history, session) => {
         const pca = session.devices['PC-A'];
         if (pca?.kind !== 'pc') return false;
@@ -151,7 +151,7 @@ export const lab11NatPat: Lab = {
     },
     {
       id: 'verify',
-      text: 'Verify with show ip nat translations',
+      text: 'R1: run show ip nat translations and confirm the entry',
       check: (_state, _history, session) => {
         const r1 = session.devices.R1;
         if (r1?.kind !== 'router') return false;
