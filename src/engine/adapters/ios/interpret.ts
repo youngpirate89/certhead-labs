@@ -18,12 +18,21 @@ import {
   routingTable,
   deriveRouterId,
 } from './state';
-import { type Route, ipToInt, maskLength, networkAddress } from './routing';
+import {
+  type Route,
+  ipInSubnet,
+  ipToInt,
+  longestPrefixMatch,
+  maskLength,
+  networkAddress,
+} from './routing';
 import type {
+  AdapterContext,
   ApplyOptions,
   CommandOutput,
   ApplyResult as GenericApplyResult,
 } from '../types';
+import { canReach, type FailPoint, type FailReason } from '@/engine/reachability';
 
 // Re-exported from the shared adapter contracts; kept here as a named export so
 // existing call-sites (`import { CommandOutput } from '@/engine/adapters/ios/interpret'`)
@@ -81,6 +90,7 @@ function invalidInputOutput(promptStr: string, charOffset: number): CommandOutpu
 export function applyCommand(
   session: Session,
   raw: string,
+  ctx?: AdapterContext,
   opts?: ApplyOptions,
 ): ApplyResult {
   const { tokens, offsets } = tokenize(raw);
@@ -124,8 +134,8 @@ export function applyCommand(
     case 'incomplete':
       return { session, output: err('% Incomplete command.') };
     case 'complete': {
-      if (doForm) return dispatchDo(session, result.command, result.args, raw, opts);
-      return dispatch(session, result.command, result.args, raw.trim(), opts);
+      if (doForm) return dispatchDo(session, result.command, result.args, raw, ctx, opts);
+      return dispatch(session, result.command, result.args, raw.trim(), ctx, opts);
     }
   }
 }
@@ -145,9 +155,10 @@ function dispatchDo(
   command: string[],
   args: Record<string, string>,
   raw: string,
+  ctx: AdapterContext | undefined,
   opts: ApplyOptions | undefined,
 ): ApplyResult {
-  const inner = dispatch(prev, command, args, raw.trim(), opts);
+  const inner = dispatch(prev, command, args, raw.trim(), ctx, opts);
   const record = opts?.record !== false;
   const last = inner.session.resolvedHistory.length - 1;
   const fixed: Session = {
@@ -254,6 +265,7 @@ function dispatch(
   command: string[],
   args: Record<string, string>,
   raw: string,
+  ctx: AdapterContext | undefined,
   opts: ApplyOptions | undefined,
 ): ApplyResult {
   const s: Session = structuredClone(prev);
@@ -382,12 +394,172 @@ function dispatch(
     case 'show':
       return show(s, command, args);
 
+    case 'ping':
+      return ping(s, args.target, ctx);
+
     case 'write':
       return { session: s, output: out('Building configuration...', '[OK]') };
 
     default:
       return { session: s, output: err('% Unknown command.') };
   }
+}
+
+// ---------- ping (privileged EXEC) ----------
+
+/** Render a successful Windows-style ping block. Mirrors the PC adapter's
+ *  output (pc.ts `renderPing`) so the look is identical regardless of which
+ *  device originates the ping — same 4 packets, same statistics line. */
+function pingSuccessLines(target: string): CommandOutput[] {
+  return [
+    { kind: 'output', text: '' },
+    { kind: 'output', text: `Pinging ${target} with 32 bytes of data:` },
+    { kind: 'output', text: `Reply from ${target}: bytes=32 time<1ms TTL=64` },
+    { kind: 'output', text: `Reply from ${target}: bytes=32 time<1ms TTL=64` },
+    { kind: 'output', text: `Reply from ${target}: bytes=32 time<1ms TTL=64` },
+    { kind: 'output', text: `Reply from ${target}: bytes=32 time<1ms TTL=64` },
+    { kind: 'output', text: '' },
+    { kind: 'output', text: `Ping statistics for ${target}:` },
+    { kind: 'output', text: '    Packets: Sent = 4, Received = 4, Lost = 0 (0% loss)' },
+  ];
+}
+
+/** Render a failed ping with the trailing `[sim]` annotation. */
+function pingFailureLines(target: string, failedAt: FailPoint): CommandOutput[] {
+  return [
+    { kind: 'output', text: '' },
+    { kind: 'output', text: `Pinging ${target} with 32 bytes of data:` },
+    { kind: 'error', text: 'Request timed out.' },
+    { kind: 'error', text: 'Request timed out.' },
+    { kind: 'error', text: 'Request timed out.' },
+    { kind: 'error', text: 'Request timed out.' },
+    { kind: 'output', text: '' },
+    { kind: 'output', text: `Ping statistics for ${target}:` },
+    { kind: 'error', text: '    Packets: Sent = 4, Received = 0, Lost = 4 (100% loss)' },
+    { kind: 'system', text: `[sim] ${failureSentence(failedAt, target)}` },
+  ];
+}
+
+/** FailReason → English sentence. Mirrors pc.ts `failureDetail` so the two
+ *  ping origins read identically; if you add a FailReason, add a case here AND
+ *  in pc.ts. The first letter is upper-cased so the line reads as a complete
+ *  sentence regardless of which branch produced it. */
+function failureSentence(failedAt: FailPoint, target: string): string {
+  const { reason, direction, deviceId, iface, acl, vlan, trunk, vlanAllow } = failedAt;
+  const place = iface ? `${deviceId} ${iface}` : deviceId;
+  const body = failureBody(reason, place, deviceId, direction, target, acl, vlan, trunk, vlanAllow);
+  return body.charAt(0).toUpperCase() + body.slice(1);
+}
+
+function failureBody(
+  reason: FailReason,
+  place: string,
+  deviceId: string,
+  direction: 'forward' | 'return',
+  target: string,
+  acl: FailPoint['acl'],
+  vlan: FailPoint['vlan'],
+  trunk: FailPoint['trunk'],
+  vlanAllow: FailPoint['vlanAllow'],
+): string {
+  switch (reason) {
+    case 'no-route':
+      return direction === 'forward'
+        ? `${deviceId} has no route to ${target}.`
+        : `${deviceId} has no return route to the source.`;
+    case 'source-no-ip':
+      return 'the source has no IP address configured.';
+    case 'source-nic-down':
+      return 'the source NIC has no link to a neighbor.';
+    case 'no-gateway':
+      return 'no default gateway is set, or the gateway is outside the local subnet.';
+    case 'egress-down':
+      return `${place} is administratively down.`;
+    case 'next-hop-unreachable':
+      return `the next-hop on ${place} is not in that interface's subnet.`;
+    case 'link-peer-down':
+      return `${place}'s link partner is administratively down.`;
+    case 'link-subnet-mismatch':
+      return `the subnets on the two ends of the link at ${place} do not match.`;
+    case 'dest-nic-down':
+      return 'the destination NIC has no link.';
+    case 'dest-unreachable':
+      return 'the destination is unreachable (no responding interface).';
+    case 'routing-loop':
+      return 'static routes form a loop — packets never arrive.';
+    case 'acl-deny':
+      if (!acl) return `${place} denied the packet via an access list.`;
+      return `traffic from ${acl.sourceIp} is denied by ACL ${acl.aclNumber} on ${place} (${acl.aclDirection}).`;
+    case 'vlan-mismatch':
+      if (!vlan) return `${place} blocked the packet at the VLAN boundary.`;
+      return `${vlan.aId} and ${vlan.bId} are on different VLANs (${vlan.aVlan} and ${vlan.bVlan}) — inter-VLAN routing is not configured.`;
+    case 'trunk-not-configured':
+      if (!trunk) return `${place} is not configured as a trunk.`;
+      return `the link between ${trunk.aDevice} ${trunk.aIface} and ${trunk.bDevice} ${trunk.bIface} is not configured as a trunk — VLANs cannot pass between switches.`;
+    case 'vlan-not-allowed':
+      if (!vlanAllow) return `${place} blocked the packet at the trunk boundary.`;
+      return `VLAN ${vlanAllow.vlanId} is not in the allowed VLAN list on ${place}.`;
+  }
+}
+
+/** Resolve the egress interface IP for `target` in `s`'s routing table —
+ *  matches IOS, which uses the egress interface as the ping source. Returns
+ *  null when no usable egress exists; canReach will then fall back to its
+ *  default first-interface pick (and likely diagnose the same no-route). */
+function pingSourceIp(s: Session, target: string): string | null {
+  const route = longestPrefixMatch(routingTable(s), target);
+  if (!route) return null;
+  let egressId: string | null = route.egressIface ?? null;
+  if (egressId === null && route.nextHop) {
+    for (const i of Object.values(s.device.interfaces)) {
+      if (!i.ip || !i.mask) continue;
+      const net = networkAddress(i.ip, i.mask);
+      if (ipInSubnet(route.nextHop, net, i.mask)) {
+        egressId = i.id;
+        break;
+      }
+    }
+  }
+  if (!egressId) return null;
+  if (isSubInterfaceId(egressId)) {
+    return s.device.subInterfaces[egressId]?.ip ?? null;
+  }
+  return s.device.interfaces[egressId]?.ip ?? null;
+}
+
+/** Handle `ping <target>`. In config / config-if modes the grammar steers
+ *  here too so we can emit a tailored redirect rather than a parser error. */
+function ping(
+  s: Session,
+  target: string | undefined,
+  ctx: AdapterContext | undefined,
+): ApplyResult {
+  if (s.mode === 'config' || s.mode === 'config-if') {
+    return {
+      session: s,
+      output: [
+        {
+          kind: 'system',
+          text: "% Ping is available in privileged EXEC mode. Type 'exit' to return.",
+        },
+      ],
+    };
+  }
+  if (!target) return { session: s, output: err('% Incomplete command.') };
+  if (!isValidIpv4(target)) {
+    return { session: s, output: err('% Invalid IP address') };
+  }
+  if (!ctx?.lab) {
+    // Adapter-level tests can drive applyCommand without a LabSession; rather
+    // than crash we surface a clear error so the test sees the right shape.
+    return { session: s, output: err('Ping requires a lab context.') };
+  }
+  const sourceIp = pingSourceIp(s, target);
+  const result = canReach(ctx.lab, s.device.id, target, sourceIp ?? undefined);
+  if (result.ok) {
+    return { session: s, output: pingSuccessLines(target) };
+  }
+  return { session: s, output: pingFailureLines(target, result.failedAt) };
 }
 
 function enterInterface(s: Session, token: string): ApplyResult {

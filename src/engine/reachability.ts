@@ -105,12 +105,16 @@ export function canReach(
   session: LabSession,
   fromDeviceId: string,
   toIp: string,
+  sourceIp?: string,
 ): ReachResult {
   const src = session.devices[fromDeviceId];
   if (!src) {
     return fail('forward', fromDeviceId, null, 'source-no-ip');
   }
-  const srcIp = sourceIpOf(src);
+  // Caller-supplied source IP overrides the default first-interface pick — used
+  // by the router-side `ping` handler so the walk starts from the egress
+  // interface's IP (matches IOS, which uses the egress as the source).
+  const srcIp = sourceIp ?? sourceIpOf(src);
   if (srcIp === null) {
     return fail('forward', fromDeviceId, null, 'source-no-ip');
   }

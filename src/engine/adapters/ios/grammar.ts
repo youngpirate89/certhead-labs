@@ -90,6 +90,10 @@ const privMode: CommandNode = {
     disable: done('Turn off privileged commands'),
     configure: { children: { terminal: done('Configure from the terminal') } },
     exit: done('Exit from the EXEC'),
+    ping: {
+      help: 'Send ICMP echo to a destination',
+      argument: arg('target', done('Ping the destination')),
+    },
     show: showSubtree,
     write: { terminal: true, help: 'Write running config to memory', children: { memory: done('Write to memory') } },
   },
@@ -220,6 +224,15 @@ const configMode: CommandNode = {
       help: 'Set the device hostname',
       argument: arg('name', done('Apply hostname')),
     },
+    // `ping` is parsed here so the dispatcher can emit a tailored redirect
+    // ("ping is available in privileged EXEC mode") instead of the resolver's
+    // generic invalid-input error. Both bare `ping` and `ping <target>`
+    // resolve to keep the redirect firing regardless of arity.
+    ping: {
+      terminal: true,
+      help: 'Not available in configuration mode',
+      argument: arg('target', done('Not available in configuration mode')),
+    },
     ip: ipConfigSubtree,
     'access-list': accessListSubtree,
     router: {
@@ -295,6 +308,13 @@ const configIfMode: CommandNode = {
     interface: {
       help: 'Select another interface to configure',
       argument: arg('iface', done('Switch to interface configuration')),
+    },
+    // Mirrors the config-mode entry: parse here so the dispatcher can emit
+    // the privileged-EXEC redirect rather than letting the resolver fail.
+    ping: {
+      terminal: true,
+      help: 'Not available in interface configuration mode',
+      argument: arg('target', done('Not available in interface configuration mode')),
     },
     ip: {
       children: {

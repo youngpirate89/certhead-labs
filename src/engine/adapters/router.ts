@@ -63,8 +63,8 @@ export const routerAdapter: DeviceAdapter<Session> = {
     );
   },
 
-  applyCommand(session, raw, _ctx, opts?: ApplyOptions) {
-    return iosApply(session, raw, opts);
+  applyCommand(session, raw, ctx, opts?: ApplyOptions) {
+    return iosApply(session, raw, ctx, opts);
   },
 
   prompt(session) {
