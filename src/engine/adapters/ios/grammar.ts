@@ -249,11 +249,17 @@ const configIfMode: CommandNode = {
   },
 };
 
+// config-subif grammar lands in Section 2 with the encapsulation+ip handlers.
+// Stubbed here so the Mode union stays exhaustive for the GRAMMARS record;
+// Section 2 replaces this with a real keyword tree.
+const configSubIfMode: CommandNode = { children: {} };
+
 const GRAMMARS: Record<Mode, CommandNode> = {
   user: userMode,
   priv: privMode,
   config: configMode,
   'config-if': configIfMode,
+  'config-subif': configSubIfMode,
   'config-router': configRouterMode,
 };
 

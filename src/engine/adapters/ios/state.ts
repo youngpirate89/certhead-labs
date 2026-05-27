@@ -8,8 +8,17 @@
  */
 import { connectedRoutes, type Route } from './routing';
 
-/** CLI mode stack levels. */
-export type Mode = 'user' | 'priv' | 'config' | 'config-if' | 'config-router';
+/** CLI mode stack levels. `config-subif` is the subinterface variant of
+ *  `config-if` — entered by `interface gi0/0.10` from `config`, holds the
+ *  active subinterface id, and accepts the same `ip address` / `shutdown`
+ *  commands plus `encapsulation dot1q <vlan>`. */
+export type Mode =
+  | 'user'
+  | 'priv'
+  | 'config'
+  | 'config-if'
+  | 'config-subif'
+  | 'config-router';
 
 /** A single `network <prefix> <wildcard> area <area-id>` statement. */
 export interface OspfNetwork {
@@ -84,11 +93,39 @@ export interface InterfaceState {
   accessGroups: { in: number | null; out: number | null };
 }
 
+/** A dot1Q subinterface — Lab 09 router-on-a-stick. Subinterfaces live ON a
+ *  physical parent (`parentId`) and tag egress traffic with `dot1qVlan`. They
+ *  contribute their own connected route (per dot1qVlan + ip/mask) and inherit
+ *  their parent's physical line state: a subif is operational only when its
+ *  parent physical is protocolUp AND the subif itself is adminUp. The dot1Q
+ *  tag is checked at the cabled switch trunk's allowed-VLAN list (Lab 08
+ *  trunk engine, unchanged). */
+export interface SubInterface {
+  /** Canonical subif id, e.g. 'Gi0/0.10'. */
+  readonly id: string;
+  /** Parent physical interface id, e.g. 'Gi0/0'. */
+  readonly parentId: string;
+  /** dot1Q encapsulation VLAN. Null until `encapsulation dot1q <vlan>` runs;
+   *  a subif with null encapsulation contributes no connected route. */
+  dot1qVlan: number | null;
+  ip: string | null;
+  mask: string | null;
+  adminUp: boolean;
+  /** Line-protocol state: true iff adminUp && parent physical is protocolUp.
+   *  Refreshed by the LabSession protocolUp pass (same one that handles
+   *  physical interfaces) — never set directly by the dispatcher. */
+  protocolUp: boolean;
+}
+
 export interface DeviceState {
   readonly id: string;
   hostname: string;
   readonly platform: string;
   interfaces: Record<string, InterfaceState>;
+  /** Dot1Q subinterfaces keyed by canonical id (`Gi0/0.10`). Empty on a
+   *  freshly-booted router; populated when the learner enters
+   *  `interface gi0/0.10` from config mode. */
+  subInterfaces: Record<string, SubInterface>;
   /** Per-router OSPF state. Process is null until `router ospf <pid>` runs.
    *  Recomputed by the LabSession after any change to networks or interface
    *  admin state. */
@@ -105,6 +142,20 @@ export interface Session {
   mode: Mode;
   /** The interface currently selected in config-if mode. */
   currentInterface: string | null;
+  /** The subinterface currently selected in config-subif mode (canonical id,
+   *  e.g. 'Gi0/0.10'). Null outside config-subif — keeps the dispatcher
+   *  symmetric with `currentInterface`. */
+  activeSubIfId: string | null;
+  /** Monotonic stamp (Date.now()) updated each time the learner runs
+   *  `show ip interface brief` on this router. Verify-style objectives compare
+   *  this against `subIfConfiguredAt[...]` to require the show to run AFTER
+   *  the configure step (mirrors `lastShowInterfacesTrunk` on switches). */
+  lastShowIpIntBrief: number;
+  /** Per-subinterface stamp of when `no shutdown` brought it up (Date.now()).
+   *  Cleared back to undefined on `shutdown`. Verify-style objectives compare
+   *  these against `lastShowIpIntBrief` so a verify run BEFORE the configure
+   *  step naturally fails the check. */
+  subIfConfiguredAt: Record<string, number>;
   device: DeviceState;
   /** Every successfully entered command line, in order, AS-TYPED by the user
    *  (abbreviated, mixed-case, etc.). Used for display and command recall. */
@@ -133,16 +184,45 @@ const FULL_NAMES: Record<string, string> = {
 
 /**
  * Normalise an interface token to a canonical id.
- * Accepts forms like `gi0/0`, `Gig0/1`, `GigabitEthernet0/2`, `fa0/0`.
+ * Accepts forms like `gi0/0`, `Gig0/1`, `GigabitEthernet0/2`, `fa0/0`, and
+ * dot1Q subinterface forms `gi0/0.10`, `GigabitEthernet0/0.20` — the dot suffix
+ * is preserved verbatim on the canonical id.
  * Returns null if the token is not a recognised interface spec.
  */
 export function normaliseInterface(token: string): string | null {
-  const m = /^(gigabitethernet|gig|gi|g|fastethernet|fa|f)(\d+\/\d+(?:\/\d+)?)$/i.exec(token);
+  const m = /^(gigabitethernet|gig|gi|g|fastethernet|fa|f)(\d+\/\d+(?:\/\d+)?)(\.\d+)?$/i.exec(
+    token,
+  );
   if (!m) return null;
   const prefix = m[1].toLowerCase();
   const slot = m[2];
+  const subif = m[3] ?? '';
   const kind = prefix.startsWith('f') ? 'Fa' : 'Gi';
-  return `${kind}${slot}`;
+  return `${kind}${slot}${subif}`;
+}
+
+/** True iff `id` looks like a subinterface canonical id (`Gi0/0.10`). */
+export function isSubInterfaceId(id: string): boolean {
+  return /\.\d+$/.test(id);
+}
+
+/** Monotonic engine sequence — strictly increasing across the process. Used
+ *  to stamp verify-style ordering pairs (e.g. `subIfConfiguredAt` and
+ *  `lastShowIpIntBrief` on the router) so an objective can require "show ran
+ *  AFTER no shutdown" without any chance of a Date.now() ms collision under
+ *  test. Pure function with internal mutable state — the only side effect is
+ *  the counter increment, which is invisible to any consumer that just reads
+ *  the return value. */
+let __engineSeq = 0;
+export function nextEngineSeq(): number {
+  return ++__engineSeq;
+}
+
+/** For a subinterface id (`Gi0/0.10`) returns the parent physical id (`Gi0/0`).
+ *  For a non-subif id, returns the id unchanged. */
+export function parentInterfaceId(id: string): string {
+  const dot = id.indexOf('.');
+  return dot === -1 ? id : id.slice(0, dot);
 }
 
 export function fullInterfaceName(id: string): string {
@@ -197,6 +277,9 @@ export function createSession(device: DeviceState): Session {
     kind: 'router',
     mode: 'user',
     currentInterface: null,
+    activeSubIfId: null,
+    lastShowIpIntBrief: 0,
+    subIfConfiguredAt: {},
     device: cloneDevice(device),
     history: [],
     resolvedHistory: [],
@@ -257,6 +340,9 @@ export function buildDevice(spec: {
     hostname: spec.id,
     platform: spec.platform,
     interfaces,
+    // No subinterfaces on a freshly-booted router — they're created lazily
+    // by `interface gi0/0.<n>` from config mode.
+    subInterfaces: {},
     ospf: { process: null, routerId: null, networks: [], neighbors: new Map() },
     acls: new Map(),
   };
@@ -295,6 +381,8 @@ export function prompt(session: Session): string {
       return `${h}(config)#`;
     case 'config-if':
       return `${h}(config-if)#`;
+    case 'config-subif':
+      return `${h}(config-subif)#`;
     case 'config-router':
       return `${h}(config-router)#`;
   }

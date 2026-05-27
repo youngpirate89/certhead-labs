@@ -70,8 +70,11 @@ export function ipInSubnet(ip: string, prefix: string, mask: string): boolean {
 // ---------- Connected route derivation ----------
 
 /** Connected routes derived from live interface state. An interface produces
- *  one route iff it is admin-up AND has an IP+mask. Order follows interface
- *  iteration order, which is stable for the lab-spec interfaces[] declaration. */
+ *  one route iff it is admin-up AND has an IP+mask. Subinterfaces contribute
+ *  a connected route iff their dot1Q encapsulation is set, they're adminUp,
+ *  and the parent physical is protocolUp — same operational requirement IOS
+ *  enforces. Order follows interface iteration order (physicals first, then
+ *  subinterfaces in lab-spec declaration order); stable for §5 tiebreak. */
 export function connectedRoutes(device: DeviceState): Route[] {
   const out: Route[] = [];
   for (const iface of Object.values(device.interfaces)) {
@@ -80,6 +83,18 @@ export function connectedRoutes(device: DeviceState): Route[] {
       prefix: networkAddress(iface.ip, iface.mask),
       mask: iface.mask,
       egressIface: iface.id,
+      source: 'connected',
+      adminDistance: 0,
+    });
+  }
+  for (const sub of Object.values(device.subInterfaces)) {
+    if (sub.dot1qVlan === null) continue;
+    if (!sub.adminUp || !sub.protocolUp) continue;
+    if (!sub.ip || !sub.mask) continue;
+    out.push({
+      prefix: networkAddress(sub.ip, sub.mask),
+      mask: sub.mask,
+      egressIface: sub.id,
       source: 'connected',
       adminDistance: 0,
     });
