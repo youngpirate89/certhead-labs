@@ -47,6 +47,18 @@ export const lab09IntervlanRouting: Lab = {
   scenario:
     "The Sales team (VLAN 10, 192.168.10.0/24) and the Engineering team (VLAN 20, 192.168.20.0/24) sit on the same switch SW1 but on different VLANs. The two teams need to talk to each other. SW1 is already trunking to R1 on Gi0/0 (allowed VLANs 1,10,20) and the access ports are assigned correctly — but R1 has no IP configuration yet.\n\nYour task: configure router-on-a-stick on R1. Bring up Gi0/0 (no IP — the physical is the trunk carrier), create two subinterfaces Gi0/0.10 and Gi0/0.20, set dot1Q encapsulation matching each VLAN, assign the gateway IPs (192.168.10.1 and 192.168.20.1), `no shutdown` both subifs, verify with `show ip interface brief`, then prove the cross-VLAN path with a ping from PC-A to PC-B.",
   topology: {
+    // T-shape layout (per-device `position` overrides the renderer's default
+    // linear left-to-right row). SW1 is the L2 hub at center; R1 stacks above
+    // it (the trunk), with PC-A and PC-B fanning out below. This is the only
+    // arrangement that keeps SW1's three spokes from crossing through another
+    // node — see TopologyPanel's `computePositions` for the convention.
+    //
+    //          R1   ← (320, 0)
+    //          |
+    //         SW1   ← (320, 240) — bottom-center port to R1 (top)
+    //        /   \
+    //    PC-A    PC-B   ← y = 480
+    //   (0,480)  (640,480)
     devices: [
       {
         id: 'PC-A',
@@ -54,6 +66,7 @@ export const lab09IntervlanRouting: Lab = {
         platform: 'Workstation',
         interfaces: ['Eth0'],
         pc: { ip: '192.168.10.10', mask: '255.255.255.0', gateway: '192.168.10.1' },
+        position: { x: 0, y: 480 },
       },
       // SW1: Gi0/0 = trunk to R1, Gi0/1 = access VLAN 10 (PC-A), Gi0/2 = access
       // VLAN 20 (PC-B). Pre-configured by setup; the lesson is on the router.
@@ -62,15 +75,18 @@ export const lab09IntervlanRouting: Lab = {
         kind: 'switch',
         platform: 'C2960',
         interfaces: ['Gi0/0', 'Gi0/1', 'Gi0/2'],
+        position: { x: 320, y: 240 },
       },
-      // R1: bare. Gi0/0 is the trunk port the learner will configure subifs on;
-      // Gi0/1 is unused (kept so the device matches a real ISR with multiple
-      // ports — out-of-scope commands targeting Gi0/1 still resolve cleanly).
+      // R1: bare. Only Gi0/0 (the trunk port the learner configures subifs on)
+      // is declared — other labs follow the same convention of declaring only
+      // cabled interfaces so the topology renderer doesn't draw floating port
+      // dots for unconnected ports.
       {
         id: 'R1',
         kind: 'router',
         platform: 'ISR4321',
-        interfaces: ['Gi0/0', 'Gi0/1'],
+        interfaces: ['Gi0/0'],
+        position: { x: 320, y: 0 },
       },
       {
         id: 'PC-B',
@@ -78,6 +94,7 @@ export const lab09IntervlanRouting: Lab = {
         platform: 'Workstation',
         interfaces: ['Eth0'],
         pc: { ip: '192.168.20.10', mask: '255.255.255.0', gateway: '192.168.20.1' },
+        position: { x: 640, y: 480 },
       },
     ],
     links: [
@@ -186,7 +203,7 @@ export const lab09IntervlanRouting: Lab = {
     {
       afterSeconds: 420,
       text:
-        "If PC-A can't ping PC-B, check that both Gi0/0.10 and Gi0/0.20 are `no shutdown` — subinterfaces default to shutdown when created.",
+        "If PC-A cannot ping PC-B, check that both Gi0/0.10 and Gi0/0.20 have 'no shutdown' applied — subinterfaces default to shutdown when created.",
     },
   ],
 };
