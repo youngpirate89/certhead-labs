@@ -37,10 +37,12 @@ import type {
   DeviceTopologyView,
 } from './types';
 import {
+  isSubInterfaceId,
   isValidIpv4,
   isValidMask,
   routingTable,
   type Session as RouterSession,
+  type SubInterface,
   type InterfaceState,
 } from './ios/state';
 import {
@@ -49,6 +51,7 @@ import {
   networkAddress,
 } from './ios/routing';
 import { evaluateAcl } from './ios/acl';
+import { trunkAllowsVlan } from './ios/switch-state';
 import {
   canReach,
   type FailPoint,
@@ -619,18 +622,51 @@ function discoverHops(
   }
   const peerEnd = otherEndOf(link, pc.id, pc.nic);
   const peer = session.devices[peerEnd.deviceId];
-  if (!peer || peer.kind !== 'router') {
-    return { hops: [], failedAt: fp('forward', pc.id, null, 'source-nic-down') };
-  }
-  const peerIface = peer.device.interfaces[peerEnd.iface];
-  if (!peerIface || !peerIface.adminUp || !peerIface.ip) {
+  if (!peer) {
     return { hops: [], failedAt: fp('forward', pc.id, null, 'source-nic-down') };
   }
 
-  const hops: Hop[] = [{ hopIp: peerIface.ip, isDestination: false }];
+  // First router hop. For PC cabled to a router, the gateway IS the cabled
+  // interface; for PC cabled to a switch (Lab 09), walk the switch L2
+  // broadcast domain on the PC's access VLAN to find the router subif that
+  // owns the gateway IP. Both cases collapse to "first hop = a router; first
+  // hop IP = the gateway IP that's printed at row 1 of the trace".
+  let firstRouter: RouterSession;
+  let firstIngressIface: string;
+  let firstHopIp: string;
+  if (peer.kind === 'router') {
+    const peerIface = peer.device.interfaces[peerEnd.iface];
+    if (!peerIface || !peerIface.adminUp || !peerIface.ip) {
+      return { hops: [], failedAt: fp('forward', pc.id, null, 'source-nic-down') };
+    }
+    firstRouter = peer;
+    firstIngressIface = peerEnd.iface;
+    firstHopIp = peerIface.ip;
+  } else if (peer.kind === 'switch') {
+    const swPort = peer.device.switchports[peerEnd.iface];
+    if (!swPort || !swPort.adminUp || swPort.mode !== 'access') {
+      return { hops: [], failedAt: fp('forward', pc.id, null, 'no-gateway') };
+    }
+    const gw = findRouterGatewayThroughSwitch(
+      session,
+      peer.device.id,
+      swPort.accessVlan,
+      pc.gateway,
+    );
+    if (!gw) {
+      return { hops: [], failedAt: fp('forward', pc.id, null, 'no-gateway') };
+    }
+    firstRouter = gw.router;
+    firstIngressIface = gw.routerParentIface;
+    firstHopIp = pc.gateway;
+  } else {
+    return { hops: [], failedAt: fp('forward', pc.id, null, 'source-nic-down') };
+  }
 
-  let current: RouterSession = peer;
-  let ingressIfaceId: string | null = peerEnd.iface;
+  const hops: Hop[] = [{ hopIp: firstHopIp, isDestination: false }];
+
+  let current: RouterSession = firstRouter;
+  let ingressIfaceId: string | null = firstIngressIface;
   const sourceIp = pc.ip;
   const limit = Object.keys(session.devices).length + 2;
 
@@ -661,14 +697,38 @@ function discoverHops(
       return { hops, failedAt: fp('forward', currentId, null, 'next-hop-unreachable') };
     }
 
-    const egressIface = current.device.interfaces[egressIfaceId];
-    // Egress admin-down BEFORE everything else — keeps the egress-down
-    // FailReason canonical (matches canReach §4). If we crossed the link
-    // anyway, the per-hop canReach below would diagnose the broken next-
-    // hop reachability as no-route instead, and the trace's final
-    // sentence would drift from the ping's.
-    if (!egressIface || !egressIface.adminUp) {
-      return { hops, failedAt: fp('forward', currentId, egressIfaceId, 'egress-down') };
+    // Subif egress mirrors canReach: validate subif + parent, then use the
+    // parent for the cable lookup. Connected dst on the subif's subnet is
+    // handled below as a destination delivery — no extra physical hop is
+    // printed in the trace, the next hop IS the destination.
+    let egressSubif: SubInterface | null = null;
+    let egressIface: InterfaceState | undefined;
+    if (isSubInterfaceId(egressIfaceId)) {
+      egressSubif = current.device.subInterfaces[egressIfaceId] ?? null;
+      if (!egressSubif) {
+        return { hops, failedAt: fp('forward', currentId, egressIfaceId, 'no-route') };
+      }
+      if (egressSubif.dot1qVlan === null) {
+        return { hops, failedAt: fp('forward', currentId, egressIfaceId, 'no-route') };
+      }
+      if (!egressSubif.adminUp) {
+        return { hops, failedAt: fp('forward', currentId, egressIfaceId, 'egress-down') };
+      }
+      const parent = current.device.interfaces[egressSubif.parentId];
+      if (!parent || !parent.adminUp) {
+        return { hops, failedAt: fp('forward', currentId, egressSubif.parentId, 'egress-down') };
+      }
+      egressIface = parent;
+    } else {
+      egressIface = current.device.interfaces[egressIfaceId];
+      // Egress admin-down BEFORE everything else — keeps the egress-down
+      // FailReason canonical (matches canReach §4). If we crossed the link
+      // anyway, the per-hop canReach below would diagnose the broken next-
+      // hop reachability as no-route instead, and the trace's final
+      // sentence would drift from the ping's.
+      if (!egressIface || !egressIface.adminUp) {
+        return { hops, failedAt: fp('forward', currentId, egressIfaceId, 'egress-down') };
+      }
     }
 
     // Validate the next-hop sits inside the egress subnet.
@@ -687,6 +747,24 @@ function discoverHops(
     }
 
     // Connected route AND dst on this subnet ⇒ destination is on this link.
+    // For subif egress the subnet is on the subif (parent has no IP); validate
+    // the trunk + walk to the access port, then push dst as the final hop.
+    if (egressSubif) {
+      const subif = egressSubif;
+      if (subif.ip && subif.mask) {
+        const ourNet = networkAddress(subif.ip, subif.mask);
+        if (ipInSubnet(dstIp, ourNet, subif.mask)) {
+          const trunkResult = subifEgressToDelivery(session, current, subif, egressIface, dstIp);
+          if (!trunkResult.ok) {
+            return { hops, failedAt: trunkResult.failedAt };
+          }
+          hops.push({ hopIp: dstIp, isDestination: true });
+          return { hops };
+        }
+      }
+      // Multi-router-on-a-stick (dst not on this subif's subnet) — not modeled.
+      return { hops, failedAt: fp('forward', currentId, egressIfaceId, 'no-route') };
+    }
     if (route.source === 'connected' && egressIface.ip && egressIface.mask) {
       const ourNet = networkAddress(egressIface.ip, egressIface.mask);
       if (ipInSubnet(dstIp, ourNet, egressIface.mask)) {
@@ -751,6 +829,154 @@ function fp(
   return { direction, deviceId, iface, reason };
 }
 
+/** Mirror of reachability.findGatewayThroughSwitch — keeps the tracert PC→
+ *  router lookup in lockstep with the ping path. Returns the router whose
+ *  dot1Q subif owns gatewayIp on the matching access VLAN, reached over
+ *  switch trunks from `srcSwitchId`. */
+function findRouterGatewayThroughSwitch(
+  session: LabSession,
+  srcSwitchId: string,
+  vlan: number,
+  gatewayIp: string,
+): { router: RouterSession; routerParentIface: string } | null {
+  const visited = new Set<string>([srcSwitchId]);
+  const queue: string[] = [srcSwitchId];
+  while (queue.length > 0) {
+    const swId = queue.shift()!;
+    const sw = session.devices[swId];
+    if (!sw || sw.kind !== 'switch') continue;
+    for (const link of session.links) {
+      let myIface: string;
+      let peerEnd: { deviceId: string; iface: string };
+      if (link.a.deviceId === swId) {
+        myIface = link.a.iface;
+        peerEnd = { deviceId: link.b.deviceId, iface: link.b.iface };
+      } else if (link.b.deviceId === swId) {
+        myIface = link.b.iface;
+        peerEnd = { deviceId: link.a.deviceId, iface: link.a.iface };
+      } else continue;
+
+      const myPort = sw.device.switchports[myIface];
+      if (!myPort || !myPort.adminUp) continue;
+      const peer = session.devices[peerEnd.deviceId];
+      if (!peer) continue;
+
+      if (peer.kind === 'router') {
+        if (myPort.mode !== 'trunk') continue;
+        if (!trunkAllowsVlan(myPort.trunkAllowedVlans, vlan)) continue;
+        const parent = peer.device.interfaces[peerEnd.iface];
+        if (!parent || !parent.adminUp) continue;
+        for (const sub of Object.values(peer.device.subInterfaces)) {
+          if (sub.parentId !== peerEnd.iface) continue;
+          if (sub.dot1qVlan !== vlan) continue;
+          if (sub.ip !== gatewayIp) continue;
+          if (!sub.adminUp || !sub.protocolUp) continue;
+          return { router: peer, routerParentIface: peerEnd.iface };
+        }
+        continue;
+      }
+      if (peer.kind === 'switch') {
+        if (visited.has(peer.device.id)) continue;
+        if (myPort.mode !== 'trunk') continue;
+        if (!trunkAllowsVlan(myPort.trunkAllowedVlans, vlan)) continue;
+        const peerPort = peer.device.switchports[peerEnd.iface];
+        if (!peerPort || peerPort.mode !== 'trunk') continue;
+        if (!trunkAllowsVlan(peerPort.trunkAllowedVlans, vlan)) continue;
+        visited.add(peer.device.id);
+        queue.push(peer.device.id);
+      }
+    }
+  }
+  return null;
+}
+
+/** Subif egress at the last hop: validate the cabled switch trunk allows the
+ *  dot1Q tag and the destination's access port is on the same VLAN. Returns
+ *  ok on a clean trunk path, fail with a meaningful FailPoint otherwise.
+ *  Mirrors reachability.deliverViaSubifTrunk — keeping the tracert summary
+ *  consistent with the ping summary (LAB_AUTHORING §4). */
+function subifEgressToDelivery(
+  session: LabSession,
+  router: RouterSession,
+  subif: SubInterface,
+  parent: InterfaceState,
+  dstIp: string,
+):
+  | { ok: true }
+  | { ok: false; failedAt: FailPoint } {
+  const link = findLink(session, router.device.id, parent.id);
+  if (!link) {
+    return { ok: false, failedAt: fp('forward', router.device.id, parent.id, 'link-peer-down') };
+  }
+  const peerEnd = otherEndOf(link, router.device.id, parent.id);
+  const peer = session.devices[peerEnd.deviceId];
+  if (!peer) {
+    return { ok: false, failedAt: fp('forward', router.device.id, parent.id, 'link-peer-down') };
+  }
+  if (peer.kind !== 'switch') {
+    return { ok: false, failedAt: fp('forward', router.device.id, parent.id, 'dest-unreachable') };
+  }
+  const trunkPort = peer.device.switchports[peerEnd.iface];
+  if (!trunkPort || !trunkPort.adminUp) {
+    return { ok: false, failedAt: fp('forward', router.device.id, parent.id, 'link-peer-down') };
+  }
+  const tag = subif.dot1qVlan!;
+  if (trunkPort.mode !== 'trunk') {
+    return {
+      ok: false,
+      failedAt: {
+        direction: 'forward',
+        deviceId: peer.device.id,
+        iface: peerEnd.iface,
+        reason: 'trunk-not-configured',
+        trunk: {
+          aDevice: router.device.id,
+          aIface: parent.id,
+          bDevice: peer.device.id,
+          bIface: peerEnd.iface,
+        },
+      },
+    };
+  }
+  if (!trunkAllowsVlan(trunkPort.trunkAllowedVlans, tag)) {
+    return {
+      ok: false,
+      failedAt: {
+        direction: 'forward',
+        deviceId: peer.device.id,
+        iface: peerEnd.iface,
+        reason: 'vlan-not-allowed',
+        vlanAllow: { vlanId: tag },
+      },
+    };
+  }
+  // Destination must be a PC with an access port on the same VLAN reachable
+  // from this switch. We don't render the switch hop in the trace — that's
+  // L2 transit, not an L3 hop — but we still validate the path.
+  const dstOwner = findOwnerOfIp(session, dstIp);
+  if (!dstOwner || dstOwner.kind !== 'pc') {
+    return { ok: false, failedAt: fp('forward', peer.device.id, null, 'dest-unreachable') };
+  }
+  return { ok: true };
+}
+
+function findOwnerOfIp(session: LabSession, ip: string): DeviceSession | null {
+  for (const s of Object.values(session.devices)) {
+    if (s.kind === 'pc') {
+      if (s.ip === ip) return s;
+      continue;
+    }
+    if (s.kind === 'switch') continue;
+    for (const i of Object.values(s.device.interfaces)) {
+      if (i.ip === ip) return s;
+    }
+    for (const sub of Object.values(s.device.subInterfaces)) {
+      if (sub.ip === ip) return s;
+    }
+  }
+  return null;
+}
+
 /** Match canReach's ACL hook (reachability.checkInterfaceAcl) — tracert MUST
  *  surface the same acl-deny FailPoint canReach does so the `[sim]` trailer
  *  reads the same sentence as the ping. Pure: returns the FailPoint on deny,
@@ -804,7 +1030,8 @@ function findEgressForNextHop(router: RouterSession, nextHop: string): string | 
 function peerOwnsDst(peer: DeviceSession, dstIp: string): boolean {
   if (peer.kind === 'pc') return peer.ip === dstIp;
   if (peer.kind === 'switch') return false;
-  return Object.values(peer.device.interfaces).some((i) => i.ip === dstIp);
+  if (Object.values(peer.device.interfaces).some((i) => i.ip === dstIp)) return true;
+  return Object.values(peer.device.subInterfaces).some((sub) => sub.ip === dstIp);
 }
 
 // ---------------------------------------------------------------------------

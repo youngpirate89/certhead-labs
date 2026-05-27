@@ -14,7 +14,12 @@
  * fold reasons together — each value carries its diagnostic value.
  */
 import type { LabSession, DeviceSession } from './lab-session';
-import type { InterfaceState, Session as RouterSession } from './adapters/ios/state';
+import type {
+  InterfaceState,
+  Session as RouterSession,
+  SubInterface,
+} from './adapters/ios/state';
+import { isSubInterfaceId } from './adapters/ios/state';
 import type { PcSession } from './adapters/pc';
 import type { SwitchSession } from './adapters/ios/switch-state';
 import { trunkAllowsVlan } from './adapters/ios/switch-state';
@@ -176,9 +181,36 @@ function walk(
       return fail(direction, currentId, null, 'next-hop-unreachable');
     }
 
-    const egressIface = current.device.interfaces[egressIfaceId];
-    if (!egressIface || !egressIface.adminUp) {
-      return fail(direction, currentId, egressIfaceId, 'egress-down');
+    // Subinterface egress: the cable lives on the parent physical. Validate
+    // subif state (admin/proto/encap) and parent admin state independently —
+    // a clear failure point matters for diagnosis (work order §3.6). After
+    // these checks we use the PARENT for link traversal; the dot1Q tag goes
+    // out with the frame and is checked at the switch trunk.
+    let egressSubif: SubInterface | null = null;
+    let egressIface: InterfaceState | undefined;
+    if (isSubInterfaceId(egressIfaceId)) {
+      egressSubif = current.device.subInterfaces[egressIfaceId] ?? null;
+      if (!egressSubif) {
+        return fail(direction, currentId, egressIfaceId, 'no-route');
+      }
+      if (egressSubif.dot1qVlan === null) {
+        // No encapsulation → no connected route in the first place; treat as
+        // no-route so the diagnosis points at "R1 has no route to X".
+        return fail(direction, currentId, egressIfaceId, 'no-route');
+      }
+      if (!egressSubif.adminUp) {
+        return fail(direction, currentId, egressIfaceId, 'egress-down');
+      }
+      const parent = current.device.interfaces[egressSubif.parentId];
+      if (!parent || !parent.adminUp) {
+        return fail(direction, currentId, egressSubif.parentId, 'egress-down');
+      }
+      egressIface = parent;
+    } else {
+      egressIface = current.device.interfaces[egressIfaceId];
+      if (!egressIface || !egressIface.adminUp) {
+        return fail(direction, currentId, egressIfaceId, 'egress-down');
+      }
     }
 
     // For a static route via next-hop, verify the next-hop sits in the
@@ -198,9 +230,22 @@ function walk(
       if (denied) return denied;
     }
 
-    // Connected route AND dst lives on this directly-attached subnet —
-    // skip the link traversal and hand off to the delivery check, which
-    // looks up the device owning dstIp regardless of physical cabling.
+    // Connected route AND dst on this directly-attached subnet — hand off to
+    // delivery. Subif egress takes the trunk-aware path: validate the switch
+    // trunk allows the dot1Q tag and the destination's access port sits on
+    // the same VLAN. Physical egress takes the legacy fast path.
+    if (egressSubif) {
+      const subnet = egressSubif.ip && egressSubif.mask
+        ? { net: networkAddress(egressSubif.ip, egressSubif.mask), mask: egressSubif.mask }
+        : null;
+      if (subnet && ipInSubnet(dstIp, subnet.net, subnet.mask)) {
+        return deliverViaSubifTrunk(session, current, egressSubif, egressIface, dstIp, direction);
+      }
+      // dst not on this subif's subnet — multi-router-on-a-stick is out of
+      // scope; fail clearly rather than silently traversing the trunk.
+      return fail(direction, currentId, egressIfaceId, 'no-route');
+    }
+
     if (route.source === 'connected' && egressIface.ip && egressIface.mask) {
       const ourNet = networkAddress(egressIface.ip, egressIface.mask);
       if (ipInSubnet(dstIp, ourNet, egressIface.mask)) {
@@ -298,10 +343,29 @@ function startFromPc(
     return fwd(fail(direction, pc.id, null, 'source-nic-down'));
   }
 
-  // PC cabled directly to a switch can only reach off-subnet destinations if
-  // the switch routes (it doesn't, in Session 1) — no router peer means no
-  // gateway can be reached. The same-subnet delivery branch above is the
-  // only valid L2 path through a switch this session.
+  // PC cabled to a switch: Lab 09 router-on-a-stick. The gateway lives on a
+  // router subinterface reached through the switch's trunk(s) on the PC's
+  // access VLAN. Walk the switch L2 broadcast domain on that VLAN looking
+  // for a router whose dot1Q subif (parent = the cabled router iface)
+  // carries the PC's access VLAN AND owns the gateway IP. On success the
+  // router becomes firstHop; ingressIface is the router's PARENT physical
+  // (the cable lands on the physical, the subif is virtual).
+  if (peer.kind === 'switch') {
+    const swPort = peer.device.switchports[peerEnd.iface];
+    if (!swPort || !swPort.adminUp) {
+      return fwd(fail(direction, pc.id, null, 'source-nic-down'));
+    }
+    // The PC sits on an access port — `accessVlan` is the L2 broadcast domain.
+    // (Trunk-mode PC-facing ports are non-standard and out of scope.)
+    if (swPort.mode !== 'access') {
+      return fwd(fail(direction, pc.id, null, 'no-gateway'));
+    }
+    const vlan = swPort.accessVlan;
+    const gw = findGatewayThroughSwitch(session, peer.device.id, vlan, pc.gateway);
+    if (!gw) return fwd(fail(direction, pc.id, null, 'no-gateway'));
+    return { kind: 'forward', firstHop: gw.router, ingressIface: gw.routerParentIface };
+  }
+  // Other unexpected peer kinds — should never appear in a valid topology.
   if (peer.kind !== 'router') {
     return fwd(fail(direction, pc.id, null, 'no-gateway'));
   }
@@ -310,6 +374,196 @@ function startFromPc(
     return fwd(fail(direction, pc.id, null, 'source-nic-down'));
   }
   return { kind: 'forward', firstHop: peer, ingressIface: peerEnd.iface };
+}
+
+/** Walk the switch L2 broadcast domain on `vlan` looking for a router whose
+ *  dot1Q subif (with `dot1qVlan === vlan` AND `ip === gatewayIp`) sits on the
+ *  parent physical at the switch-router link. Returns the router + its parent
+ *  physical iface (the cable's landing point) on the first match, null
+ *  otherwise. BFS through switch-trunk hops keeps the multi-switch case
+ *  symmetric with Lab 08's walkSwitchToSwitch. For Lab 09 (single switch)
+ *  this collapses to one iteration. */
+function findGatewayThroughSwitch(
+  session: LabSession,
+  srcSwitchId: string,
+  vlan: number,
+  gatewayIp: string,
+): { router: RouterSession; routerParentIface: string } | null {
+  const visited = new Set<string>([srcSwitchId]);
+  const queue: string[] = [srcSwitchId];
+  while (queue.length > 0) {
+    const swId = queue.shift()!;
+    const sw = session.devices[swId];
+    if (!sw || sw.kind !== 'switch') continue;
+    for (const link of session.links) {
+      let myIface: string;
+      let peerEnd: { deviceId: string; iface: string };
+      if (link.a.deviceId === swId) {
+        myIface = link.a.iface;
+        peerEnd = { deviceId: link.b.deviceId, iface: link.b.iface };
+      } else if (link.b.deviceId === swId) {
+        myIface = link.b.iface;
+        peerEnd = { deviceId: link.a.deviceId, iface: link.a.iface };
+      } else continue;
+
+      const myPort = sw.device.switchports[myIface];
+      if (!myPort || !myPort.adminUp) continue;
+      const peer = session.devices[peerEnd.deviceId];
+      if (!peer) continue;
+
+      if (peer.kind === 'router') {
+        // Router hop: requires a properly-configured trunk on the switch side
+        // AND a subif on the router's cabled parent with the right tag + IP.
+        if (myPort.mode !== 'trunk') continue;
+        if (!trunkAllowsVlan(myPort.trunkAllowedVlans, vlan)) continue;
+        const parent = peer.device.interfaces[peerEnd.iface];
+        if (!parent || !parent.adminUp) continue;
+        for (const sub of Object.values(peer.device.subInterfaces)) {
+          if (sub.parentId !== peerEnd.iface) continue;
+          if (sub.dot1qVlan !== vlan) continue;
+          if (sub.ip !== gatewayIp) continue;
+          if (!sub.adminUp || !sub.protocolUp) continue;
+          return { router: peer, routerParentIface: peerEnd.iface };
+        }
+        continue;
+      }
+      if (peer.kind === 'switch') {
+        // Switch-to-switch trunk hop — both ends must trunk and allow VLAN.
+        if (visited.has(peer.device.id)) continue;
+        if (myPort.mode !== 'trunk') continue;
+        if (!trunkAllowsVlan(myPort.trunkAllowedVlans, vlan)) continue;
+        const peerPort = peer.device.switchports[peerEnd.iface];
+        if (!peerPort || peerPort.mode !== 'trunk') continue;
+        if (!trunkAllowsVlan(peerPort.trunkAllowedVlans, vlan)) continue;
+        visited.add(peer.device.id);
+        queue.push(peer.device.id);
+      }
+    }
+  }
+  return null;
+}
+
+/** Subif egress with dst on the connected subnet: validate the cabled
+ *  switch trunk allows the dot1Q tag, walk the L2 broadcast domain for that
+ *  VLAN to find the destination access port, then deliver. The dst lookup
+ *  reuses deliveryCheck so PC nicUp / router admin-state checks stay one
+ *  function. Symmetric with the forward-from-PC path through a switch. */
+function deliverViaSubifTrunk(
+  session: LabSession,
+  router: RouterSession,
+  subif: SubInterface,
+  parent: InterfaceState,
+  dstIp: string,
+  direction: Direction,
+): ReachResult {
+  const link = findLink(session, router.device.id, parent.id);
+  if (!link) {
+    return fail(direction, router.device.id, parent.id, 'link-peer-down');
+  }
+  const peerEnd = otherEndOf(link, router.device.id, parent.id);
+  const peer = session.devices[peerEnd.deviceId];
+  if (!peer) {
+    return fail(direction, router.device.id, parent.id, 'link-peer-down');
+  }
+  // Subif egress assumes the parent cables to a switch — the routed-VLAN
+  // hand-off only makes sense at an L2 boundary. Other peer kinds are an
+  // unsupported topology; fail clearly.
+  if (peer.kind !== 'switch') {
+    return fail(direction, router.device.id, parent.id, 'dest-unreachable');
+  }
+  const trunkPort = peer.device.switchports[peerEnd.iface];
+  if (!trunkPort || !trunkPort.adminUp) {
+    return fail(direction, router.device.id, parent.id, 'link-peer-down');
+  }
+  const tag = subif.dot1qVlan!;
+  if (trunkPort.mode !== 'trunk') {
+    return {
+      ok: false,
+      failedAt: {
+        direction,
+        deviceId: peer.device.id,
+        iface: peerEnd.iface,
+        reason: 'trunk-not-configured',
+        trunk: {
+          aDevice: router.device.id,
+          aIface: parent.id,
+          bDevice: peer.device.id,
+          bIface: peerEnd.iface,
+        },
+      },
+    };
+  }
+  if (!trunkAllowsVlan(trunkPort.trunkAllowedVlans, tag)) {
+    return {
+      ok: false,
+      failedAt: {
+        direction,
+        deviceId: peer.device.id,
+        iface: peerEnd.iface,
+        reason: 'vlan-not-allowed',
+        vlanAllow: { vlanId: tag },
+      },
+    };
+  }
+  // Confirm the destination PC's access port sits on the same VLAN — walk
+  // through trunks if the destination is on a different switch in the L2
+  // graph. For Lab 09 (one switch) this collapses to a same-switch check.
+  const reachableAccess = findAccessPortReachableForIp(session, peer, tag, dstIp);
+  if (!reachableAccess.ok) return reachableAccess;
+  return deliveryCheck(session, dstIp, direction);
+}
+
+/** Confirm dstIp's owner (a PC) has an access port on `vlan` reachable from
+ *  `startSwitch` over trunks. Failure surfaces a meaningful reason — wrong
+ *  VLAN, trunk break in the middle, or destination not on this L2 domain. */
+function findAccessPortReachableForIp(
+  session: LabSession,
+  startSwitch: SwitchSession,
+  vlan: number,
+  dstIp: string,
+): ReachResult {
+  const dstOwner = deviceOwningIp(session, dstIp);
+  if (!dstOwner) {
+    return fail('forward', startSwitch.device.id, null, 'dest-unreachable');
+  }
+  // Dst on a router subif (multi-router-on-a-stick) — not modeled; the
+  // single-router Lab 09 keeps dst as a PC. Fail clearly.
+  if (dstOwner.kind !== 'pc') {
+    return fail('forward', startSwitch.device.id, null, 'dest-unreachable');
+  }
+  const dstEdge = pcSwitchEdge(session, dstOwner.id, dstOwner.nic);
+  if (!dstEdge) {
+    return fail('forward', dstOwner.id, null, 'dest-nic-down');
+  }
+  if (dstEdge.vlan !== vlan) {
+    // The destination PC is on a different VLAN — the dot1Q tag from the
+    // router subif wouldn't be accepted at the access port.
+    return {
+      ok: false,
+      failedAt: {
+        direction: 'forward',
+        deviceId: dstEdge.switchId,
+        iface: null,
+        reason: 'vlan-mismatch',
+        vlan: {
+          aId: '',
+          aVlan: vlan,
+          bId: dstOwner.id,
+          bVlan: dstEdge.vlan,
+        },
+      },
+    };
+  }
+  if (dstEdge.switchId === startSwitch.device.id) return { ok: true };
+  // Multi-switch case — reuse Lab 08's trunk walker. Direction is best-effort
+  // 'forward' here; the caller passed the real direction via deliveryCheck.
+  return walkSwitchToSwitch(
+    session,
+    startSwitch.device.id,
+    dstEdge.switchId,
+    vlan,
+    'forward',
+  );
 }
 
 /** Final-hop check: confirm dstIp is owned by a reachable up endpoint. */
@@ -329,12 +583,28 @@ function deliveryCheck(
     // return one, but the type system needs the exhaustive branch.
     return fail(direction, owner.device.id, null, 'dest-unreachable');
   }
-  // Router — confirm the interface holding dstIp is admin-up.
+  // Router — confirm the interface holding dstIp is admin-up. Subifs count
+  // as long as both the subif AND its parent are admin-up (the parent owns
+  // the cable; without it the dot1Q frame never arrives at the subif).
   const iface = Object.values(owner.device.interfaces).find((i) => i.ip === dstIp);
-  if (!iface || !iface.adminUp) {
-    return fail(direction, owner.device.id, iface?.id ?? null, 'dest-unreachable');
+  if (iface) {
+    if (!iface.adminUp) {
+      return fail(direction, owner.device.id, iface.id, 'dest-unreachable');
+    }
+    return { ok: true };
   }
-  return { ok: true };
+  const sub = Object.values(owner.device.subInterfaces).find((s) => s.ip === dstIp);
+  if (sub) {
+    if (!sub.adminUp) {
+      return fail(direction, owner.device.id, sub.id, 'dest-unreachable');
+    }
+    const parent = owner.device.interfaces[sub.parentId];
+    if (!parent || !parent.adminUp) {
+      return fail(direction, owner.device.id, sub.parentId, 'dest-unreachable');
+    }
+    return { ok: true };
+  }
+  return fail(direction, owner.device.id, null, 'dest-unreachable');
 }
 
 // ---------- Helpers ----------
@@ -402,6 +672,9 @@ function sourceIpOf(s: DeviceSession): string | null {
   for (const i of Object.values(s.device.interfaces)) {
     if (i.adminUp && i.ip) return i.ip;
   }
+  for (const sub of Object.values(s.device.subInterfaces)) {
+    if (sub.adminUp && sub.ip) return sub.ip;
+  }
   return null;
 }
 
@@ -415,6 +688,9 @@ function deviceOwningIp(session: LabSession, ip: string): DeviceSession | null {
     for (const i of Object.values(s.device.interfaces)) {
       if (i.ip === ip) return s;
     }
+    for (const sub of Object.values(s.device.subInterfaces)) {
+      if (sub.ip === ip) return s;
+    }
   }
   return null;
 }
@@ -422,7 +698,8 @@ function deviceOwningIp(session: LabSession, ip: string): DeviceSession | null {
 function peerOwnsDst(peer: DeviceSession, dstIp: string): boolean {
   if (peer.kind === 'pc') return peer.ip === dstIp;
   if (peer.kind === 'switch') return false;
-  return Object.values(peer.device.interfaces).some((i) => i.ip === dstIp);
+  if (Object.values(peer.device.interfaces).some((i) => i.ip === dstIp)) return true;
+  return Object.values(peer.device.subInterfaces).some((sub) => sub.ip === dstIp);
 }
 
 function findLink(session: LabSession, deviceId: string, iface: string): Link | null {
