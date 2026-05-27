@@ -9,9 +9,9 @@ function deviceR1(): DeviceTopologyView {
     hostname: 'R1',
     platform: 'ISR4321',
     interfaces: [
-      { id: 'Gi0/0', name: 'GigabitEthernet0/0', status: 'up', ip: '192.168.1.1', mask: '255.255.255.0' },
-      { id: 'Gi0/1', name: 'GigabitEthernet0/1', status: 'no-ip', ip: null, mask: null },
-      { id: 'Gi0/2', name: 'GigabitEthernet0/2', status: 'admin-down', ip: null, mask: null },
+      { id: 'Gi0/0', name: 'GigabitEthernet0/0', status: 'up', ip: '192.168.1.1', mask: '255.255.255.0', adminUp: true, protocolUp: true },
+      { id: 'Gi0/1', name: 'GigabitEthernet0/1', status: 'no-ip', ip: null, mask: null, adminUp: true, protocolUp: true },
+      { id: 'Gi0/2', name: 'GigabitEthernet0/2', status: 'admin-down', ip: null, mask: null, adminUp: false, protocolUp: false },
     ],
   };
 }
@@ -22,7 +22,7 @@ function deviceR2(): DeviceTopologyView {
     kind: 'router',
     hostname: 'R2',
     platform: 'ISR4321',
-    interfaces: [{ id: 'Gi0/0', name: 'GigabitEthernet0/0', status: 'admin-down', ip: null, mask: null }],
+    interfaces: [{ id: 'Gi0/0', name: 'GigabitEthernet0/0', status: 'admin-down', ip: null, mask: null, adminUp: false, protocolUp: false }],
   };
 }
 
@@ -35,7 +35,15 @@ function twoRoutersWithLink(opts: { r2Up: boolean }) {
     hostname: 'R1',
     platform: 'ISR4321',
     interfaces: [
-      { id: 'Gi0/0', name: 'GigabitEthernet0/0', status: 'up', ip: '192.168.12.1', mask: '255.255.255.252' },
+      {
+        id: 'Gi0/0',
+        name: 'GigabitEthernet0/0',
+        status: 'up',
+        ip: '192.168.12.1',
+        mask: '255.255.255.252',
+        adminUp: true,
+        protocolUp: opts.r2Up,
+      },
     ],
   };
   const r2: DeviceTopologyView = {
@@ -50,6 +58,8 @@ function twoRoutersWithLink(opts: { r2Up: boolean }) {
         status: opts.r2Up ? 'up' : 'admin-down',
         ip: opts.r2Up ? '192.168.12.2' : null,
         mask: opts.r2Up ? '255.255.255.252' : null,
+        adminUp: opts.r2Up,
+        protocolUp: opts.r2Up,
       },
     ],
   };
@@ -220,7 +230,7 @@ describe('TopologyPanel', () => {
       hostname: 'A',
       platform: 'ISR4321',
       interfaces: [
-        { id: 'Gi0/0', name: 'GigabitEthernet0/0', status: 'no-ip', ip: null, mask: null },
+        { id: 'Gi0/0', name: 'GigabitEthernet0/0', status: 'no-ip', ip: null, mask: null, adminUp: true, protocolUp: true },
       ],
     };
     const b: DeviceTopologyView = {
@@ -229,7 +239,7 @@ describe('TopologyPanel', () => {
       hostname: 'B',
       platform: 'ISR4321',
       interfaces: [
-        { id: 'Gi0/0', name: 'GigabitEthernet0/0', status: 'no-ip', ip: null, mask: null },
+        { id: 'Gi0/0', name: 'GigabitEthernet0/0', status: 'no-ip', ip: null, mask: null, adminUp: true, protocolUp: true },
       ],
     };
     const { container } = render(

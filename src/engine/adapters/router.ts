@@ -103,6 +103,8 @@ export const routerAdapter: DeviceAdapter<Session> = {
         status: interfaceStatus(i.adminUp, i.protocolUp, i.ip, parentsWithSubifs.has(i.id)),
         ip: i.ip,
         mask: i.mask,
+        adminUp: i.adminUp,
+        protocolUp: i.protocolUp,
       })),
     };
   },

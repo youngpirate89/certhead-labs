@@ -439,7 +439,12 @@ function EdgeOverlay({
     const aIsLeft = aDev.x <= bDev.x;
     const left = aIsLeft ? aEndpoint : bEndpoint;
     const right = aIsLeft ? bEndpoint : aEndpoint;
-    const linkUp = aIface.status === 'up' && bIface.status === 'up';
+    // Cable LED is the L1/L2 signal — green iff BOTH ends are adminUp AND
+    // protocolUp. IP-less ports (status='no-ip') still light green so a learner
+    // who runs `no shutdown` BEFORE assigning an IP sees the link come up.
+    // The "either-end-down ⇒ both red" PT rule still reduces to one bool.
+    const linkUp =
+      aIface.adminUp && aIface.protocolUp && bIface.adminUp && bIface.protocolUp;
     const network = deriveNetwork(aIface, bIface);
     renderLinks.push({
       key: `${left.deviceId}:${left.ifaceId}-${right.deviceId}:${right.ifaceId}-${i}`,

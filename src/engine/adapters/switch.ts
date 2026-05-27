@@ -85,6 +85,8 @@ export const switchAdapter: DeviceAdapter<SwitchSession> = {
         // label when both endpoints return null here.
         ip: null,
         mask: null,
+        adminUp: port.adminUp,
+        protocolUp: port.protocolUp,
       })),
     };
   },

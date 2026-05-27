@@ -315,6 +315,11 @@ export const pcAdapter: DeviceAdapter<PcSession> = {
           status: !session.nicUp ? 'admin-down' : session.ip ? 'up' : 'no-ip',
           ip: session.ip,
           mask: session.mask,
+          // PCs have no admin shutdown in our model — `adminUp` collapses to
+          // `nicUp` (carrier state). The cable LED uses adminUp && protocolUp
+          // so this gives PCs the same "link health" reading as routers/switches.
+          adminUp: session.nicUp,
+          protocolUp: session.nicUp,
         },
       ],
     };

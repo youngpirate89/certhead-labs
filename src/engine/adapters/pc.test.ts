@@ -71,7 +71,7 @@ describe('pcAdapter — basics', () => {
       hostname: 'PC-A',
       platform: 'Workstation',
       interfaces: [
-        { id: 'Eth0', name: 'Eth0', status: 'up', ip: '192.168.1.10', mask: '255.255.255.0' },
+        { id: 'Eth0', name: 'Eth0', status: 'up', ip: '192.168.1.10', mask: '255.255.255.0', adminUp: true, protocolUp: true },
       ],
     });
   });

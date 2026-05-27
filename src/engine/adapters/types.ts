@@ -82,6 +82,14 @@ export interface InterfaceTopologyView {
    *  canvas can derive the network label (CIDR) for a link without importing
    *  adapter internals. Derived from existing state — no engine-state change. */
   readonly mask: string | null;
+  /** Local admin state — `no shutdown` applied locally. Cable LED color is
+   *  `adminUp && protocolUp` on both ends; the IP state belongs to `status`
+   *  and is intentionally NOT part of the L1/L2 link signal. */
+  readonly adminUp: boolean;
+  /** Line-protocol state — admin-up locally AND the cabled peer is admin-up
+   *  (PCs are always "protocol up" for this purpose). False on an uncabled
+   *  or peer-down link. */
+  readonly protocolUp: boolean;
 }
 
 export interface DeviceTopologyView {
