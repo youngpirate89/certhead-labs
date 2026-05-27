@@ -10,6 +10,8 @@ const CATALOG_IDS = [
   'ccna-lab05-ospf-single-area',
   'ccna-lab06-standard-acl',
   'ccna-lab07-vlan-access-ports',
+  'ccna-lab08-vlan-trunking',
+  'ccna-lab09-intervlan-routing',
   'ccna-tshoot-return-route',
   'ccna-tshoot-wrong-next-hop',
   'ccna-tshoot-wan-subnet-mismatch',
