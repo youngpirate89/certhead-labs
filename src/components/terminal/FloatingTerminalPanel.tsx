@@ -56,11 +56,23 @@ export interface FloatingTerminalPanelProps {
   readonly onCloseAll: () => void;
 }
 
-/** Default panel dimensions. Will become resizable in a follow-up. */
-const PANEL_WIDTH = 600;
-const PANEL_HEIGHT = 420;
+/** Initial panel dimensions when first opened. Resize state lives in
+ *  component-local useState, so a lab reload returns to these defaults
+ *  (matches the position-not-persisted decision). */
+const DEFAULT_PANEL_WIDTH = 600;
+const DEFAULT_PANEL_HEIGHT = 420;
+/** Floor sizes — below these the tab strip wraps and the terminal becomes
+ *  illegible. Hardcoded rather than measured because a dynamic measurement
+ *  loop here would re-fire mid-drag and feel sticky. */
+const MIN_PANEL_WIDTH = 400;
+const MIN_PANEL_HEIGHT = 300;
 /** Title bar height (matches the minimized panel height). */
 const TITLE_BAR_HEIGHT = 36;
+/** Hit areas for the resize handles. Edge handles are deliberately thin
+ *  (8px) so they don't visually overlap the terminal padding; the corner
+ *  handle is generous (16x16) so the diagonal grab is easy to find. */
+const RESIZE_EDGE_HIT = 8;
+const RESIZE_CORNER_HIT = 16;
 /** Minimum visible title-bar pixels when constrained to viewport edges. */
 const MIN_VISIBLE_PX = 80;
 
@@ -68,9 +80,13 @@ function initialPosition(): { x: number; y: number } {
   return { x: 60, y: 80 };
 }
 
-function clampPosition(x: number, y: number): { x: number; y: number } {
+function clampPosition(
+  x: number,
+  y: number,
+  panelWidth: number,
+): { x: number; y: number } {
   if (typeof window === 'undefined') return { x, y };
-  const minX = MIN_VISIBLE_PX - PANEL_WIDTH;
+  const minX = MIN_VISIBLE_PX - panelWidth;
   const minY = 0;
   const maxX = window.innerWidth - MIN_VISIBLE_PX;
   const maxY = window.innerHeight - TITLE_BAR_HEIGHT;
@@ -90,6 +106,10 @@ export function FloatingTerminalPanel({
   onCloseAll,
 }: FloatingTerminalPanelProps) {
   const [pos, setPos] = useState(initialPosition);
+  const [size, setSize] = useState({
+    w: DEFAULT_PANEL_WIDTH,
+    h: DEFAULT_PANEL_HEIGHT,
+  });
   const [minimized, setMinimized] = useState(false);
 
   // Topology re-click on any device — even one already open — should pop the
@@ -101,14 +121,22 @@ export function FloatingTerminalPanel({
   }, [activeDeviceId, openDeviceIds.length]);
 
   // Re-clamp position when the viewport shrinks so a drag-pinned panel doesn't
-  // disappear behind a smaller window.
+  // disappear behind a smaller window. Resize doesn't auto-shrink the panel
+  // itself — the learner picked their size.
   useEffect(() => {
     function onResize() {
-      setPos((p) => clampPosition(p.x, p.y));
+      setPos((p) => clampPosition(p.x, p.y, size.w));
     }
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
-  }, []);
+  }, [size.w]);
+
+  // Re-clamp position whenever the panel's width changes — shrinking via the
+  // corner handle can push the right edge past MIN_VISIBLE_PX if the panel
+  // was previously dragged far left.
+  useEffect(() => {
+    setPos((p) => clampPosition(p.x, p.y, size.w));
+  }, [size.w]);
 
   // Drag state — held in a ref to avoid re-renders on every pointermove.
   const dragRef = useRef<{
@@ -136,13 +164,67 @@ export function FloatingTerminalPanel({
     if (!drag || e.pointerId !== drag.pointerId) return;
     const nextX = drag.baseX + (e.clientX - drag.pointerX);
     const nextY = drag.baseY + (e.clientY - drag.pointerY);
-    setPos(clampPosition(nextX, nextY));
+    setPos(clampPosition(nextX, nextY, size.w));
   };
 
   const endDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (!dragRef.current) return;
     e.currentTarget.releasePointerCapture(dragRef.current.pointerId);
     dragRef.current = null;
+  };
+
+  // Resize state — held in a ref so pointermove doesn't re-render until the
+  // size actually changes. `axes` controls whether width, height, or both
+  // grow with the cursor (right edge = width only, bottom = height only,
+  // corner = both).
+  type ResizeAxes = 'width' | 'height' | 'both';
+  const resizeRef = useRef<{
+    baseW: number;
+    baseH: number;
+    pointerX: number;
+    pointerY: number;
+    pointerId: number;
+    axes: ResizeAxes;
+  } | null>(null);
+
+  const onResizePointerDown =
+    (axes: ResizeAxes) => (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      // Don't let the handler that started a resize also kick off a parent
+      // pointermove handler (e.g., the title bar's drag — though we're not
+      // inside it here, defensive in case the markup shifts).
+      e.stopPropagation();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      resizeRef.current = {
+        baseW: size.w,
+        baseH: size.h,
+        pointerX: e.clientX,
+        pointerY: e.clientY,
+        pointerId: e.pointerId,
+        axes,
+      };
+    };
+
+  const onResizePointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const resize = resizeRef.current;
+    if (!resize || e.pointerId !== resize.pointerId) return;
+    const dx = e.clientX - resize.pointerX;
+    const dy = e.clientY - resize.pointerY;
+    const nextW =
+      resize.axes === 'height'
+        ? resize.baseW
+        : Math.max(MIN_PANEL_WIDTH, resize.baseW + dx);
+    const nextH =
+      resize.axes === 'width'
+        ? resize.baseH
+        : Math.max(MIN_PANEL_HEIGHT, resize.baseH + dy);
+    setSize((cur) => (cur.w === nextW && cur.h === nextH ? cur : { w: nextW, h: nextH }));
+  };
+
+  const endResize = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!resizeRef.current) return;
+    e.currentTarget.releasePointerCapture(resizeRef.current.pointerId);
+    resizeRef.current = null;
   };
 
   // No tabs → panel hides. State above (pos, minimized) persists because the
@@ -166,8 +248,8 @@ export function FloatingTerminalPanel({
       style={{
         left: pos.x,
         top: pos.y,
-        width: PANEL_WIDTH,
-        height: minimized ? TITLE_BAR_HEIGHT : PANEL_HEIGHT,
+        width: size.w,
+        height: minimized ? TITLE_BAR_HEIGHT : size.h,
       }}
     >
       <div
@@ -230,6 +312,63 @@ export function FloatingTerminalPanel({
           />
           <div className="min-h-0 flex-1 overflow-hidden">
             <Terminal term={term} />
+          </div>
+
+          {/* Right edge handle — width-only resize. cursor:ew-resize tells the
+              learner this is a draggable edge before they grab it. */}
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize panel width"
+            data-floating-terminal-resize="right"
+            onPointerDown={onResizePointerDown('width')}
+            onPointerMove={onResizePointerMove}
+            onPointerUp={endResize}
+            onPointerCancel={endResize}
+            className="absolute right-0 top-0 h-full cursor-ew-resize"
+            style={{ width: RESIZE_EDGE_HIT }}
+          />
+          {/* Bottom edge — height-only resize. */}
+          <div
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Resize panel height"
+            data-floating-terminal-resize="bottom"
+            onPointerDown={onResizePointerDown('height')}
+            onPointerMove={onResizePointerMove}
+            onPointerUp={endResize}
+            onPointerCancel={endResize}
+            className="absolute bottom-0 left-0 w-full cursor-ns-resize"
+            style={{ height: RESIZE_EDGE_HIT }}
+          />
+          {/* Bottom-right corner — both axes. Drawn over the edge handles so
+              its diagonal grab wins. Visual chevron lines hint that the
+              corner is grabbable. */}
+          <div
+            role="separator"
+            aria-label="Resize panel"
+            data-floating-terminal-resize="corner"
+            onPointerDown={onResizePointerDown('both')}
+            onPointerMove={onResizePointerMove}
+            onPointerUp={endResize}
+            onPointerCancel={endResize}
+            className="absolute bottom-0 right-0 cursor-nwse-resize"
+            style={{ width: RESIZE_CORNER_HIT, height: RESIZE_CORNER_HIT }}
+          >
+            <svg
+              width={RESIZE_CORNER_HIT}
+              height={RESIZE_CORNER_HIT}
+              viewBox="0 0 16 16"
+              aria-hidden
+              className="pointer-events-none text-terminal-dim/70"
+            >
+              <path
+                d="M5 14l9-9M9 14l5-5M13 14l1-1"
+                stroke="currentColor"
+                strokeWidth="1.2"
+                strokeLinecap="round"
+              />
+            </svg>
           </div>
         </>
       )}

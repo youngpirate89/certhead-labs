@@ -172,6 +172,42 @@ describe('FloatingTerminalPanel', () => {
     expect(screen.getByLabelText('Terminal input')).toBeInTheDocument();
   });
 
+  it('renders all three resize handles when not minimized', () => {
+    const { container } = renderPanel();
+    expect(
+      container.querySelector('[data-floating-terminal-resize="right"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-floating-terminal-resize="bottom"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-floating-terminal-resize="corner"]'),
+    ).not.toBeNull();
+  });
+
+  it('hides resize handles when minimized (no body, nothing to resize against)', () => {
+    const { container } = renderPanel();
+    fireEvent.click(screen.getByRole('button', { name: 'Minimize terminal' }));
+    expect(
+      container.querySelector('[data-floating-terminal-resize="right"]'),
+    ).toBeNull();
+    expect(
+      container.querySelector('[data-floating-terminal-resize="bottom"]'),
+    ).toBeNull();
+    expect(
+      container.querySelector('[data-floating-terminal-resize="corner"]'),
+    ).toBeNull();
+  });
+
+  it('opens at the default size (600 wide, 420 tall)', () => {
+    const { container } = renderPanel();
+    const panel = container.querySelector(
+      '[data-floating-terminal-panel]',
+    ) as HTMLElement;
+    expect(panel.style.width).toBe('600px');
+    expect(panel.style.height).toBe('420px');
+  });
+
   it('renders the Terminal for whichever device is activeDeviceId', () => {
     const forDevice = vi.fn((id: string) =>
       id === 'R1' ? stubTerm('R1>') : stubTerm('PC-A$'),
