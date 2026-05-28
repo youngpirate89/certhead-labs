@@ -21,7 +21,7 @@ import {
   ViewportPortal,
   useReactFlow,
 } from '@xyflow/react';
-import type { Node, NodeProps } from '@xyflow/react';
+import type { Node, NodeProps, Viewport } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
   useEffect,
@@ -626,26 +626,89 @@ function PortLed({
 }
 
 /**
+ * Compute and apply the fit viewport — the SINGLE source of truth for both
+ * the on-load / auto-refit path (CanvasAutoFit) and the manual fit button
+ * (CanvasControls). Centralising it is what keeps the button's framing
+ * IDENTICAL to a fresh on-load fit.
+ *
+ * Earlier the button called React Flow's built-in `fitView({ padding: 0.16 })`.
+ * That padding model is a fraction of the *content* bounds applied during the
+ * zoom solve, not the 8%-of-canvas inset this custom fit uses, so a mid-session
+ * fit landed TIGHTER than the on-load auto-fit and clipped the outer end nodes
+ * (and their labels) against the canvas / objectives-panel edges. Routing both
+ * paths through this one function removes that divergence — same padding, same
+ * centering, same MIN_ZOOM..1 clamp.
+ */
+function applyFit(
+  el: HTMLElement,
+  contentWidth: number,
+  contentHeight: number,
+  setViewport: (viewport: Viewport, options?: { duration?: number }) => void,
+  options?: { duration?: number },
+) {
+  const rect = el.getBoundingClientRect();
+  const cw = rect.width;
+  const ch = rect.height;
+  if (!cw || !ch) return;
+
+  // 8% padding on each side keeps the leftmost/rightmost end nodes (and their
+  // labels) clear of the canvas edges with visible margin, while still letting
+  // the node row use most of a desktop band.
+  const padX = Math.max(ROW_INSET_X, cw * 0.08);
+  const padY = Math.max(8, ch * 0.08);
+  const availW = Math.max(1, cw - 2 * padX);
+  const availH = Math.max(1, ch - 2 * padY);
+
+  const zX = availW / contentWidth;
+  const zY = availH / contentHeight;
+  const zoom = Math.min(1, Math.max(MIN_ZOOM, Math.min(zX, zY)));
+
+  const scaledW = contentWidth * zoom;
+  const scaledH = contentHeight * zoom;
+  // If content fits, center it. If it overflows (canvas too narrow even at
+  // MIN_ZOOM), anchor the leftmost node at the padding inset and let panOnDrag
+  // handle the right overflow — PC-A clipped on the left is jarring and breaks
+  // the diagnostic mental model.
+  const fitsHorizontally = scaledW <= cw - 2 * padX;
+  const x = fitsHorizontally ? (cw - scaledW) / 2 : padX;
+  const y = (ch - scaledH) / 2;
+
+  setViewport({ x, y, zoom }, options);
+}
+
+/**
  * Canvas zoom controls — three small icon buttons (in / out / fit) rendered
  * inside the topology band, top-right. Wheel-zoom isn't discoverable and
  * fails on plain mice; the buttons are the always-available path.
  *
- * Fit uses `fitView({ maxZoom: 1 })` so it can never inflate a small
- * topology past 1.0 and can never push the global zoom past MIN_ZOOM — this
- * is the explicit safeguard against the historical fitView crush where an
- * unclamped fit on a multi-device lab settled at ~0.3 and produced
- * unclickable ~60px-wide nodes.
+ * Fit calls the shared `applyFit` (the same code CanvasAutoFit runs on load
+ * and on resize), so clicking it after zooming in reproduces a fresh on-load
+ * fit exactly — every node framed with the 8% margin, clamped to [MIN_ZOOM, 1]
+ * so it can never reproduce the historical multi-node crush. (It animates the
+ * transition; the FINAL viewport matches the auto-fit's.)
  *
  * `pointer-events:auto` + a stopPropagation guard on pointerdown/mousedown
  * keeps a quick mouse-down on a button from also starting a canvas pan.
  * Lives in screen space (outside ViewportPortal) so it doesn't pan/zoom
  * with the canvas — controls stay anchored to the band's corner.
  */
-function CanvasControls() {
-  const { zoomIn, zoomOut, fitView } = useReactFlow();
+function CanvasControls({
+  containerRef,
+  contentWidth,
+  contentHeight,
+}: {
+  readonly containerRef: React.RefObject<HTMLDivElement>;
+  readonly contentWidth: number;
+  readonly contentHeight: number;
+}) {
+  const { zoomIn, zoomOut, setViewport } = useReactFlow();
   // Stop the event from bubbling to React Flow's pan handler — without this,
   // a slow click on a button would also start dragging the canvas.
   const stop = (e: MouseEvent | PointerEvent) => e.stopPropagation();
+  const handleFit = () => {
+    const el = containerRef.current;
+    if (el) applyFit(el, contentWidth, contentHeight, setViewport, { duration: 200 });
+  };
   return (
     <div
       className="pointer-events-auto absolute right-3 top-3 z-10 flex flex-col gap-1"
@@ -663,7 +726,7 @@ function CanvasControls() {
         </svg>
       </CanvasButton>
       <CanvasButton
-        onClick={() => fitView({ maxZoom: 1, duration: 200, padding: 0.16 })}
+        onClick={handleFit}
         label="Fit topology to view"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden fill="none">
@@ -737,35 +800,7 @@ function CanvasAutoFit({
 
     function fit() {
       if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const cw = rect.width;
-      const ch = rect.height;
-      if (!cw || !ch) return;
-
-      // 8% padding on each side keeps the leftmost/rightmost end nodes (and
-      // their labels) clear of the canvas edges with visible margin, while
-      // still letting the 4-node row use most of a desktop band. (Was 5% — too
-      // tight, left end nodes hugging the edge at laptop widths.)
-      const padX = Math.max(ROW_INSET_X, cw * 0.08);
-      const padY = Math.max(8, ch * 0.08);
-      const availW = Math.max(1, cw - 2 * padX);
-      const availH = Math.max(1, ch - 2 * padY);
-
-      const zX = availW / contentWidth;
-      const zY = availH / contentHeight;
-      const zoom = Math.min(1, Math.max(MIN_ZOOM, Math.min(zX, zY)));
-
-      const scaledW = contentWidth * zoom;
-      const scaledH = contentHeight * zoom;
-      // If content fits, center it. If it overflows (canvas too narrow even
-      // at MIN_ZOOM), anchor the leftmost node at the padding inset and let
-      // panOnDrag handle the right overflow — PC-A clipped on the left is
-      // jarring and breaks the diagnostic mental model.
-      const fitsHorizontally = scaledW <= cw - 2 * padX;
-      const x = fitsHorizontally ? (cw - scaledW) / 2 : padX;
-      const y = (ch - scaledH) / 2;
-
-      setViewport({ x, y, zoom });
+      applyFit(el, contentWidth, contentHeight, setViewport);
     }
 
     fit();
@@ -916,7 +951,11 @@ export function TopologyPanel({
               links={links ?? []}
             />
           </ReactFlow>
-          <CanvasControls />
+          <CanvasControls
+            containerRef={canvasWrapperRef}
+            contentWidth={contentWidth}
+            contentHeight={contentHeight}
+          />
           <CanvasAutoFit
             containerRef={canvasWrapperRef}
             contentWidth={contentWidth}
