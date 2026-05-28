@@ -40,6 +40,7 @@ import {
   isSubInterfaceId,
   isValidIpv4,
   isValidMask,
+  nextEngineSeq,
   routingTable,
   type Session as RouterSession,
   type SubInterface,
@@ -94,6 +95,12 @@ export interface PcSession {
    *  state alone auto-completes the instant routes are correct, which
    *  defeats the troubleshooting pedagogy. */
   lastPing: { target: string; ok: boolean } | null;
+  /** Stamped each time the learner runs `ipconfig` on this PC. Verify-style
+   *  objectives (Lab 14) compare this against 0 to require the show command
+   *  to actually have been run — mirrors `lastPing` for ping and the router
+   *  `lastShowDhcpBinding` stamp. Cleared by `record:false` so seeded runs
+   *  cannot pre-satisfy a verify gate. */
+  lastIpconfig: number;
 }
 
 /**
@@ -263,6 +270,7 @@ export const pcAdapter: DeviceAdapter<PcSession> = {
       history: [],
       resolvedHistory: [],
       lastPing: null,
+      lastIpconfig: 0,
     };
   },
 
@@ -355,12 +363,16 @@ export const pcAdapter: DeviceAdapter<PcSession> = {
 function handleIpconfig(
   s: PcSession,
   args: readonly string[],
+  _ctx: AdapterContext | undefined,
+  opts: ApplyOptions | undefined,
 ): ApplyResult<PcSession> {
   if (args.length === 0) {
+    if (opts?.record !== false) s.lastIpconfig = nextEngineSeq();
     return { session: s, output: renderIpconfig(s, /* all */ false) };
   }
   const flag = args[0].toLowerCase();
   if (flag === '/all') {
+    if (opts?.record !== false) s.lastIpconfig = nextEngineSeq();
     return { session: s, output: renderIpconfig(s, /* all */ true) };
   }
   // Unknown flag — Windows-shell-style honest error rather than silently
