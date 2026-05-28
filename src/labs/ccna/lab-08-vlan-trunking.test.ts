@@ -234,6 +234,25 @@ describe('lab-08-vlan-trunking — partial-credit guards', () => {
     expect(g.objectives.find((o) => o.id === 'trunk-verified')?.met).toBe(false);
   });
 
+  it('only SW1 trunked + verify on SW1 → trunk-verified unmet (SW2 still access)', () => {
+    // Regression: a factory access port carries trunkAllowedVlans:'all', so
+    // reading SW2's allowed list without first checking mode === 'trunk' would
+    // soft-pass trunk-verified while SW2 Fa0/24 is still in access mode.
+    let ls = initLabSession(lab);
+    ls = runOn(ls, 'SW1', [
+      'enable',
+      'configure terminal',
+      'interface fa0/24',
+      'switchport mode trunk',
+      'end',
+      'show interfaces trunk',
+    ]);
+    // SW2 left untouched — Fa0/24 is still access mode.
+    const g = grade(lab, ls);
+    expect(g.objectives.find((o) => o.id === 'trunk-configured')?.met).toBe(false);
+    expect(g.objectives.find((o) => o.id === 'trunk-verified')?.met).toBe(false);
+  });
+
   it('verify-at-t=0 → configure → verify-again → trunk-verified flips to met', () => {
     // Companion to the previous test: once the learner re-runs the verify
     // command POST-config, the fresh snapshot includes Fa0/24 and the

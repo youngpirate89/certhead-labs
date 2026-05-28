@@ -127,11 +127,17 @@ export const lab08VlanTrunking: Lab = {
         const sw2Verified = sw2.lastShowInterfacesTrunk?.trunkPortIds.includes('Fa0/24') ?? false;
         if (!sw1Verified && !sw2Verified) return false;
         // VLAN 10 must be present in BOTH trunks' allowed lists — 'all' is the
-        // IOS default (every VLAN) and naturally satisfies this.
+        // IOS default (every VLAN) and naturally satisfies this. Gate each side
+        // on `mode === 'trunk'` FIRST: a factory access port also carries
+        // trunkAllowedVlans:'all' (switch-state.ts), so reading the allowed
+        // list without the mode check would soft-pass this objective while one
+        // end is still in access mode.
         const sw1Allows =
-          sw1Port.trunkAllowedVlans === 'all' || sw1Port.trunkAllowedVlans.includes(10);
+          sw1Port.mode === 'trunk' &&
+          (sw1Port.trunkAllowedVlans === 'all' || sw1Port.trunkAllowedVlans.includes(10));
         const sw2Allows =
-          sw2Port.trunkAllowedVlans === 'all' || sw2Port.trunkAllowedVlans.includes(10);
+          sw2Port.mode === 'trunk' &&
+          (sw2Port.trunkAllowedVlans === 'all' || sw2Port.trunkAllowedVlans.includes(10));
         return sw1Allows && sw2Allows;
       },
     },

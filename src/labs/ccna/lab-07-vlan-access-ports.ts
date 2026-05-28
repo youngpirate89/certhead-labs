@@ -121,9 +121,13 @@ export const lab07VlanAccessPorts: Lab = {
         const pingFailed =
           pca.lastPing?.target === '192.168.20.10' && pca.lastPing.ok === false;
         // AND the learner must have inspected the VLAN database on SW1 —
-        // forces a discovery step instead of a configure-and-move-on.
+        // forces a discovery step instead of a configure-and-move-on. Both
+        // `show vlan` and `show vlan brief` render the identical table
+        // (switch-interpret.ts), so either form counts — rejecting the bare
+        // form would false-fail a learner who ran valid IOS and saw the right
+        // output.
         const inspected = history.SW1?.resolved.some((cmd) =>
-          /^(do\s+)?show vlan brief$/.test(cmd),
+          /^(do\s+)?show vlan( brief)?$/.test(cmd),
         );
         return pingFailed && !!inspected;
       },

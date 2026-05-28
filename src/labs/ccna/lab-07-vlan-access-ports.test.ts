@@ -149,6 +149,33 @@ describe('lab-07-vlan-access-ports — happy path', () => {
     expect(g.objectives.find((o) => o.id === 'segmentation-verified')?.met).toBe(true);
   });
 
+  it('bare `show vlan` (no brief) also credits segmentation-verified', () => {
+    // Regression: the switch renders the IDENTICAL table for `show vlan` and
+    // `show vlan brief`, so a learner who runs the bare form has genuinely
+    // inspected the VLAN database and must get credit.
+    let ls = initLabSession(lab);
+    ls = runOn(ls, 'SW1', [
+      'enable',
+      'configure terminal',
+      'vlan 10',
+      'name Sales',
+      'exit',
+      'vlan 20',
+      'name Engineering',
+      'exit',
+      'interface fa0/1',
+      'switchport access vlan 10',
+      'exit',
+      'interface fa0/2',
+      'switchport access vlan 20',
+      'end',
+      'show vlan', // bare form — same table as `show vlan brief`
+    ]);
+    ls = runOn(ls, 'PC-A', ['ping 192.168.20.10']);
+    const g = grade(lab, ls);
+    expect(g.objectives.find((o) => o.id === 'segmentation-verified')?.met).toBe(true);
+  });
+
   it('full walkthrough: all three objectives met, allMet true', () => {
     let ls = initLabSession(lab);
     ls = runOn(ls, 'SW1', [
