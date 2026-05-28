@@ -95,6 +95,10 @@ Status: Engine has generalized well past the original troubleshooting-pilot scop
 
 **Next — Lab 20 candidate selection: check CLAUDE.md strategic sequencing rules before starting. Authoring checklist for every new lab: starting state + objectives + hints + `solution: LabSolution` block — all authored together in the same PR, never as a follow-up.**
 
+### 🧊 DEFERRED WORK — banked, build only when evidence demands (guardrail #21)
+
+- **Next-hop resolvability + stacked `show ip route` (ECMP) rendering.** Today a static whose next-hop is not in any interface subnet (e.g. Lab 03's seeded `.99`) still renders in `show ip route`, and `canReach`/`showIpRoute` disagree (canReach refuses it as `next-hop-unreachable`, the RIB shows it). Two equal-AD statics to the same prefix also render as only one line (lowest-AD/earliest-insertion winner), not stacked ECMP. **This is a fidelity/clarity deviation, NOT a grading bug** — it only surfaces on the off-path action of adding the correct route *without* removing the seeded wrong one; the intended solution removes the wrong route first, and no adversarial probe in Lab 03/04 produced a false completion. **HOLD** (decided 2026-05-28). The faithful fix requires next-hop resolvability tied to **live** interface up-state (admin-down must withdraw the connected route + its dependent statics — exactly what the egress-down lab relies on for its `egress-down` diagnosis), i.e. RIB recomputation on admin-state change mirrored between the RIB and `canReach`. That is a load-bearing refactor of shared routing code rippling to Lab 02/03/04/egress-down, and it collapses Lab 03's "wrong next-hop" identity into Lab 02's "missing route" shape (requires rewriting a shipped lab). **Build it only when a lab is authored that intentionally teaches ECMP load-balancing or static-route recursion/resolvability — that lab is the evidence that demands it. At that point build the live-up-state resolvability predicate (mirrored RIB ↔ canReach) AND stacked `show ip route` rendering together.**
+
 ---
 
 ## 🆓 THE PUBLIC FREE LAB — TOP-OF-FUNNEL ASSET
