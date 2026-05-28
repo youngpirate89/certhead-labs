@@ -21,7 +21,7 @@ import type {
 } from './adapters/ios/state';
 import { isSubInterfaceId } from './adapters/ios/state';
 import type { PcSession } from './adapters/pc';
-import type { SwitchSession } from './adapters/ios/switch-state';
+import type { SwitchSession, Switchport } from './adapters/ios/switch-state';
 import { trunkAllowsVlan } from './adapters/ios/switch-state';
 import { ipInSubnet, longestPrefixMatch, networkAddress } from './adapters/ios/routing';
 import { routingTable } from './adapters/ios/state';
@@ -45,6 +45,7 @@ export type FailReason =
   | 'acl-deny'
   | 'vlan-mismatch'
   | 'trunk-not-configured'
+  | 'trunk-link-down'
   | 'vlan-not-allowed';
 
 export interface FailPoint {
@@ -442,6 +443,16 @@ function startFromPc(
   return { kind: 'forward', firstHop: peer, ingressIface: peerEnd.iface };
 }
 
+/** A switch trunk hop is usable only when the trunk port's line protocol is
+ *  up. `protocolUp` (computed by lab-session's peerLinkIsUp — the same single
+ *  source of truth behind router protocolUp and PC nicUp) already folds in
+ *  this port's adminUp AND the peer end's adminUp, so a shut on EITHER side
+ *  drops it. One read is the both-ends-up predicate; do NOT re-derive link
+ *  state here. */
+function trunkHopUp(port: Switchport): boolean {
+  return port.protocolUp;
+}
+
 /** Walk the switch L2 broadcast domain on `vlan` looking for a router whose
  *  dot1Q subif (with `dot1qVlan === vlan` AND `ip === gatewayIp`) sits on the
  *  parent physical at the switch-router link. Returns the router + its parent
@@ -473,7 +484,10 @@ function findGatewayThroughSwitch(
       } else continue;
 
       const myPort = sw.device.switchports[myIface];
-      if (!myPort || !myPort.adminUp) continue;
+      // protocolUp gates the hop: admin-down here OR a down peer end drops it.
+      // (For a PC-facing access port the peer is a PC, treated always-up, so
+      // this reduces to the port's own adminUp.)
+      if (!myPort || !trunkHopUp(myPort)) continue;
       const peer = session.devices[peerEnd.deviceId];
       if (!peer) continue;
 
@@ -538,7 +552,9 @@ function deliverViaSubifTrunk(
     return fail(direction, router.device.id, parent.id, 'dest-unreachable');
   }
   const trunkPort = peer.device.switchports[peerEnd.iface];
-  if (!trunkPort || !trunkPort.adminUp) {
+  // protocolUp, not adminUp: the trunk-to-switch hop is only usable when the
+  // line protocol is up on both ends (a shut on either drops protocolUp).
+  if (!trunkPort || !trunkHopUp(trunkPort)) {
     return fail(direction, router.device.id, parent.id, 'link-peer-down');
   }
   const tag = subif.dot1qVlan!;
@@ -980,6 +996,32 @@ function walkSwitchToSwitch(
               deviceId: swId,
               iface: myIface,
               reason: 'trunk-not-configured',
+              trunk: {
+                aDevice: swId,
+                aIface: myIface,
+                bDevice: peer.device.id,
+                bIface: peerEnd.iface,
+              },
+            },
+          };
+        }
+        continue;
+      }
+
+      // Both ends are trunks, but the link itself must be UP. protocolUp folds
+      // in this port's adminUp AND the peer end's adminUp (peerLinkIsUp), so a
+      // shut on EITHER switch drops both ends. Distinct from
+      // trunk-not-configured: the trunk IS configured, it's just down. Name
+      // both ends so the learner checks the whole link rather than one side.
+      if (!trunkHopUp(myPort) || !trunkHopUp(peerPort)) {
+        if (!firstFailure) {
+          firstFailure = {
+            ok: false,
+            failedAt: {
+              direction,
+              deviceId: swId,
+              iface: myIface,
+              reason: 'trunk-link-down',
               trunk: {
                 aDevice: swId,
                 aIface: myIface,

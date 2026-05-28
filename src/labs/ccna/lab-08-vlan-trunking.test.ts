@@ -277,3 +277,77 @@ describe('lab-08-vlan-trunking — partial-credit guards', () => {
     expect(grade(lab, ls).objectives.find((o) => o.id === 'trunk-verified')?.met).toBe(true);
   });
 });
+
+describe('lab-08-vlan-trunking — admin/protocol state on the trunk', () => {
+  function configureTrunk(ls: LabSession): LabSession {
+    let cur = runOn(ls, 'SW1', [
+      'enable',
+      'configure terminal',
+      'interface fa0/24',
+      'switchport mode trunk',
+      'end',
+    ]);
+    cur = runOn(cur, 'SW2', [
+      'enable',
+      'configure terminal',
+      'interface fa0/24',
+      'switchport mode trunk',
+      'end',
+    ]);
+    return cur;
+  }
+
+  /** Run one command on `id` and return the rendered output as a single
+   *  string — used to assert what `show interfaces trunk` prints. */
+  function outputOf(ls: LabSession, id: string, line: string): string {
+    const res = applyToActive({ ...ls, activeDeviceId: id }, line);
+    return res.output.map((o) => o.text).join('\n');
+  }
+
+  it('both ends up: ping succeeds AND show interfaces trunk reports trunking', () => {
+    const ls = configureTrunk(initLabSession(lab));
+    expect(canReach(ls, 'PC-A', '192.168.10.20').ok).toBe(true);
+    const show = outputOf(ls, 'SW1', 'show interfaces trunk');
+    expect(show).toContain('Fa0/24');
+    expect(show).toContain('trunking');
+    expect(show).not.toContain('not-trunking');
+  });
+
+  it('shut SW1 Fa0/24: ping FAILS (trunk-link-down) AND show says not-trunking — same state', () => {
+    let ls = configureTrunk(initLabSession(lab));
+    ls = runOn(ls, 'SW1', ['configure terminal', 'interface fa0/24', 'shutdown', 'end']);
+
+    // Forwarding: the down trunk no longer carries the frame.
+    const r = canReach(ls, 'PC-A', '192.168.10.20');
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error('unreachable');
+    expect(r.failedAt.reason).toBe('trunk-link-down');
+
+    // Render must AGREE: the shut port shows not-trunking on the local switch,
+    // and — because a link is both ends — on the peer switch too (its end's
+    // protocolUp dropped when SW1 went admin-down).
+    expect(outputOf(ls, 'SW1', 'show interfaces trunk')).toContain('not-trunking');
+    expect(outputOf(ls, 'SW2', 'show interfaces trunk')).toContain('not-trunking');
+  });
+
+  it('shut SW2 Fa0/24 (the OTHER end): ping FAILS too — link = both ends', () => {
+    let ls = configureTrunk(initLabSession(lab));
+    ls = runOn(ls, 'SW2', ['configure terminal', 'interface fa0/24', 'shutdown', 'end']);
+    const r = canReach(ls, 'PC-A', '192.168.10.20');
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error('unreachable');
+    expect(r.failedAt.reason).toBe('trunk-link-down');
+  });
+
+  it('no shutdown restores the trunk: ping succeeds and show returns to trunking', () => {
+    let ls = configureTrunk(initLabSession(lab));
+    ls = runOn(ls, 'SW1', ['configure terminal', 'interface fa0/24', 'shutdown', 'end']);
+    expect(canReach(ls, 'PC-A', '192.168.10.20').ok).toBe(false);
+
+    ls = runOn(ls, 'SW1', ['configure terminal', 'interface fa0/24', 'no shutdown', 'end']);
+    expect(canReach(ls, 'PC-A', '192.168.10.20').ok).toBe(true);
+    const show = outputOf(ls, 'SW1', 'show interfaces trunk');
+    expect(show).toContain('trunking');
+    expect(show).not.toContain('not-trunking');
+  });
+});

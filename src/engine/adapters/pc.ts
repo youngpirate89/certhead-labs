@@ -1245,6 +1245,12 @@ function detailFor(
       // to configure trunk mode on both switches, so both should appear.
       if (!trunk) return `${place} is not configured as a trunk.`;
       return `the link between ${trunk.aDevice} ${trunk.aIface} and ${trunk.bDevice} ${trunk.bIface} is not configured as a trunk — VLANs cannot pass between switches.`;
+    case 'trunk-link-down':
+      // The trunk IS configured but the link is down — a port is shut on one
+      // end (protocolUp folds in both ends). Name both ends so the learner
+      // checks the whole link, not just one switch.
+      if (!trunk) return `${place} trunk link is down.`;
+      return `the trunk link between ${trunk.aDevice} ${trunk.aIface} and ${trunk.bDevice} ${trunk.bIface} is down — a port is shut or its line protocol is down.`;
     case 'vlan-not-allowed':
       // vlanAllow always present — names the VLAN that was filtered out of
       // the trunk's allowed list. The trunk IS configured; the learner just

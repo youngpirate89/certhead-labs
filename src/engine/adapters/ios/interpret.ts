@@ -514,6 +514,9 @@ function failureBody(
     case 'trunk-not-configured':
       if (!trunk) return `${place} is not configured as a trunk.`;
       return `the link between ${trunk.aDevice} ${trunk.aIface} and ${trunk.bDevice} ${trunk.bIface} is not configured as a trunk — VLANs cannot pass between switches.`;
+    case 'trunk-link-down':
+      if (!trunk) return `${place} trunk link is down.`;
+      return `the trunk link between ${trunk.aDevice} ${trunk.aIface} and ${trunk.bDevice} ${trunk.bIface} is down — a port is shut or its line protocol is down.`;
     case 'vlan-not-allowed':
       if (!vlanAllow) return `${place} blocked the packet at the trunk boundary.`;
       return `VLAN ${vlanAllow.vlanId} is not in the allowed VLAN list on ${place}.`;
