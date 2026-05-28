@@ -23,6 +23,7 @@ import { lab10Dhcp } from './ccna/lab-10-dhcp';
 import { lab11NatPat } from './ccna/lab-11-nat-pat';
 import { lab12ExtendedAcl } from './ccna/lab-12-extended-acl';
 import { lab13OspfTshoot } from './ccna/lab-13-ospf-tshoot';
+import { lab14DhcpRelay } from './ccna/lab-14-dhcp-relay';
 import { tshootReturnRoute } from './ccna/tshoot-return-route';
 import { tshootWrongNextHop } from './ccna/tshoot-wrong-next-hop';
 import { tshootWanSubnetMismatch } from './ccna/tshoot-wan-subnet-mismatch';
@@ -39,6 +40,7 @@ const CATALOG: readonly Lab[] = [
   lab11NatPat,
   lab12ExtendedAcl,
   lab13OspfTshoot,
+  lab14DhcpRelay,
   tshootReturnRoute,
   tshootWrongNextHop,
   tshootWanSubnetMismatch,
