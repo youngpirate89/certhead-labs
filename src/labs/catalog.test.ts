@@ -14,6 +14,7 @@ const CATALOG_IDS = [
   'ccna-lab09-intervlan-routing',
   'ccna-lab10-dhcp-server',
   'ccna-lab11-nat-pat',
+  'ccna-lab14-dhcp-relay',
   'ccna-tshoot-return-route',
   'ccna-tshoot-wrong-next-hop',
   'ccna-tshoot-wan-subnet-mismatch',
