@@ -16,6 +16,21 @@ const lineColor: Record<TerminalLine['kind'], string> = {
 
 const themedKinds = new Set<TerminalLine['kind']>(['input', 'output']);
 
+// `[sim]` diagnostic sentences share the `system` kind with genuine background
+// noise (the IOS banner, %LINK syslog, the workstation intro), but they are the
+// single most useful line in a failing lab — the engine naming the fault. In
+// `terminal-dim` they were the faintest text in the pane, so learners skimmed
+// past them. Lift only the `[sim]` lines to the bright neutral `terminal-fg`
+// (the body-text contrast token) so they read at least as clearly as the white
+// ping stats and well above the dim system noise, while staying distinct from
+// the red `terminal-error` timeouts — this is guidance, not a failure line.
+function lineClass(line: TerminalLine): string {
+  if (line.kind === 'system' && line.text.startsWith('[sim]')) {
+    return 'text-terminal-fg';
+  }
+  return lineColor[line.kind];
+}
+
 interface TerminalProps {
   /** Per-device terminal view — either the active-device shortcuts from
    *  useLabSession (single-CLI legacy path) or a `forDevice(id)` view
@@ -139,7 +154,7 @@ export function Terminal({ term }: TerminalProps) {
         {term.lines.map((line) => (
           <div
             key={line.id}
-            className={`whitespace-pre-wrap break-words ${lineColor[line.kind]}`}
+            className={`whitespace-pre-wrap break-words ${lineClass(line)}`}
             style={themedKinds.has(line.kind) ? { color: 'var(--term-fg)' } : undefined}
           >
             {line.kind === 'input' && line.prompt && (
