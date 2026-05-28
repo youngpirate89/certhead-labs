@@ -53,9 +53,9 @@ This project is **explicitly subordinate to CertHead's launch sequence.** Work o
 
 ## 🎯 CURRENT FOCUS — CATALOG AT 11 LABS, ALL COMMITTED
 
-Status: Engine has generalized well past the original troubleshooting-pilot scope. Switch + VLAN + trunking landed; on-demand hint reveal landed; DHCP server landed; "See Solution" disclosure landed across the entire catalog; NAT/PAT landed. Catalog is at 11 labs, all committed (Lab 11 NAT/PAT signed off by human-driven cold-run; solution field now standard across every catalog lab).
+Status: Engine has generalized well past the original troubleshooting-pilot scope. Switch + VLAN + trunking landed; on-demand hint reveal landed; DHCP server landed; "See Solution" disclosure landed across the entire catalog; NAT/PAT landed; named extended ACLs landed. Catalog is at 12 labs, all committed (Lab 12 ext ACLs signed off by tests + cold-run; solution field standard across every catalog lab).
 
-**Catalog (11 labs):**
+**Catalog (12 labs):**
 - Lab 01: Interface IP — free lab, live at `/try` ✅
 - Lab 02: Tshoot — wrong return route ✅
 - Lab 03: Tshoot — wrong next-hop ✅
@@ -68,9 +68,10 @@ Status: Engine has generalized well past the original troubleshooting-pilot scop
 - Lab 09: Inter-VLAN Routing — Router-on-a-Stick (ROAS) ✅
 - Lab 10: DHCP server — exclude range, pool config, binding, verify ✅
 - Lab 11: NAT/PAT overload — inside/outside roles, ACL-selected source, `ip nat inside source list ... overload`, verify ✅
+- Lab 12: Named Extended ACL — `ip access-list extended <name>`, `permit/deny <proto> <src> <dst>`, apply inbound close to source, verify ✅
 
 **Engine capabilities now span:**
-- **Router:** interface config, static routes, OSPF single-area (neighbor state + O routes), standard ACLs (numbered 1–99, `ip access-group`, ACL evaluation in `canReach`), subinterfaces with config-subif mode (`interface Gi0/0.10`), `encapsulation dot1q <vlan>` (native option), subif-aware `canReach` for inter-VLAN routing, DHCP server (`ip dhcp pool`, `ip dhcp excluded-address`, `network` / `default-router` / `dns-server` / `lease` in config-dhcp mode), deterministic binding allocator that propagates ip/mask/gateway into DHCP-client PCs, NAT/PAT overload (`ip nat inside`/`outside` on interfaces, `ip nat inside source list <acl> interface <iface> overload` in config) with canReach-integrated `effectiveSrcIp` translation at the inside→outside boundary and a LabSession-refresh-populated translation table, full show suite incl. `show run interface <iface>`, `show ip dhcp pool|binding|conflict`, and `show ip nat translations|statistics`.
+- **Router:** interface config, static routes, OSPF single-area (neighbor state + O routes), standard ACLs (numbered 1–99) AND named extended ACLs (`ip access-list extended <name>` enters config-ext-nacl mode; `permit/deny <proto> <src> <dst> [eq <port>]` lines auto-sequence in 10s; `ip access-group <name|number> in|out` binds), protocol + destination matching in `evaluateAcl`/`canReach` (PC/router ping handlers + tracert pass `protocol: 'icmp'` so extended `deny icmp` entries fire), subinterfaces with config-subif mode (`interface Gi0/0.10`), `encapsulation dot1q <vlan>` (native option), subif-aware `canReach` for inter-VLAN routing, DHCP server (`ip dhcp pool`, `ip dhcp excluded-address`, `network` / `default-router` / `dns-server` / `lease` in config-dhcp mode), deterministic binding allocator that propagates ip/mask/gateway into DHCP-client PCs, NAT/PAT overload (`ip nat inside`/`outside` on interfaces, `ip nat inside source list <acl> interface <iface> overload` in config) with canReach-integrated `effectiveSrcIp` translation at the inside→outside boundary and a LabSession-refresh-populated translation table, full show suite incl. `show run interface <iface>`, `show ip dhcp pool|binding|conflict`, `show ip nat translations|statistics`, and `show access-lists` (renders Standard and Extended ACLs; stamps Session.lastShowAccessLists as the verify gate).
 - **Switch:** VLAN database, access + trunk ports, native VLAN, `switchport trunk allowed vlan`, VLAN-aware forwarding (same-VLAN reachable, different-VLAN blocked, trunk-aware across switches), `show vlan`, `show interfaces trunk`, `show run interface <iface>`. Verify-style objectives (e.g. `show interfaces trunk`) use a `lastShowInterfacesTrunk` session field written at command-eval time (mirrors PC `lastPing`) so they require an observe-after-configure action and cannot auto-complete from state alone.
 - **PC:** ping (4 packets, engine-wide), tracert (streamed 150ms/hop, cancel-on-reset), ipconfig (with `(DHCP request pending)` and `/all DHCP Enabled: Yes` for `dhcpMode` PCs), redirect tier for out-of-scope commands.
 - **Terminal:** streaming with input-lock, `[sim]` dim failure sentences, reset cancels in-flight streams.
@@ -80,11 +81,11 @@ Status: Engine has generalized well past the original troubleshooting-pilot scop
 - **Hint system:** on-demand reveal — timer gates *availability*, learner clicks to reveal (deliberate flip from auto-print, which interrupted learners mid-typing).
 - **Solution disclosure:** every catalog lab ships a `solution: LabSolution` block. `LabSolution = { steps: SolutionStep[] }`, step = `{ device, commands, note? }`. Collapsible "See Solution" panel under the hints — closed by default, muted text + chevron, no warning copy. **Solution field is now standard on the Lab type — every new lab requires a solution block, authored at the same time as the lab (not added retroactively).** The type stays optional so pilot/throwaway labs in `_pilots/` can omit it; catalog membership implies a solution.
 
-619 tests passing, tsc clean, prod build clean. Free lab unchanged and live.
+663 tests passing, tsc clean, prod build clean. Free lab unchanged and live.
 
 **CertHead state (drives the next move):** Live exams: CCNA, N10-009, SY0-701. Paid subscribers: 0 — pre-launch, building catalog depth in private is the +4–12 week phase, fully in-bounds. Nothing deployed beyond the free lab; catalog registry, `/embed`, custom domain, and the landing-page link to `/try` all still gated on the ≥300-paid bar.
 
-**Next — Lab 12: check CLAUDE.md strategic sequencing rules before starting. Authoring checklist: starting state + objectives + hints + `solution: LabSolution` block — all authored together in the same PR, never as a follow-up.**
+**Next — Lab 13: check CLAUDE.md strategic sequencing rules before starting. Authoring checklist: starting state + objectives + hints + `solution: LabSolution` block — all authored together in the same PR, never as a follow-up.**
 
 ---
 
