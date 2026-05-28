@@ -25,6 +25,7 @@ import { lab12ExtendedAcl } from './ccna/lab-12-extended-acl';
 import { lab13OspfTshoot } from './ccna/lab-13-ospf-tshoot';
 import { lab14DhcpRelay } from './ccna/lab-14-dhcp-relay';
 import { lab15DefaultStaticRoute } from './ccna/lab-15-default-static-route';
+import { lab16FloatingStaticRoute } from './ccna/lab-16-floating-static-route';
 import { tshootReturnRoute } from './ccna/tshoot-return-route';
 import { tshootWrongNextHop } from './ccna/tshoot-wrong-next-hop';
 import { tshootWanSubnetMismatch } from './ccna/tshoot-wan-subnet-mismatch';
@@ -43,6 +44,7 @@ const CATALOG: readonly Lab[] = [
   lab13OspfTshoot,
   lab14DhcpRelay,
   lab15DefaultStaticRoute,
+  lab16FloatingStaticRoute,
   tshootReturnRoute,
   tshootWrongNextHop,
   tshootWanSubnetMismatch,

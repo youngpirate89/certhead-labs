@@ -4,7 +4,7 @@
 > the question-bank product. Do not conflate the two; they have different
 > architectures, different priorities, and different timelines.
 >
-> Last updated: 2026-05-28
+> Last updated: 2026-05-28 (Lab 16 — floating static route)
 
 ---
 
@@ -51,11 +51,11 @@ This project is **explicitly subordinate to CertHead's launch sequence.** Work o
 
 ---
 
-## 🎯 CURRENT FOCUS — CATALOG AT 15 LABS, ALL COMMITTED
+## 🎯 CURRENT FOCUS — CATALOG AT 16 LABS, ALL COMMITTED
 
-Status: Engine has generalized well past the original troubleshooting-pilot scope. Switch + VLAN + trunking landed; on-demand hint reveal landed; DHCP server landed; "See Solution" disclosure landed across the entire catalog; NAT/PAT landed; named extended ACLs landed (grammar hardened with explicit coverage for the 4 src/dst×any/host/bare combinations + `eq` port forms); Lab 13 (OSPF tshoot — mismatched area) signed off via tests + cold-run; Lab 14 (DHCP relay via `ip helper-address`) added relay-path allocator + PC `lastIpconfig` verify gate; Lab 15 (default static route — `ip route 0.0.0.0 0.0.0.0 <nh>`) needed a one-shim engine fix — split `isValidRouteMask` off `isValidMask` so the route grammar accepts the /0 default mask while interface-IP validation still rejects `ip address X 0.0.0.0` as nonsense. Catalog is at 15 labs, all committed (solution field standard across every catalog lab).
+Status: Engine has generalized well past the original troubleshooting-pilot scope. Switch + VLAN + trunking landed; on-demand hint reveal landed; DHCP server landed; "See Solution" disclosure landed across the entire catalog; NAT/PAT landed; named extended ACLs landed (grammar hardened with explicit coverage for the 4 src/dst×any/host/bare combinations + `eq` port forms); Lab 13 (OSPF tshoot — mismatched area) signed off via tests + cold-run; Lab 14 (DHCP relay via `ip helper-address`) added relay-path allocator + PC `lastIpconfig` verify gate; Lab 15 (default static route — `ip route 0.0.0.0 0.0.0.0 <nh>`) needed a one-shim engine fix — split `isValidRouteMask` off `isValidMask` so the route grammar accepts the /0 default mask while interface-IP validation still rejects `ip address X 0.0.0.0` as nonsense; Lab 16 (floating static route — `ip route <net> <mask> <nh> <ad>`) extended the `ip route` grammar with an optional trailing AD slot (validated 1..255), wired AD through `addStaticRoute` with idempotent same-target replacement, and RIB-filtered `show ip route` so per (prefix, mask) only the lowest-AD entry renders while losers remain in the routing table for LPM to promote on withdrawal. Catalog is at 16 labs, all committed (solution field standard across every catalog lab).
 
-**Catalog (15 labs):**
+**Catalog (16 labs):**
 - Lab 01: Interface IP — free lab, live at `/try` ✅
 - Lab 02: Tshoot — wrong return route ✅
 - Lab 03: Tshoot — wrong next-hop ✅
@@ -72,9 +72,10 @@ Status: Engine has generalized well past the original troubleshooting-pilot scop
 - Lab 13: OSPF tshoot — diagnose missing/wrong adjacency via `show ip ospf neighbor` (empty header rendered IOS-style) ✅
 - Lab 14: DHCP relay — `ip helper-address` forwards client broadcasts across subnets to a remote pool ✅
 - Lab 15: Default static route — `ip route 0.0.0.0 0.0.0.0 <next-hop>`, verify with `show ip route`, ping through the gateway of last resort ✅
+- Lab 16: Floating static route — `ip route 0.0.0.0 0.0.0.0 <next-hop> <ad>`, primary at AD 1 + backup at AD 200, RIB shows only the winner ✅
 
 **Engine capabilities now span:**
-- **Router:** interface config, static routes, OSPF single-area (neighbor state + O routes), standard ACLs (numbered 1–99) AND named extended ACLs (`ip access-list extended <name>` enters config-ext-nacl mode; `permit/deny <proto> <src> <dst> [eq <port>]` lines auto-sequence in 10s; `ip access-group <name|number> in|out` binds), protocol + destination matching in `evaluateAcl`/`canReach` (PC/router ping handlers + tracert pass `protocol: 'icmp'` so extended `deny icmp` entries fire), subinterfaces with config-subif mode (`interface Gi0/0.10`), `encapsulation dot1q <vlan>` (native option), subif-aware `canReach` for inter-VLAN routing, DHCP server (`ip dhcp pool`, `ip dhcp excluded-address`, `network` / `default-router` / `dns-server` / `lease` in config-dhcp mode), deterministic binding allocator that propagates ip/mask/gateway into DHCP-client PCs, NAT/PAT overload (`ip nat inside`/`outside` on interfaces, `ip nat inside source list <acl> interface <iface> overload` in config) with canReach-integrated `effectiveSrcIp` translation at the inside→outside boundary and a LabSession-refresh-populated translation table, full show suite incl. `show run interface <iface>`, `show ip dhcp pool|binding|conflict`, `show ip nat translations|statistics`, and `show access-lists` (renders Standard and Extended ACLs; stamps Session.lastShowAccessLists as the verify gate).
+- **Router:** interface config, static routes (with optional trailing AD on `ip route` — floating backups supported, RIB filters `show ip route` to the lowest-AD entry per prefix), OSPF single-area (neighbor state + O routes), standard ACLs (numbered 1–99) AND named extended ACLs (`ip access-list extended <name>` enters config-ext-nacl mode; `permit/deny <proto> <src> <dst> [eq <port>]` lines auto-sequence in 10s; `ip access-group <name|number> in|out` binds), protocol + destination matching in `evaluateAcl`/`canReach` (PC/router ping handlers + tracert pass `protocol: 'icmp'` so extended `deny icmp` entries fire), subinterfaces with config-subif mode (`interface Gi0/0.10`), `encapsulation dot1q <vlan>` (native option), subif-aware `canReach` for inter-VLAN routing, DHCP server (`ip dhcp pool`, `ip dhcp excluded-address`, `network` / `default-router` / `dns-server` / `lease` in config-dhcp mode), deterministic binding allocator that propagates ip/mask/gateway into DHCP-client PCs, NAT/PAT overload (`ip nat inside`/`outside` on interfaces, `ip nat inside source list <acl> interface <iface> overload` in config) with canReach-integrated `effectiveSrcIp` translation at the inside→outside boundary and a LabSession-refresh-populated translation table, full show suite incl. `show run interface <iface>`, `show ip dhcp pool|binding|conflict`, `show ip nat translations|statistics`, and `show access-lists` (renders Standard and Extended ACLs; stamps Session.lastShowAccessLists as the verify gate).
 - **Switch:** VLAN database, access + trunk ports, native VLAN, `switchport trunk allowed vlan`, VLAN-aware forwarding (same-VLAN reachable, different-VLAN blocked, trunk-aware across switches), `show vlan`, `show interfaces trunk`, `show run interface <iface>`. Verify-style objectives (e.g. `show interfaces trunk`) use a `lastShowInterfacesTrunk` session field written at command-eval time (mirrors PC `lastPing`) so they require an observe-after-configure action and cannot auto-complete from state alone.
 - **PC:** ping (4 packets, engine-wide), tracert (streamed 150ms/hop, cancel-on-reset), ipconfig (with `(DHCP request pending)` and `/all DHCP Enabled: Yes` for `dhcpMode` PCs), redirect tier for out-of-scope commands.
 - **Terminal:** streaming with input-lock, `[sim]` dim failure sentences, reset cancels in-flight streams.
@@ -85,11 +86,11 @@ Status: Engine has generalized well past the original troubleshooting-pilot scop
 - **Solution disclosure:** every catalog lab ships a `solution: LabSolution` block. `LabSolution = { steps: SolutionStep[] }`, step = `{ device, commands, note? }`. Collapsible "See Solution" panel under the hints — closed by default, muted text + chevron, no warning copy. **Solution field is now standard on the Lab type — every new lab requires a solution block, authored at the same time as the lab (not added retroactively).** The type stays optional so pilot/throwaway labs in `_pilots/` can omit it; catalog membership implies a solution. Command block renders one `<div>` per command (no `.join('\n')` into a single string) with `whitespace-pre` to preserve leading indents — learners can read the block top to bottom and type each line exactly as shown.
 - **Extended ACL grammar:** hardened across the 4 src×dst combinations (`any|host <ip>|<ip> <wc>` for both source and destination) plus optional `eq <port|name>`. `show running-config interface <iface>` now mirrors the full `show running-config` and includes `ip access-group ... in|out` lines so the single-iface form doesn't silently drop bindings.
 
-728 tests passing, tsc clean, prod build clean. Free lab unchanged and live.
+747 tests passing, tsc clean, prod build clean. Free lab unchanged and live.
 
 **CertHead state (drives the next move):** Live exams: CCNA, N10-009, SY0-701. Paid subscribers: 0 — pre-launch, building catalog depth in private is the +4–12 week phase, fully in-bounds. Nothing deployed beyond the free lab; catalog registry, `/embed`, custom domain, and the landing-page link to `/try` all still gated on the ≥300-paid bar.
 
-**Next — Lab 16 candidate selection: check CLAUDE.md strategic sequencing rules before starting. Authoring checklist for every new lab: starting state + objectives + hints + `solution: LabSolution` block — all authored together in the same PR, never as a follow-up.**
+**Next — Lab 17 candidate selection: check CLAUDE.md strategic sequencing rules before starting. Authoring checklist for every new lab: starting state + objectives + hints + `solution: LabSolution` block — all authored together in the same PR, never as a follow-up.**
 
 ---
 
