@@ -352,6 +352,10 @@ const configIfMode: CommandNode = {
             outside: done('Mark interface as NAT outside'),
           },
         },
+        'helper-address': {
+          help: 'Forward DHCP broadcasts to a remote server',
+          argument: arg('ip', done('Apply DHCP relay target')),
+        },
       },
     },
     description: {
@@ -382,6 +386,7 @@ const configIfMode: CommandNode = {
                 outside: done('Remove NAT outside marking'),
               },
             },
+            'helper-address': done('Remove the DHCP relay target'),
           },
         },
       },

@@ -378,6 +378,9 @@ function dispatch(
       if (command[1] === 'access-list' && command[2] === 'extended') {
         return enterExtAcl(s, args.name);
       }
+      if (command[1] === 'helper-address') {
+        return setHelperAddress(s, args.ip);
+      }
       return { session: s, output: err('% Incomplete command.') };
 
     case 'permit':
@@ -770,6 +773,9 @@ function negate(s: Session, command: string[], args: Record<string, string>): Ap
       }
       if (command[2] === 'access-list' && command[3] === 'extended') {
         return removeExtAcl(s, args.name);
+      }
+      if (command[2] === 'helper-address') {
+        return clearHelperAddress(s);
       }
       // `no ip address`:
       //   - in config-subif → clear the active subinterface's IP+mask
@@ -1243,6 +1249,27 @@ function clearAccessGroup(
   if (iface.accessGroups[direction] === aclId) {
     iface.accessGroups[direction] = null;
   }
+  return { session: s, output: [] };
+}
+
+// ---------- DHCP relay: ip helper-address <ip> (config-if) ----------
+
+/** Set the active interface's DHCP relay target. Grammar only exposes this in
+ *  config-if so currentInterface must be set; defensive guard mirrors the
+ *  NAT-role handlers above. */
+function setHelperAddress(s: Session, ip: string): ApplyResult {
+  if (!isValidIpv4(ip)) {
+    return { session: s, output: err(`% Invalid input detected at "${ip}".`) };
+  }
+  if (!s.currentInterface) return { session: s, output: [] };
+  s.device.interfaces[s.currentInterface].helperAddress = ip;
+  return { session: s, output: [] };
+}
+
+/** Clear the active interface's DHCP relay target. */
+function clearHelperAddress(s: Session): ApplyResult {
+  if (!s.currentInterface) return { session: s, output: [] };
+  s.device.interfaces[s.currentInterface].helperAddress = undefined;
   return { session: s, output: [] };
 }
 
@@ -2028,6 +2055,7 @@ function showRunningConfigInterface(s: Session, ifaceToken: string): ApplyResult
   if (i.description) lines.push(` description ${i.description}`);
   if (i.ip && i.mask) lines.push(` ip address ${i.ip} ${i.mask}`);
   else lines.push(' no ip address');
+  if (i.helperAddress) lines.push(` ip helper-address ${i.helperAddress}`);
   if (i.accessGroups.in !== null) lines.push(` ip access-group ${i.accessGroups.in} in`);
   if (i.accessGroups.out !== null) lines.push(` ip access-group ${i.accessGroups.out} out`);
   if (!i.adminUp) lines.push(' shutdown');
@@ -2060,6 +2088,7 @@ function showRunningConfig(s: Session): string[] {
     if (i.description) lines.push(` description ${i.description}`);
     if (i.ip && i.mask) lines.push(` ip address ${i.ip} ${i.mask}`);
     else lines.push(' no ip address');
+    if (i.helperAddress) lines.push(` ip helper-address ${i.helperAddress}`);
     if (i.accessGroups.in !== null) lines.push(` ip access-group ${i.accessGroups.in} in`);
     if (i.accessGroups.out !== null) lines.push(` ip access-group ${i.accessGroups.out} out`);
     if (!i.adminUp) lines.push(' shutdown');

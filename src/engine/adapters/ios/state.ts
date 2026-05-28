@@ -181,6 +181,11 @@ export interface InterfaceState {
    *  iface AND exits on an `outside` iface that has a matching overload
    *  statement. (Lab 11.) */
   natRole?: 'inside' | 'outside';
+  /** DHCP relay target set by `ip helper-address <ip>` (Lab 14). When set, the
+   *  DHCP refresh pass forwards a DHCP-mode PC cabled to this interface to the
+   *  remote device whose interface owns `helperAddress`, instead of looking
+   *  for a same-subnet pool on this router. Undefined = no relay. */
+  helperAddress?: string;
 }
 
 /** A dot1Q subinterface — Lab 09 router-on-a-stick. Subinterfaces live ON a
