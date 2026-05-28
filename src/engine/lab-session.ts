@@ -565,7 +565,14 @@ function translationsEqual(
  *  switch-fronted DHCP isn't in scope yet), reads the cabled router
  *  interface's IP+mask, and picks the router pool whose network covers it.
  *  Returns null when the cable doesn't land on a router or no pool matches —
- *  the PC stays unbound in that case. */
+ *  the PC stays unbound in that case.
+ *
+ *  Lab 14 — relay path: if the cabled router has no same-subnet pool of its
+ *  own but its interface carries `ip helper-address <ip>`, follow that to the
+ *  device that owns the helper-address IP and use ITS pool whose network
+ *  matches the PC's subnet. The binding lives on the remote DHCP server, not
+ *  on the relay router. Without the helper-address line the PC stays
+ *  unbound — that's the educational moment. */
 function resolveDhcpClientPool(
   lab: LabSession,
   pc: PcSession,
@@ -585,9 +592,43 @@ function resolveDhcpClientPool(
     if (!neighbor || neighbor.kind !== 'router') return null;
     const iface = neighbor.device.interfaces[peer.iface];
     if (!iface || !iface.ip || !iface.mask) return null;
-    const pool = pickPoolForIfaceSubnet(neighbor.device.dhcpPools, iface.ip, iface.mask);
-    if (!pool) return null;
-    return { routerId: neighbor.device.id, poolName: pool.name };
+    // Lab 10 same-subnet path: a pool on the cabled router covering the
+    // cabled subnet. Wins over relay when both could match.
+    const localPool = pickPoolForIfaceSubnet(neighbor.device.dhcpPools, iface.ip, iface.mask);
+    if (localPool) {
+      return { routerId: neighbor.device.id, poolName: localPool.name };
+    }
+    // Lab 14 relay path: forward to the device whose interface IP equals the
+    // helper-address; pick the matching pool there. Without helper-address
+    // the PC stays unbound.
+    if (iface.helperAddress) {
+      const server = findRouterOwningIp(lab, iface.helperAddress);
+      if (server) {
+        const remotePool = pickPoolForIfaceSubnet(
+          server.device.dhcpPools,
+          iface.ip,
+          iface.mask,
+        );
+        if (remotePool) {
+          return { routerId: server.device.id, poolName: remotePool.name };
+        }
+      }
+    }
+    return null;
+  }
+  return null;
+}
+
+/** Find the router in the topology that owns `ip` on any of its physical
+ *  interfaces. Used by the DHCP relay path to follow `ip helper-address` to
+ *  the remote DHCP server. Subinterfaces are not searched because the relay
+ *  flow doesn't currently target dot1Q endpoints. */
+function findRouterOwningIp(lab: LabSession, ip: string): RouterSession | null {
+  for (const s of Object.values(lab.devices)) {
+    if (s.kind !== 'router') continue;
+    for (const i of Object.values(s.device.interfaces)) {
+      if (i.ip === ip) return s;
+    }
   }
   return null;
 }
