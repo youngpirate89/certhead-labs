@@ -989,7 +989,7 @@ function DeviceNode({ data }: NodeProps<Node<DeviceNodeData>>) {
         }`}
       >
         <div className="flex flex-col items-center gap-0.5">
-          <DeviceIcon type={view.platform} size={40} color={active ? '#e2e8f0' : '#94a3b8'} />
+          <DeviceIcon type={view.deviceClass ?? view.platform} size={40} color={active ? '#e2e8f0' : '#94a3b8'} />
           <span className="font-sans text-sm font-semibold tracking-tight text-terminal-fg">
             {view.hostname}
           </span>

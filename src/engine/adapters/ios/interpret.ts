@@ -1783,9 +1783,10 @@ function routeCode(source: 'connected' | 'static' | 'ospf'): string {
  *  `/ROLE` suffix (the spec example shows `FULL/  -` — a literal `-` to mean
  *  "no DR election"; we keep that exact rendering). */
 function showIpOspfNeighbor(s: Session): string[] {
-  if (s.device.ospf.neighbors.size === 0) {
-    return ['No OSPF neighbors found.'];
-  }
+  // IOS prints the header row even when the neighbor table is empty — an
+  // empty table reads as "header, no data rows" rather than a friendly
+  // "no neighbors" sentence. Lab 13's diagnostic flow relies on the learner
+  // seeing the empty header to recognize that adjacency hasn't formed.
   const header =
     'Neighbor ID'.padEnd(16) +
     'Pri'.padEnd(6) +
@@ -2029,6 +2030,8 @@ function showRunningConfigInterface(s: Session, ifaceToken: string): ApplyResult
   if (i.description) lines.push(` description ${i.description}`);
   if (i.ip && i.mask) lines.push(` ip address ${i.ip} ${i.mask}`);
   else lines.push(' no ip address');
+  if (i.accessGroups.in !== null) lines.push(` ip access-group ${i.accessGroups.in} in`);
+  if (i.accessGroups.out !== null) lines.push(` ip access-group ${i.accessGroups.out} out`);
   if (!i.adminUp) lines.push(' shutdown');
   lines.push('!');
   return { session: s, output: out(...lines) };

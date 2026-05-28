@@ -253,6 +253,36 @@ describe('config-ext-nacl: permit / deny entries', () => {
     expect(s.device.acls.get('A')?.entries[0]?.dstPort).toBe(23);
   });
 
+  // The cases below pin down the 4 src/dst combinations called out by the
+  // emdash-any-servericon bugfix work order — adds explicit coverage for
+  // `deny tcp any host <ip> eq <port>` and `permit udp <ip> <wc> any eq <port>`
+  // so a regression in the src-then-dst grammar walk fails loudly.
+  it('deny tcp any host 10.0.0.1 eq 23 — src=any, dst=host, with eq', () => {
+    const s = applyCommand(inExtAcl('A'), 'deny tcp any host 10.0.0.1 eq 23').session;
+    expect(s.device.acls.get('A')?.entries[0]).toMatchObject({
+      action: 'deny',
+      protocol: 'tcp',
+      srcIp: '0.0.0.0',
+      srcWildcard: '255.255.255.255',
+      dstIp: '10.0.0.1',
+      dstWildcard: '0.0.0.0',
+      dstPort: 23,
+    });
+  });
+
+  it('permit udp 10.0.0.0 0.0.0.255 any eq 53 — src=bare, dst=any, with eq', () => {
+    const s = applyCommand(inExtAcl('A'), 'permit udp 10.0.0.0 0.0.0.255 any eq 53').session;
+    expect(s.device.acls.get('A')?.entries[0]).toMatchObject({
+      action: 'permit',
+      protocol: 'udp',
+      srcIp: '10.0.0.0',
+      srcWildcard: '0.0.0.255',
+      dstIp: '0.0.0.0',
+      dstWildcard: '255.255.255.255',
+      dstPort: 53,
+    });
+  });
+
   it('eq on icmp returns an error and does not add the entry', () => {
     const result = applyCommand(inExtAcl('A'), 'permit icmp any any eq 80');
     expect(result.output[0]?.kind).toBe('error');

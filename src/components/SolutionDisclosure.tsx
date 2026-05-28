@@ -44,9 +44,13 @@ export function SolutionDisclosure({ steps }: Props) {
               <div className="mb-0.5 font-mono text-[10px] font-medium uppercase tracking-wider text-terminal-dim">
                 {step.device}
               </div>
-              <pre className="overflow-x-auto rounded bg-terminal-bg px-2 py-1.5 font-mono text-[11px] leading-relaxed text-terminal-prompt">
-                {step.commands.join('\n')}
-              </pre>
+              <div className="overflow-x-auto rounded bg-terminal-bg px-2 py-1.5 font-mono text-[11px] leading-relaxed text-terminal-prompt">
+                {step.commands.map((cmd, j) => (
+                  <div key={j} className="whitespace-pre">
+                    {cmd}
+                  </div>
+                ))}
+              </div>
             </div>
           ))}
         </div>

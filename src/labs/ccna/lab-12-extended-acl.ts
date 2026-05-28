@@ -51,7 +51,8 @@ export const lab12ExtendedAcl: Lab = {
       {
         id: 'Server',
         kind: 'pc',
-        platform: 'Workstation',
+        platform: 'Server',
+        deviceClass: 'server',
         interfaces: ['Eth0'],
         pc: { ip: '192.168.2.10', mask: '255.255.255.0', gateway: '192.168.2.1' },
       },

@@ -71,10 +71,15 @@ describe('OSPF — config-router mode + network statements', () => {
     expect(s.device.ospf.networks).toHaveLength(1);
   });
 
-  it('`do show ip ospf neighbor` works from config-router (no adjacency, prints empty)', () => {
+  it('`do show ip ospf neighbor` works from config-router (no adjacency, prints empty header)', () => {
     const s = applyCommand(configRouter(fresh2iface()), 'router ospf 1').session;
     const out = applyCommand(s, 'do sh ip ospf nei').output;
-    expect(out.map((o) => o.text).join('\n')).toMatch(/No OSPF neighbors found/);
+    const text = out.map((o) => o.text).join('\n');
+    // Empty table reads as IOS header row, no data rows. Lab 13's tshoot
+    // workflow keys off this — seeing the empty header is the learner's
+    // signal that adjacency hasn't formed.
+    expect(text).toMatch(/Neighbor ID\s+Pri\s+State\s+Dead Time\s+Address\s+Interface/);
+    expect(text).not.toMatch(/FULL/);
   });
 
   it('`show ip ospf` summary names the process id and router-id', () => {
@@ -361,9 +366,12 @@ describe('OSPF — show ip ospf neighbor output', () => {
     expect(lastOutput).toMatch(/10\.0\.0\.2\s+GigabitEthernet0\/2/);
   });
 
-  it('prints "No OSPF neighbors found." when the table is empty', () => {
+  it('prints the IOS header (no data rows) when the table is empty', () => {
     const ls = initLabSession(twoRouterLink());
     const { lastOutput } = runOnWithOutput(ls, 'R1', ['enable', 'show ip ospf neighbor']);
-    expect(lastOutput).toMatch(/No OSPF neighbors found/);
+    // IOS prints the table header even with no neighbors — Lab 13 (OSPF
+    // tshoot) keys its learner's diagnosis off seeing the empty header.
+    expect(lastOutput).toMatch(/Neighbor ID\s+Pri\s+State\s+Dead Time\s+Address\s+Interface/);
+    expect(lastOutput).not.toMatch(/FULL/);
   });
 });

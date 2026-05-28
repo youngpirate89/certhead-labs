@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { TerminalView, TerminalLine } from '@/engine/terminal/useTerminal';
 import { loadTheme, saveTheme, type TerminalTheme } from '@/engine/terminal/terminalTheme';
+import { sanitizeInput } from '@/engine/terminal/sanitize';
 import TerminalThemePanel from './terminal/TerminalThemePanel';
 
 // Output + input lines pick up the user-configurable terminal foreground via
@@ -154,7 +155,7 @@ export function Terminal({ term }: TerminalProps) {
           <input
             ref={inputRef}
             value={term.input}
-            onChange={(e) => term.setInput(e.target.value)}
+            onChange={(e) => term.setInput(sanitizeInput(e.target.value))}
             onKeyDown={handleKeyDown}
             disabled={term.busy}
             spellCheck={false}

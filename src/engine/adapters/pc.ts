@@ -73,6 +73,11 @@ export interface PcSession {
    *  Lab-session DHCP refresh pass writes those fields whenever a binding
    *  resolves; clears them back to null when the binding falls away. */
   readonly dhcpMode: boolean;
+  /** Optional visual classification carried from the lab spec — drives the
+   *  topology canvas's icon pick via DeviceTopologyView.deviceClass. Today
+   *  only 'server' has a distinct icon; 'workstation' is the default and is
+   *  equivalent to leaving the field unset. */
+  readonly deviceClass?: 'workstation' | 'server';
   /** True when the PC's NIC is cabled to an up neighbor interface. Refreshed
    *  by the LabSession layer whenever device state changes. */
   nicUp: boolean;
@@ -248,6 +253,7 @@ export const pcAdapter: DeviceAdapter<PcSession> = {
       mask: dhcpMode ? null : spec.pc?.mask ?? null,
       gateway: dhcpMode ? null : spec.pc?.gateway ?? null,
       dhcpMode,
+      deviceClass: spec.deviceClass,
       nicUp: false,
       history: [],
       resolvedHistory: [],
@@ -318,6 +324,7 @@ export const pcAdapter: DeviceAdapter<PcSession> = {
       kind: 'pc',
       hostname: session.hostname,
       platform: 'Workstation',
+      deviceClass: session.deviceClass,
       interfaces: [
         {
           id: session.nic,

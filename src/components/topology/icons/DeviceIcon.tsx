@@ -1,6 +1,7 @@
 import RouterIcon from "./RouterIcon";
 import SwitchIcon from "./SwitchIcon";
 import WorkstationIcon from "./WorkstationIcon";
+import ServerIcon from "./ServerIcon";
 
 interface DeviceIconProps {
   type: string;
@@ -19,6 +20,8 @@ export default function DeviceIcon({ type, size = 40, color = "currentColor" }: 
     case "catalyst-2960":
     case "C2960":
       return <SwitchIcon size={size} color={color} />;
+    case "server":
+      return <ServerIcon size={size} color={color} />;
     case "workstation":
     case "Workstation":
     case "pc":
@@ -29,4 +32,4 @@ export default function DeviceIcon({ type, size = 40, color = "currentColor" }: 
   }
 }
 
-export { RouterIcon, SwitchIcon, WorkstationIcon };
+export { RouterIcon, SwitchIcon, WorkstationIcon, ServerIcon };

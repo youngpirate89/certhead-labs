@@ -98,6 +98,10 @@ export interface DeviceTopologyView {
   readonly hostname: string;
   /** Short platform/model label (badge), e.g. `ISR4321`. */
   readonly platform: string;
+  /** Optional visual override — when set, the canvas's DeviceIcon picks an
+   *  icon by this discriminator instead of `platform`. Used to render a
+   *  PC-kind node as a server (Lab 12's Server). */
+  readonly deviceClass?: string;
   readonly interfaces: readonly InterfaceTopologyView[];
 }
 

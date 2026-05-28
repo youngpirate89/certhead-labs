@@ -78,6 +78,13 @@ export interface LabDevice {
   /** Device kind — selects the adapter (router/switch/pc). */
   readonly kind: DeviceKind;
   readonly platform: string;
+  /** Optional visual classification — drives the topology canvas's icon
+   *  pick. When unset, the icon dispatcher falls back to the `platform`
+   *  string. Today only the PC-shaped variants ('workstation', 'server')
+   *  are surfaced; routers/switches always render their kind's icon. Use
+   *  this when a lab needs a PC-shaped node to render as a rack-unit
+   *  server (e.g., Lab 12's BLOCK-ICMP target). */
+  readonly deviceClass?: 'workstation' | 'server';
   readonly interfaces: readonly string[];
   /** PC-only initial state. Routers/switches ignore this. */
   readonly pc?: {
