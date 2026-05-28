@@ -4,7 +4,7 @@
 > the question-bank product. Do not conflate the two; they have different
 > architectures, different priorities, and different timelines.
 >
-> Last updated: 2026-05-30
+> Last updated: 2026-05-28
 
 ---
 
@@ -51,11 +51,11 @@ This project is **explicitly subordinate to CertHead's launch sequence.** Work o
 
 ---
 
-## 🎯 CURRENT FOCUS — CATALOG AT 13 LABS, ALL COMMITTED
+## 🎯 CURRENT FOCUS — CATALOG AT 15 LABS, ALL COMMITTED
 
-Status: Engine has generalized well past the original troubleshooting-pilot scope. Switch + VLAN + trunking landed; on-demand hint reveal landed; DHCP server landed; "See Solution" disclosure landed across the entire catalog; NAT/PAT landed; named extended ACLs landed (grammar hardened with explicit coverage for the 4 src/dst×any/host/bare combinations + `eq` port forms); Lab 13 (OSPF tshoot — mismatched area) signed off via tests + cold-run. Catalog is at 13 labs, all committed (solution field standard across every catalog lab).
+Status: Engine has generalized well past the original troubleshooting-pilot scope. Switch + VLAN + trunking landed; on-demand hint reveal landed; DHCP server landed; "See Solution" disclosure landed across the entire catalog; NAT/PAT landed; named extended ACLs landed (grammar hardened with explicit coverage for the 4 src/dst×any/host/bare combinations + `eq` port forms); Lab 13 (OSPF tshoot — mismatched area) signed off via tests + cold-run; Lab 14 (DHCP relay via `ip helper-address`) added relay-path allocator + PC `lastIpconfig` verify gate; Lab 15 (default static route — `ip route 0.0.0.0 0.0.0.0 <nh>`) needed a one-shim engine fix — split `isValidRouteMask` off `isValidMask` so the route grammar accepts the /0 default mask while interface-IP validation still rejects `ip address X 0.0.0.0` as nonsense. Catalog is at 15 labs, all committed (solution field standard across every catalog lab).
 
-**Catalog (13 labs):**
+**Catalog (15 labs):**
 - Lab 01: Interface IP — free lab, live at `/try` ✅
 - Lab 02: Tshoot — wrong return route ✅
 - Lab 03: Tshoot — wrong next-hop ✅
@@ -70,6 +70,8 @@ Status: Engine has generalized well past the original troubleshooting-pilot scop
 - Lab 11: NAT/PAT overload — inside/outside roles, ACL-selected source, `ip nat inside source list ... overload`, verify ✅
 - Lab 12: Named Extended ACL — `ip access-list extended <name>`, `permit/deny <proto> <src> <dst>`, apply inbound close to source, verify ✅
 - Lab 13: OSPF tshoot — diagnose missing/wrong adjacency via `show ip ospf neighbor` (empty header rendered IOS-style) ✅
+- Lab 14: DHCP relay — `ip helper-address` forwards client broadcasts across subnets to a remote pool ✅
+- Lab 15: Default static route — `ip route 0.0.0.0 0.0.0.0 <next-hop>`, verify with `show ip route`, ping through the gateway of last resort ✅
 
 **Engine capabilities now span:**
 - **Router:** interface config, static routes, OSPF single-area (neighbor state + O routes), standard ACLs (numbered 1–99) AND named extended ACLs (`ip access-list extended <name>` enters config-ext-nacl mode; `permit/deny <proto> <src> <dst> [eq <port>]` lines auto-sequence in 10s; `ip access-group <name|number> in|out` binds), protocol + destination matching in `evaluateAcl`/`canReach` (PC/router ping handlers + tracert pass `protocol: 'icmp'` so extended `deny icmp` entries fire), subinterfaces with config-subif mode (`interface Gi0/0.10`), `encapsulation dot1q <vlan>` (native option), subif-aware `canReach` for inter-VLAN routing, DHCP server (`ip dhcp pool`, `ip dhcp excluded-address`, `network` / `default-router` / `dns-server` / `lease` in config-dhcp mode), deterministic binding allocator that propagates ip/mask/gateway into DHCP-client PCs, NAT/PAT overload (`ip nat inside`/`outside` on interfaces, `ip nat inside source list <acl> interface <iface> overload` in config) with canReach-integrated `effectiveSrcIp` translation at the inside→outside boundary and a LabSession-refresh-populated translation table, full show suite incl. `show run interface <iface>`, `show ip dhcp pool|binding|conflict`, `show ip nat translations|statistics`, and `show access-lists` (renders Standard and Extended ACLs; stamps Session.lastShowAccessLists as the verify gate).
@@ -83,11 +85,11 @@ Status: Engine has generalized well past the original troubleshooting-pilot scop
 - **Solution disclosure:** every catalog lab ships a `solution: LabSolution` block. `LabSolution = { steps: SolutionStep[] }`, step = `{ device, commands, note? }`. Collapsible "See Solution" panel under the hints — closed by default, muted text + chevron, no warning copy. **Solution field is now standard on the Lab type — every new lab requires a solution block, authored at the same time as the lab (not added retroactively).** The type stays optional so pilot/throwaway labs in `_pilots/` can omit it; catalog membership implies a solution. Command block renders one `<div>` per command (no `.join('\n')` into a single string) with `whitespace-pre` to preserve leading indents — learners can read the block top to bottom and type each line exactly as shown.
 - **Extended ACL grammar:** hardened across the 4 src×dst combinations (`any|host <ip>|<ip> <wc>` for both source and destination) plus optional `eq <port|name>`. `show running-config interface <iface>` now mirrors the full `show running-config` and includes `ip access-group ... in|out` lines so the single-iface form doesn't silently drop bindings.
 
-685 tests passing, tsc clean, prod build clean. Free lab unchanged and live.
+728 tests passing, tsc clean, prod build clean. Free lab unchanged and live.
 
 **CertHead state (drives the next move):** Live exams: CCNA, N10-009, SY0-701. Paid subscribers: 0 — pre-launch, building catalog depth in private is the +4–12 week phase, fully in-bounds. Nothing deployed beyond the free lab; catalog registry, `/embed`, custom domain, and the landing-page link to `/try` all still gated on the ≥300-paid bar.
 
-**Next — Lab 14 candidate selection: check CLAUDE.md strategic sequencing rules before starting. Authoring checklist for every new lab: starting state + objectives + hints + `solution: LabSolution` block — all authored together in the same PR, never as a follow-up.**
+**Next — Lab 16 candidate selection: check CLAUDE.md strategic sequencing rules before starting. Authoring checklist for every new lab: starting state + objectives + hints + `solution: LabSolution` block — all authored together in the same PR, never as a follow-up.**
 
 ---
 

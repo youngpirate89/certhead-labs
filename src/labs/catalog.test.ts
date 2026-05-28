@@ -15,6 +15,7 @@ const CATALOG_IDS = [
   'ccna-lab10-dhcp-server',
   'ccna-lab11-nat-pat',
   'ccna-lab14-dhcp-relay',
+  'ccna-lab15-default-static-route',
   'ccna-tshoot-return-route',
   'ccna-tshoot-wrong-next-hop',
   'ccna-tshoot-wan-subnet-mismatch',
