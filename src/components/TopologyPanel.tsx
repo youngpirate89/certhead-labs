@@ -663,7 +663,7 @@ function CanvasControls() {
         </svg>
       </CanvasButton>
       <CanvasButton
-        onClick={() => fitView({ maxZoom: 1, duration: 200, padding: 0.1 })}
+        onClick={() => fitView({ maxZoom: 1, duration: 200, padding: 0.16 })}
         label="Fit topology to view"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden fill="none">
@@ -742,10 +742,12 @@ function CanvasAutoFit({
       const ch = rect.height;
       if (!cw || !ch) return;
 
-      // 5% padding on each side gives small topologies breathing room while
-      // still letting the 4-node row use most of a desktop band.
-      const padX = Math.max(ROW_INSET_X, cw * 0.05);
-      const padY = Math.max(8, ch * 0.05);
+      // 8% padding on each side keeps the leftmost/rightmost end nodes (and
+      // their labels) clear of the canvas edges with visible margin, while
+      // still letting the 4-node row use most of a desktop band. (Was 5% — too
+      // tight, left end nodes hugging the edge at laptop widths.)
+      const padX = Math.max(ROW_INSET_X, cw * 0.08);
+      const padY = Math.max(8, ch * 0.08);
       const availW = Math.max(1, cw - 2 * padX);
       const availH = Math.max(1, ch - 2 * padY);
 
