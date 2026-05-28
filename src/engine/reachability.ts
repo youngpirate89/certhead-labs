@@ -25,7 +25,7 @@ import type { SwitchSession } from './adapters/ios/switch-state';
 import { trunkAllowsVlan } from './adapters/ios/switch-state';
 import { ipInSubnet, longestPrefixMatch, networkAddress } from './adapters/ios/routing';
 import { routingTable } from './adapters/ios/state';
-import { evaluateAcl } from './adapters/ios/acl';
+import { evaluateAcl, type AclProtocol } from './adapters/ios/acl';
 import type { Link } from './types';
 
 // ---------- Public contract (§1) ----------
@@ -55,9 +55,11 @@ export interface FailPoint {
   /** Extra context for `acl-deny`: which ACL fired, which direction it was
    *  applied to the interface, and the source IP that hit the deny. Carried
    *  here so failureDetail can name the ACL in the `[sim]` sentence without
-   *  re-walking the topology. Undefined for every other reason. */
+   *  re-walking the topology. Undefined for every other reason.
+   *  `aclNumber` is the ACL id — a number for numbered standard ACLs, a
+   *  string for named extended ACLs (Lab 12). */
   readonly acl?: {
-    readonly aclNumber: number;
+    readonly aclNumber: number | string;
     readonly aclDirection: 'in' | 'out';
     readonly sourceIp: string;
   };
@@ -106,6 +108,7 @@ export function canReach(
   fromDeviceId: string,
   toIp: string,
   sourceIp?: string,
+  protocol: AclProtocol = 'ip',
 ): ReachResult {
   const src = session.devices[fromDeviceId];
   if (!src) {
@@ -120,9 +123,9 @@ export function canReach(
   }
 
   const natCtx: NatContext = { finalSrcIp: srcIp };
-  const fwd = walk(session, srcIp, toIp, 'forward', natCtx);
+  const fwd = walk(session, srcIp, toIp, 'forward', protocol, natCtx);
   if (!fwd.ok) return fwd;
-  const ret = walk(session, toIp, natCtx.finalSrcIp, 'return');
+  const ret = walk(session, toIp, natCtx.finalSrcIp, 'return', protocol);
   return ret;
 }
 
@@ -143,6 +146,7 @@ function walk(
   srcIp: string,
   dstIp: string,
   direction: Direction,
+  protocol: AclProtocol,
   natCtx?: NatContext,
 ): ReachResult {
   // Mutable "what's the source IP in the packet right now" for the walk.
@@ -192,7 +196,15 @@ function walk(
     if (ingressIface !== null) {
       const inIface = current.device.interfaces[ingressIface];
       if (inIface) {
-        const denied = checkInterfaceAcl(current, inIface, effectiveSrcIp, 'in', direction);
+        const denied = checkInterfaceAcl(
+          current,
+          inIface,
+          effectiveSrcIp,
+          dstIp,
+          protocol,
+          'in',
+          direction,
+        );
         if (denied) return denied;
       }
     }
@@ -272,7 +284,15 @@ function walk(
     // before delivery / link traversal so the failure point is named on the
     // forwarding router (not the destination), matching IOS semantics.
     {
-      const denied = checkInterfaceAcl(current, egressIface, effectiveSrcIp, 'out', direction);
+      const denied = checkInterfaceAcl(
+        current,
+        egressIface,
+        effectiveSrcIp,
+        dstIp,
+        protocol,
+        'out',
+        direction,
+      );
       if (denied) return denied;
     }
 
@@ -668,7 +688,7 @@ function failAcl(
   direction: Direction,
   deviceId: string,
   iface: string,
-  aclNumber: number,
+  aclNumber: number | string,
   aclDirection: 'in' | 'out',
   sourceIp: string,
 ): ReachResult {
@@ -684,26 +704,29 @@ function failAcl(
   };
 }
 
-/** Run the ACL bound to `iface` in the given `aclDirection` against `sourceIp`.
- *  Returns the failing ReachResult on deny, or null when the packet passes
- *  (no ACL bound, ACL number references no defined ACL, or first-match permit).
- *  Pure: never mutates inputs. */
+/** Run the ACL bound to `iface` in the given `aclDirection` against
+ *  (`sourceIp`, `dstIp`, `protocol`). Standard ACLs ignore the dst/protocol
+ *  args; extended ACLs (Lab 12) match on all three. Returns the failing
+ *  ReachResult on deny, or null when the packet passes (no ACL bound, ACL id
+ *  references no defined ACL, or first-match permit). Pure: never mutates. */
 function checkInterfaceAcl(
   router: RouterSession,
   iface: InterfaceState,
   sourceIp: string,
+  dstIp: string,
+  protocol: AclProtocol,
   aclDirection: 'in' | 'out',
   walkDirection: Direction,
 ): ReachResult | null {
-  const aclNumber = iface.accessGroups[aclDirection];
-  if (aclNumber === null) return null;
-  const acl = router.device.acls.get(aclNumber);
+  const aclId = iface.accessGroups[aclDirection];
+  if (aclId === null) return null;
+  const acl = router.device.acls.get(aclId);
   // Real IOS: an `ip access-group N <dir>` pointing at an undefined ACL is a
   // no-op (nothing to filter against). Keep the lab consistent with that —
   // the learner only sees blocks once they've actually defined the ACL.
   if (!acl) return null;
-  if (evaluateAcl(acl, sourceIp) === 'deny') {
-    return failAcl(walkDirection, router.device.id, iface.id, aclNumber, aclDirection, sourceIp);
+  if (evaluateAcl(acl, sourceIp, protocol, dstIp) === 'deny') {
+    return failAcl(walkDirection, router.device.id, iface.id, aclId, aclDirection, sourceIp);
   }
   return null;
 }

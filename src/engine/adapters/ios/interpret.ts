@@ -51,7 +51,8 @@ function isConfigFamily(mode: Mode): boolean {
     mode === 'config-if' ||
     mode === 'config-subif' ||
     mode === 'config-router' ||
-    mode === 'config-dhcp'
+    mode === 'config-dhcp' ||
+    mode === 'config-ext-nacl'
   );
 }
 
@@ -303,6 +304,9 @@ function dispatch(
       } else if (s.mode === 'config-dhcp') {
         s.mode = 'config';
         s.activeDhcpPool = null;
+      } else if (s.mode === 'config-ext-nacl') {
+        s.mode = 'config';
+        s.activeAcl = null;
       } else if (s.mode === 'config') {
         s.mode = 'priv';
       } else if (s.mode === 'priv') {
@@ -315,6 +319,7 @@ function dispatch(
       s.currentInterface = null;
       s.activeSubIfId = null;
       s.activeDhcpPool = null;
+      s.activeAcl = null;
       return { session: s, output: [] };
 
     case 'router':
@@ -370,7 +375,16 @@ function dispatch(
           return addNatStatement(s, args.acl, args.iface);
         }
       }
+      if (command[1] === 'access-list' && command[2] === 'extended') {
+        return enterExtAcl(s, args.name);
+      }
       return { session: s, output: err('% Incomplete command.') };
+
+    case 'permit':
+    case 'deny':
+      // Only reachable from config-ext-nacl (the grammar exposes permit/deny
+      // here). Other modes' permit/deny resolve elsewhere or fail at parse.
+      return addExtAclEntry(s, head, command, args);
 
     case 'network':
       // In config-router this is an OSPF network statement; in config-dhcp it's
@@ -555,7 +569,9 @@ function ping(
     return { session: s, output: err('Ping requires a lab context.') };
   }
   const sourceIp = pingSourceIp(s, target);
-  const result = canReach(ctx.lab, s.device.id, target, sourceIp ?? undefined);
+  // Router-originated ping is ICMP — pass the protocol so extended `deny icmp`
+  // ACLs (Lab 12) fire identically here as for PC ping.
+  const result = canReach(ctx.lab, s.device.id, target, sourceIp ?? undefined, 'icmp');
   if (result.ok) {
     return { session: s, output: pingSuccessLines(target) };
   }
@@ -716,6 +732,13 @@ function setSubIfAdmin(s: Session, up: boolean): ApplyResult {
 
 function negate(s: Session, command: string[], args: Record<string, string>): ApplyResult {
   // command = ['no', ...]
+  // In config-ext-nacl mode, `no <sequence>` removes an entry — the grammar
+  // captures the sequence under args.sequence and command[1] is the bare
+  // sequence number rather than a known keyword. Detect that path first so
+  // we don't fall into the keyword switch below.
+  if (s.mode === 'config-ext-nacl' && args.sequence !== undefined) {
+    return removeExtAclEntry(s, args.sequence);
+  }
   switch (command[1]) {
     case 'shutdown':
       return setAdmin(s, true);
@@ -744,6 +767,9 @@ function negate(s: Session, command: string[], args: Record<string, string>): Ap
         if (s.mode === 'config' && command[3] === 'inside') {
           return removeNatStatement(s, args.acl, args.iface);
         }
+      }
+      if (command[2] === 'access-list' && command[3] === 'extended') {
+        return removeExtAcl(s, args.name);
       }
       // `no ip address`:
       //   - in config-subif → clear the active subinterface's IP+mask
@@ -1163,38 +1189,58 @@ function removeAcl(s: Session, numberArg: string): ApplyResult {
   return { session: s, output: [] };
 }
 
+/** Parse an ACL binding token — accepts a standard ACL number (1-99) or a
+ *  named extended ACL identifier (any non-empty string). Numbered IDs are
+ *  returned as numbers; names pass through as strings. The downstream
+ *  evaluator looks the id up in `device.acls` with the appropriate key type. */
+function parseAclId(raw: string): string | number | null {
+  if (!raw) return null;
+  // Try numbered standard first — if the token parses cleanly as 1-99, use it
+  // as a number (so an existing numbered ACL lookup keys match by Number).
+  // Out-of-range numbers (e.g. 100) still fall through to a name to keep the
+  // surface generic; pedagogically that's fine — the lookup just won't hit
+  // an existing ACL and the binding is a no-op.
+  const asNumber = parseAclNumber(raw);
+  if (asNumber !== null) return asNumber;
+  // Names cannot be pure numbers (IOS forbids); the regex enforces that an
+  // identifier starts with a letter or underscore. Any other token shape is
+  // invalid.
+  if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(raw)) return null;
+  return raw;
+}
+
 /** Bind an ACL to the current interface in the given direction
- *  (`ip access-group <n> in|out`). No-ops if no interface is selected. */
+ *  (`ip access-group <n|name> in|out`). No-ops if no interface is selected. */
 function setAccessGroup(
   s: Session,
-  numberArg: string,
+  idArg: string,
   direction: 'in' | 'out',
 ): ApplyResult {
-  const number = parseAclNumber(numberArg);
-  if (number === null) {
-    return { session: s, output: err(`% Invalid input detected at "${numberArg}".`) };
+  const aclId = parseAclId(idArg);
+  if (aclId === null) {
+    return { session: s, output: err(`% Invalid input detected at "${idArg}".`) };
   }
   if (!s.currentInterface) return { session: s, output: [] };
-  s.device.interfaces[s.currentInterface].accessGroups[direction] = number;
+  s.device.interfaces[s.currentInterface].accessGroups[direction] = aclId;
   return { session: s, output: [] };
 }
 
-/** Unbind an ACL from the current interface (`no ip access-group <n> in|out`).
- *  IOS clears the binding regardless of the supplied number — but the syntax
- *  requires the number; we honor that with a soft check that mismatches still
- *  clear (matches real IOS, which is lenient). */
+/** Unbind an ACL from the current interface (`no ip access-group <n|name>
+ *  in|out`). IOS clears the binding regardless of the supplied id — but the
+ *  syntax requires the id; we honor that with a soft check that mismatches
+ *  still clear (matches real IOS, which is lenient). */
 function clearAccessGroup(
   s: Session,
-  numberArg: string,
+  idArg: string,
   direction: 'in' | 'out',
 ): ApplyResult {
-  const number = parseAclNumber(numberArg);
-  if (number === null) {
-    return { session: s, output: err(`% Invalid input detected at "${numberArg}".`) };
+  const aclId = parseAclId(idArg);
+  if (aclId === null) {
+    return { session: s, output: err(`% Invalid input detected at "${idArg}".`) };
   }
   if (!s.currentInterface) return { session: s, output: [] };
   const iface = s.device.interfaces[s.currentInterface];
-  if (iface.accessGroups[direction] === number) {
+  if (iface.accessGroups[direction] === aclId) {
     iface.accessGroups[direction] = null;
   }
   return { session: s, output: [] };
@@ -1278,6 +1324,179 @@ function removeNatStatement(
   return { session: s, output: [] };
 }
 
+// ---------- Named extended ACLs (Lab 12: `ip access-list extended <name>`) ---
+
+/** Well-known TCP/UDP port names that IOS accepts after `eq` on an extended
+ *  ACL. Numeric ports pass through as-is; this map is consulted only when the
+ *  user types a name. Not exhaustive — covers the CCNA-relevant set. */
+const ACL_PORT_NAMES: Record<string, number> = {
+  ftp: 21,
+  ssh: 22,
+  telnet: 23,
+  smtp: 25,
+  dns: 53,
+  www: 80,
+  http: 80,
+  https: 443,
+};
+
+/** Accept either a numeric port (1-65535) or one of the well-known names in
+ *  ACL_PORT_NAMES. Returns the resolved port, or null on invalid input. */
+function parseAclPort(raw: string): number | null {
+  const named = ACL_PORT_NAMES[raw.toLowerCase()];
+  if (named !== undefined) return named;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || String(n) !== raw) return null;
+  if (n < 1 || n > 65535) return null;
+  return n;
+}
+
+/** `ip access-list extended <name>` from config — create the ACL if absent
+ *  and enter config-ext-nacl mode for the named ACL. If a same-named ACL
+ *  already exists with a different type, refuse (matches IOS behavior). */
+function enterExtAcl(s: Session, name: string): ApplyResult {
+  if (!name) return { session: s, output: err('% Incomplete command.') };
+  const existing = s.device.acls.get(name);
+  if (existing && existing.type !== 'extended') {
+    return {
+      session: s,
+      output: err(`% Access-list ${name} already exists with a different type.`),
+    };
+  }
+  if (!existing) {
+    s.device.acls.set(name, { name, type: 'extended', entries: [] });
+  }
+  s.mode = 'config-ext-nacl';
+  s.activeAcl = name;
+  return { session: s, output: [] };
+}
+
+/** `no ip access-list extended <name>` from config — drop the entire ACL. */
+function removeExtAcl(s: Session, name: string): ApplyResult {
+  if (!name) return { session: s, output: err('% Incomplete command.') };
+  s.device.acls.delete(name);
+  return { session: s, output: [] };
+}
+
+/** Parse the src or dst form (any | host <ip> | <ip> <wildcard>) out of the
+ *  resolver's captured args. Args are namespaced per side ('src-ip', etc.) so
+ *  the same parser can drive both source and destination. Returns the
+ *  canonical (ip, wildcard) pair, or an error string on invalid IPs. */
+function parseExtTuple(
+  args: Record<string, string>,
+  side: 'src' | 'dst',
+): { ip: string; wildcard: string } | { error: string } {
+  const ipKey = `${side}-ip`;
+  const wcKey = `${side}-wildcard`;
+  const rawIp = args[ipKey];
+  const rawWc = args[wcKey];
+  if (rawIp === undefined) {
+    // `any` — neither arg was captured.
+    return { ip: '0.0.0.0', wildcard: '255.255.255.255' };
+  }
+  if (!isValidIpv4(rawIp)) {
+    return { error: `% Invalid input detected at "${rawIp}".` };
+  }
+  if (rawWc === undefined) {
+    // `host <ip>` — the IP was captured under host, no wildcard arg.
+    return { ip: rawIp, wildcard: '0.0.0.0' };
+  }
+  if (!isValidIpv4(rawWc)) {
+    return { error: `% Invalid input detected at "${rawWc}".` };
+  }
+  return { ip: rawIp, wildcard: rawWc };
+}
+
+/** Append a permit/deny entry to the active extended ACL. Only valid in
+ *  config-ext-nacl mode — the grammar already enforces that, but we
+ *  defensively guard for safety in tests that might drive applyCommand
+ *  bypassing the mode check. Sequences auto-increment in 10s. */
+function addExtAclEntry(
+  s: Session,
+  action: 'permit' | 'deny',
+  command: string[],
+  args: Record<string, string>,
+): ApplyResult {
+  if (s.mode !== 'config-ext-nacl' || !s.activeAcl) {
+    return { session: s, output: err('% No active extended ACL.') };
+  }
+  const acl = s.device.acls.get(s.activeAcl);
+  if (!acl || acl.type !== 'extended') {
+    return { session: s, output: err('% Invalid ACL state.') };
+  }
+  const protocol = args.protocol as 'ip' | 'tcp' | 'udp' | 'icmp' | undefined;
+  if (!protocol || !['ip', 'tcp', 'udp', 'icmp'].includes(protocol)) {
+    return {
+      session: s,
+      output: err(`% Invalid input detected at "${args.protocol ?? ''}".`),
+    };
+  }
+
+  const src = parseExtTuple(args, 'src');
+  if ('error' in src) return { session: s, output: err(src.error) };
+  const dst = parseExtTuple(args, 'dst');
+  if ('error' in dst) return { session: s, output: err(dst.error) };
+
+  // Optional `eq <port>`. Grammar captures it as args.port whenever the user
+  // typed `eq <port>`; we surface a clean IOS-style error when the protocol
+  // doesn't support ports (icmp/ip) or the port itself doesn't parse.
+  let dstPort: number | undefined;
+  if (command.includes('eq')) {
+    if (protocol === 'icmp' || protocol === 'ip') {
+      return {
+        session: s,
+        output: err(`% eq keyword not supported for protocol ${protocol}`),
+      };
+    }
+    const port = parseAclPort(args.port);
+    if (port === null) {
+      return { session: s, output: err(`% Invalid input detected at "${args.port}".`) };
+    }
+    dstPort = port;
+  }
+
+  const nextSeq =
+    acl.entries.length === 0
+      ? 10
+      : acl.entries[acl.entries.length - 1].sequence + 10;
+  const entry: AclEntry = {
+    sequence: nextSeq,
+    action,
+    // Mirror srcIp/srcWildcard into the legacy source/wildcard fields so
+    // readers that only inspect those (older code paths, show output for
+    // standard rendering) still see sensible values. Extended-only
+    // consumers read srcIp/srcWildcard/dstIp/dstWildcard/protocol directly.
+    source: src.ip,
+    wildcard: src.wildcard,
+    protocol,
+    srcIp: src.ip,
+    srcWildcard: src.wildcard,
+    dstIp: dst.ip,
+    dstWildcard: dst.wildcard,
+    ...(dstPort !== undefined ? { dstPort } : {}),
+  };
+  acl.entries.push(entry);
+  return { session: s, output: [] };
+}
+
+/** `no <sequence>` in config-ext-nacl — remove the entry with that line
+ *  number. Soft no-op if no matching entry (IOS silently accepts). */
+function removeExtAclEntry(s: Session, seqArg: string): ApplyResult {
+  if (s.mode !== 'config-ext-nacl' || !s.activeAcl) {
+    return { session: s, output: err('% No active extended ACL.') };
+  }
+  const acl = s.device.acls.get(s.activeAcl);
+  if (!acl || acl.type !== 'extended') {
+    return { session: s, output: err('% Invalid ACL state.') };
+  }
+  const seq = Number.parseInt(seqArg, 10);
+  if (!Number.isFinite(seq) || String(seq) !== seqArg) {
+    return { session: s, output: err(`% Invalid input detected at "${seqArg}".`) };
+  }
+  acl.entries = acl.entries.filter((e) => e.sequence !== seq);
+  return { session: s, output: [] };
+}
+
 /** Render `show ip nat translations`. Empty case mirrors IOS verbatim. Each
  *  entry is the PAT (overload) form — no port tracking, so port columns
  *  display `---`. The translation table is rebuilt by the LabSession's NAT
@@ -1333,7 +1552,14 @@ function show(
 ): ApplyResult {
   // command = ['show', ...]
   const what = command[1];
-  if (what === 'access-lists') return { session: s, output: out(...showAccessLists(s)) };
+  if (what === 'access-lists') {
+    // Stamp the verify gate when at least one ACL exists — same shape as
+    // lastShowDhcpBinding / lastShowNatTranslations: an empty-table run prints
+    // the "no access lists" line but doesn't satisfy a verify objective
+    // (the learner has to land at least one ACL definition first).
+    if (s.device.acls.size > 0) s.lastShowAccessLists = nextEngineSeq();
+    return { session: s, output: out(...showAccessLists(s)) };
+  }
   if (what === 'ip') {
     // `show ip interface brief` vs `show ip interface <iface>` vs route vs ospf.
     if (command[2] === 'route') return { session: s, output: out(...showIpRoute(s)) };
@@ -1398,19 +1624,59 @@ function show(
   return { session: s, output: err('% Incomplete command.') };
 }
 
-/** Render `show access-lists`. Empty case matches IOS verbatim. */
+/** Render `show access-lists`. Empty case matches IOS verbatim. Standard and
+ *  extended ACLs render under different headers — numbered standard uses the
+ *  ACL number; extended uses the named identifier (Lab 12 only ships named
+ *  extended). */
 function showAccessLists(s: Session): string[] {
   if (s.device.acls.size === 0) {
     return ['There are no access lists.'];
   }
   const lines: string[] = [];
   for (const acl of s.device.acls.values()) {
-    lines.push(`Standard IP access list ${acl.number}`);
-    for (const e of acl.entries) {
-      lines.push(formatAclEntryLine(e));
+    if (acl.type === 'extended') {
+      lines.push(`Extended IP access list ${acl.name ?? acl.number}`);
+      for (const e of acl.entries) {
+        lines.push(formatExtAclEntryLine(e));
+      }
+    } else {
+      const id = acl.number ?? acl.name;
+      lines.push(`Standard IP access list ${id}`);
+      for (const e of acl.entries) {
+        lines.push(formatAclEntryLine(e));
+      }
     }
   }
   return lines;
+}
+
+/** Render a single extended-ACL entry in `show access-lists` format.
+ *
+ *  IOS form:
+ *    `    10 deny icmp 192.168.1.0 0.0.0.255 host 192.168.2.10`
+ *    `    20 permit ip any any`
+ *    `    30 permit tcp host 10.0.0.1 any eq www`
+ *
+ *  Normalisations match the IOS display:
+ *    - source/dest pair (0.0.0.0, 255.255.255.255) → `any`
+ *    - source/dest with wildcard 0.0.0.0 → `host <ip>`
+ *    - otherwise → `<ip> <wildcard>`
+ *  `dstPort` omitted when absent. */
+function formatExtAclEntryLine(e: AclEntry): string {
+  const seq = String(e.sequence).padStart(2, ' ');
+  const action = e.action;
+  const protocol = e.protocol ?? 'ip';
+  const src = formatExtTuple(e.srcIp ?? e.source, e.srcWildcard ?? '0.0.0.0');
+  const dst = formatExtTuple(e.dstIp ?? '0.0.0.0', e.dstWildcard ?? '0.0.0.0');
+  const eq = e.dstPort !== undefined ? ` eq ${e.dstPort}` : '';
+  return `    ${seq} ${action} ${protocol} ${src} ${dst}${eq}`;
+}
+
+/** (ip, wildcard) → IOS short form: `any` | `host <ip>` | `<ip> <wildcard>`. */
+function formatExtTuple(ip: string, wildcard: string): string {
+  if (ip === '0.0.0.0' && wildcard === '255.255.255.255') return 'any';
+  if (wildcard === '0.0.0.0') return `host ${ip}`;
+  return `${ip} ${wildcard}`;
 }
 
 /** Single entry in `show access-lists` format.
@@ -1827,11 +2093,20 @@ function showRunningConfig(s: Session): string[] {
   if (s.staticRoutes.some((r) => r.source === 'static')) {
     lines.push('!');
   }
-  // ACL lines appear after interfaces / routes — matches IOS ordering. Each
-  // entry collapses to its source form (any / host / network+wildcard).
+  // ACL lines appear after interfaces / routes — matches IOS ordering.
+  // Standard numbered ACLs render as `access-list N action ...`; named
+  // extended ACLs render as a multi-line `ip access-list extended NAME`
+  // stanza, with each entry on its own indented line (Lab 12).
   for (const acl of s.device.acls.values()) {
-    for (const e of acl.entries) {
-      lines.push(`access-list ${acl.number} ${e.action} ${aclEntryRunConfig(e)}`);
+    if (acl.type === 'extended') {
+      lines.push(`ip access-list extended ${acl.name ?? acl.number}`);
+      for (const e of acl.entries) {
+        lines.push(` ${e.action} ${extEntryRunConfig(e)}`);
+      }
+    } else {
+      for (const e of acl.entries) {
+        lines.push(`access-list ${acl.number ?? acl.name} ${e.action} ${aclEntryRunConfig(e)}`);
+      }
     }
   }
   if (s.device.acls.size > 0) lines.push('!');
@@ -1844,4 +2119,14 @@ function aclEntryRunConfig(e: AclEntry): string {
   if (e.source === '0.0.0.0' && e.wildcard === '255.255.255.255') return 'any';
   if (e.wildcard === null) return `host ${e.source}`;
   return `${e.source} ${e.wildcard}`;
+}
+
+/** Render an EXTENDED ACL entry's body (protocol + src + dst + eq) for the
+ *  `ip access-list extended NAME` stanza in `show running-config`. */
+function extEntryRunConfig(e: AclEntry): string {
+  const protocol = e.protocol ?? 'ip';
+  const src = formatExtTuple(e.srcIp ?? e.source, e.srcWildcard ?? '0.0.0.0');
+  const dst = formatExtTuple(e.dstIp ?? '0.0.0.0', e.dstWildcard ?? '0.0.0.0');
+  const eq = e.dstPort !== undefined ? ` eq ${e.dstPort}` : '';
+  return `${protocol} ${src} ${dst}${eq}`;
 }

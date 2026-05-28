@@ -12,7 +12,9 @@ import { connectedRoutes, type Route } from './routing';
  *  `config-if` — entered by `interface gi0/0.10` from `config`, holds the
  *  active subinterface id, and accepts the same `ip address` / `shutdown`
  *  commands plus `encapsulation dot1q <vlan>`. `config-dhcp` is the per-pool
- *  configuration mode entered by `ip dhcp pool <name>` from `config`. */
+ *  configuration mode entered by `ip dhcp pool <name>` from `config`.
+ *  `config-ext-nacl` is the per-ACL configuration mode entered by
+ *  `ip access-list extended <name>` from `config` (Lab 12). */
 export type Mode =
   | 'user'
   | 'priv'
@@ -20,7 +22,8 @@ export type Mode =
   | 'config-if'
   | 'config-subif'
   | 'config-router'
-  | 'config-dhcp';
+  | 'config-dhcp'
+  | 'config-ext-nacl';
 
 /** A single `network <prefix> <wildcard> area <area-id>` statement. */
 export interface OspfNetwork {
@@ -50,24 +53,47 @@ export interface OspfState {
   neighbors: Map<string, OspfNeighborState>;
 }
 
-/** One ACE in a numbered standard ACL.
- *  - `source` is the prefix (or host IP, or '0.0.0.0' for `any`).
- *  - `wildcard` null encodes a `host <ip>` exact match (semantically /32).
+/** One ACE in a standard OR extended ACL.
+ *
+ *  Standard entries set `source` + `wildcard` only (the legacy fields used by
+ *  Lab 06 / Lab 11's numbered ACL grading). For these entries, `protocol` is
+ *  undefined and the evaluator matches on source IP alone.
+ *
+ *  Extended entries (Lab 12) ALSO set `protocol`, `srcIp`, `srcWildcard`,
+ *  `dstIp`, `dstWildcard`, and optionally `dstPort`. `source` and `wildcard`
+ *  on extended entries mirror `srcIp`/`srcWildcard` so legacy readers that
+ *  only inspect those two fields still see sensible values. The evaluator
+ *  discriminates on `protocol`: undefined → standard path; defined →
+ *  protocol + dst match in addition to the source check.
+ *
+ *  - `source` / `srcIp`: prefix (or host IP, or '0.0.0.0' for `any`).
+ *  - `wildcard`: null encodes a `host <ip>` exact match for standard entries
+ *    (semantically /32). Extended entries never use null — host form maps to
+ *    `srcWildcard: '0.0.0.0'` (the canonical extended-ACL encoding).
  *  - `sequence` is the IOS line number, auto-assigned in 10s on insertion. */
 export interface AclEntry {
   readonly sequence: number;
   readonly action: 'permit' | 'deny';
   readonly source: string;
   readonly wildcard: string | null;
+  // Extended-only fields (undefined on standard entries):
+  readonly protocol?: 'ip' | 'tcp' | 'udp' | 'icmp';
+  readonly srcIp?: string;
+  readonly srcWildcard?: string;
+  readonly dstIp?: string;
+  readonly dstWildcard?: string;
+  readonly dstPort?: number;
 }
 
-/** Standard numbered IP ACL (range 1-99). Extended (100-199) is out of scope
- *  for now; the `type` discriminator is set up so extended can be added
- *  without restructuring. Entries iterate in insertion order — first-match
- *  wins, with an implicit deny at the end. */
+/** A standard numbered IP ACL (range 1-99) or a named extended IP ACL.
+ *  Numbered standard ACLs carry `number`; named extended ACLs (Lab 12)
+ *  carry `name`. The `type` discriminator drives evaluator + render paths.
+ *  Entries iterate in insertion order — first-match wins, with an implicit
+ *  deny at the end. */
 export interface Acl {
-  readonly number: number;
-  readonly type: 'standard';
+  readonly type: 'standard' | 'extended';
+  readonly number?: number;
+  readonly name?: string;
   entries: AclEntry[];
 }
 
@@ -144,9 +170,11 @@ export interface InterfaceState {
    *  for tests / standalone sessions that never go through the refresh —
    *  show ip int brief falls back to adminUp gracefully in that case. */
   protocolUp: boolean;
-  /** ACL numbers bound inbound/outbound on this interface. Null = no ACL on
-   *  that direction. Reachability evaluates these on every transit. */
-  accessGroups: { in: number | null; out: number | null };
+  /** ACL identifiers bound inbound/outbound on this interface — a number for
+   *  numbered standard ACLs, a string for named extended ACLs (Lab 12). Null
+   *  = no ACL on that direction. Reachability evaluates these on every
+   *  transit by looking the id up in `device.acls`. */
+  accessGroups: { in: string | number | null; out: string | number | null };
   /** NAT boundary role set by `ip nat inside` / `ip nat outside`. Undefined
    *  means no NAT role (the interface does not participate in translation).
    *  canReach's NAT pass triggers only when a packet enters on an `inside`
@@ -192,10 +220,11 @@ export interface DeviceState {
    *  Recomputed by the LabSession after any change to networks or interface
    *  admin state. */
   ospf: OspfState;
-  /** Standard numbered ACLs keyed by ACL number. Map preserves insertion order
-   *  for deterministic `show access-lists` rendering. Empty until the learner
-   *  defines an ACL with `access-list <n> permit|deny ...`. */
-  acls: Map<number, Acl>;
+  /** ACLs keyed by number (standard, 1-99) OR by name string (named extended,
+   *  Lab 12). Map preserves insertion order for deterministic `show access-lists`
+   *  rendering. Empty until the learner defines an ACL with
+   *  `access-list <n> permit|deny ...` or `ip access-list extended <name>`. */
+  acls: Map<string | number, Acl>;
   /** DHCP pools keyed by pool name. Insertion order preserved for
    *  deterministic `show ip dhcp pool` rendering. Empty until the learner
    *  creates a pool with `ip dhcp pool <name>`. */
@@ -233,6 +262,16 @@ export interface Session {
   /** The DHCP pool name being edited in config-dhcp mode. Null outside
    *  config-dhcp — symmetric with `currentInterface` / `activeSubIfId`. */
   activeDhcpPool: string | null;
+  /** The named extended ACL being edited in config-ext-nacl mode (Lab 12).
+   *  Null outside config-ext-nacl — symmetric with the other "active object"
+   *  fields above. `permit`/`deny`/`no <seq>` lines mutate this ACL. */
+  activeAcl: string | null;
+  /** Monotonic engine-seq stamp updated each time the learner runs `show
+   *  access-lists` AND at least one ACL is defined. Lab 12's verify-style
+   *  objective compares this against 0 to require the show command to have
+   *  actually run after at least one ACL exists (mirrors lastShowDhcpBinding
+   *  / lastShowNatTranslations). */
+  lastShowAccessLists: number;
   /** Monotonic engine-seq stamp updated each time the learner runs `show ip
    *  dhcp binding`. Verify-style objectives compare this against 0 to require
    *  the show command to actually have been run (mirrors `lastShowIpIntBrief`
@@ -377,9 +416,11 @@ export function createSession(device: DeviceState): Session {
     currentInterface: null,
     activeSubIfId: null,
     activeDhcpPool: null,
+    activeAcl: null,
     lastShowIpIntBrief: 0,
     lastShowDhcpBinding: 0,
     lastShowNatTranslations: 0,
+    lastShowAccessLists: 0,
     subIfConfiguredAt: {},
     device: cloneDevice(device),
     history: [],
@@ -493,5 +534,7 @@ export function prompt(session: Session): string {
       return `${h}(config-router)#`;
     case 'config-dhcp':
       return `${h}(config-dhcp)#`;
+    case 'config-ext-nacl':
+      return `${h}(config-ext-nacl)#`;
   }
 }

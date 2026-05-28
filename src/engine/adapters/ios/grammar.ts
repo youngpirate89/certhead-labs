@@ -199,6 +199,18 @@ const ipDhcpExcludedSubtree: CommandNode = {
   }),
 };
 
+/** `ip access-list extended <name>` — enters config-ext-nacl for the named
+ *  extended ACL (Lab 12). Numbered extended ACLs (100-199) are deferred. */
+const ipAccessListSubtree: CommandNode = {
+  help: 'Configure an IP access list',
+  children: {
+    extended: {
+      help: 'Extended IP access list (named)',
+      argument: arg('name', done('Enter extended ACL configuration')),
+    },
+  },
+};
+
 const ipConfigSubtree: CommandNode = {
   help: 'IP configuration commands',
   children: {
@@ -211,6 +223,7 @@ const ipConfigSubtree: CommandNode = {
       },
     },
     nat: ipNatStatementSubtree,
+    'access-list': ipAccessListSubtree,
   },
 };
 
@@ -259,6 +272,7 @@ const configMode: CommandNode = {
               },
             },
             nat: ipNatStatementSubtree,
+            'access-list': ipAccessListSubtree,
           },
         },
         'access-list': noAccessListSubtree,
@@ -467,6 +481,68 @@ const configDhcpMode: CommandNode = {
   },
 };
 
+/** config-ext-nacl keyword surface — the per-ACL config entered by
+ *  `ip access-list extended <name>` from config (Lab 12). Each `permit`/`deny`
+ *  line appends an entry: protocol → source form → destination form → optional
+ *  `eq <port>`. Source and destination both accept `any`, `host <ip>`, or
+ *  bare `<ip> <wildcard>` — three sub-trees sharing the same shape.
+ *
+ *  `no <sequence>` removes the entry with that line number. `exit` returns to
+ *  config and clears `activeAcl`. `end` jumps straight to privileged EXEC. */
+const extOptionalEq: CommandNode = {
+  terminal: true,
+  help: 'Apply the entry',
+  children: {
+    eq: {
+      help: 'Match a specific TCP/UDP port',
+      argument: arg('port', done('Apply the entry')),
+    },
+  },
+};
+
+const extDstClause: CommandNode = {
+  children: {
+    any: extOptionalEq,
+    host: {
+      help: 'Match a single destination host (/32)',
+      argument: arg('dst-ip', extOptionalEq),
+    },
+  },
+  argument: arg('dst-ip', {
+    argument: arg('dst-wildcard', extOptionalEq),
+  }),
+};
+
+const extSrcAndDst: CommandNode = {
+  children: {
+    any: extDstClause,
+    host: {
+      help: 'Match a single source host (/32)',
+      argument: arg('src-ip', extDstClause),
+    },
+  },
+  argument: arg('src-ip', {
+    argument: arg('src-wildcard', extDstClause),
+  }),
+};
+
+const extPermitDeny: CommandNode = {
+  argument: arg('protocol', extSrcAndDst),
+};
+
+const configExtNaclMode: CommandNode = {
+  children: {
+    permit: extPermitDeny,
+    deny: extPermitDeny,
+    no: {
+      help: 'Remove an entry by sequence number',
+      argument: arg('sequence', done('Remove the entry')),
+    },
+    exit: done('Exit extended ACL configuration'),
+    end: done('Return to privileged EXEC'),
+  },
+};
+
 const GRAMMARS: Record<Mode, CommandNode> = {
   user: userMode,
   priv: privMode,
@@ -475,6 +551,7 @@ const GRAMMARS: Record<Mode, CommandNode> = {
   'config-subif': configSubIfMode,
   'config-router': configRouterMode,
   'config-dhcp': configDhcpMode,
+  'config-ext-nacl': configExtNaclMode,
 };
 
 export function grammarFor(mode: Mode): CommandNode {

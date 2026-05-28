@@ -21,6 +21,7 @@ import { lab08VlanTrunking } from './ccna/lab-08-vlan-trunking';
 import { lab09IntervlanRouting } from './ccna/lab-09-intervlan-routing';
 import { lab10Dhcp } from './ccna/lab-10-dhcp';
 import { lab11NatPat } from './ccna/lab-11-nat-pat';
+import { lab12ExtendedAcl } from './ccna/lab-12-extended-acl';
 import { tshootReturnRoute } from './ccna/tshoot-return-route';
 import { tshootWrongNextHop } from './ccna/tshoot-wrong-next-hop';
 import { tshootWanSubnetMismatch } from './ccna/tshoot-wan-subnet-mismatch';
@@ -35,6 +36,7 @@ const CATALOG: readonly Lab[] = [
   lab09IntervlanRouting,
   lab10Dhcp,
   lab11NatPat,
+  lab12ExtendedAcl,
   tshootReturnRoute,
   tshootWrongNextHop,
   tshootWanSubnetMismatch,

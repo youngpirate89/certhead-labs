@@ -406,7 +406,9 @@ function handlePing(
   if (!ctx?.lab) {
     return { session: s, output: errLine('Ping requires a lab context.') };
   }
-  const result = canReach(ctx.lab, s.id, target);
+  // Ping is ICMP — pass the protocol so extended `deny icmp` ACLs (Lab 12)
+  // fire. Standard ACLs ignore the protocol arg, so this is backward-safe.
+  const result = canReach(ctx.lab, s.id, target, undefined, 'icmp');
   // Record the ping outcome so reachability objectives can require an ACTUAL
   // ping from the learner (not just state-permits-reachability). Gated on
   // record:false so a seeded ping (Lab.setup) couldn't pre-satisfy a
@@ -522,7 +524,9 @@ function computeTracertTail(
     // return-side failures (the missing-return-route scenario won't show
     // up in the topological walk — the route exists going OUT — but the
     // ICMP reply can't get back, so canReach to that hop returns false).
-    const result = canReach(lab, fromPcId, hop.hopIp);
+    // tracert is itself ICMP (Windows default) — pass the protocol so any
+    // extended `deny icmp` ACL (Lab 12) blocks the trace identically to ping.
+    const result = canReach(lab, fromPcId, hop.hopIp, undefined, 'icmp');
     if (result.ok) {
       out.push({ kind: 'output', text: formatHopRow(hopNum, hop.hopIp) });
       if (hop.isDestination) {
@@ -610,6 +614,11 @@ function discoverHops(
   fromPcId: string,
   dstIp: string,
 ): HopDiscovery {
+  // tracert is ICMP — match the ping path so extended ACL deny icmp entries
+  // surface here too (Lab 12). canReach calls in the per-hop loop above use
+  // the same protocol; this constant feeds the in-walk aclCheck calls below.
+  const protocol = 'icmp';
+
   const pc = session.devices[fromPcId];
   if (!pc || pc.kind !== 'pc') {
     return { hops: [], failedAt: fp('forward', fromPcId, null, 'source-no-ip') };
@@ -694,7 +703,7 @@ function discoverHops(
     if (ingressIfaceId !== null) {
       const inIface = current.device.interfaces[ingressIfaceId];
       if (inIface) {
-        const denied = aclCheck(current, inIface, sourceIp, 'in');
+        const denied = aclCheck(current, inIface, sourceIp, dstIp, protocol, 'in');
         if (denied) return { hops, failedAt: denied };
       }
     }
@@ -757,7 +766,7 @@ function discoverHops(
     // Outbound ACL on the egress mirrors canReach. Evaluated before
     // delivery / link crossing so the failure names the forwarding router.
     {
-      const denied = aclCheck(current, egressIface, sourceIp, 'out');
+      const denied = aclCheck(current, egressIface, sourceIp, dstIp, protocol, 'out');
       if (denied) return { hops, failedAt: denied };
     }
 
@@ -995,24 +1004,28 @@ function findOwnerOfIp(session: LabSession, ip: string): DeviceSession | null {
 /** Match canReach's ACL hook (reachability.checkInterfaceAcl) — tracert MUST
  *  surface the same acl-deny FailPoint canReach does so the `[sim]` trailer
  *  reads the same sentence as the ping. Pure: returns the FailPoint on deny,
- *  null on permit / no binding / undefined ACL. */
+ *  null on permit / no binding / undefined ACL. `protocol`/`dstIp` feed the
+ *  extended-ACL evaluator (Lab 12) — passing the trace's `icmp` here keeps
+ *  the diagnosis aligned with the ping for `deny icmp` entries. */
 function aclCheck(
   router: RouterSession,
   iface: InterfaceState,
   sourceIp: string,
+  dstIp: string,
+  protocol: 'ip' | 'tcp' | 'udp' | 'icmp',
   aclDirection: 'in' | 'out',
 ): FailPoint | null {
-  const aclNumber = iface.accessGroups[aclDirection];
-  if (aclNumber === null) return null;
-  const acl = router.device.acls.get(aclNumber);
+  const aclId = iface.accessGroups[aclDirection];
+  if (aclId === null) return null;
+  const acl = router.device.acls.get(aclId);
   if (!acl) return null;
-  if (evaluateAcl(acl, sourceIp) !== 'deny') return null;
+  if (evaluateAcl(acl, sourceIp, protocol, dstIp) !== 'deny') return null;
   return {
     direction: 'forward',
     deviceId: router.device.id,
     iface: iface.id,
     reason: 'acl-deny',
-    acl: { aclNumber, aclDirection, sourceIp },
+    acl: { aclNumber: aclId, aclDirection, sourceIp },
   };
 }
 
