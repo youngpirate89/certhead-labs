@@ -172,6 +172,24 @@ describe('lab-06-standard-acl — partial-credit guards', () => {
     expect(g.objectives.find((o) => o.id === 'acl-applied')?.met).toBe(false);
   });
 
+  it('ping fails for a NON-ACL reason (egress shut, no ACL) + show access-lists → acl-verified unmet', () => {
+    let ls = initLabSession(lab);
+    // No ACL defined or applied; instead break the PC-B path with a shutdown.
+    // The ping fails (egress-down), and `show access-lists` is in history, but
+    // the failure is not the ACL block — acl-verified must NOT credit it.
+    ls = runOn(ls, 'R1', [
+      'enable',
+      'configure terminal',
+      'interface gi0/1',
+      'shutdown',
+      'end',
+      'show access-lists',
+    ]);
+    ls = runOn(ls, 'PC-A', ['ping 192.168.2.10']);
+    const g = grade(lab, ls);
+    expect(g.objectives.find((o) => o.id === 'acl-verified')?.met).toBe(false);
+  });
+
   it('ACL defined + show run but never applied → ping still succeeds → acl-verified unmet', () => {
     let ls = initLabSession(lab);
     ls = runOn(ls, 'R1', [

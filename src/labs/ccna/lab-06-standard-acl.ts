@@ -1,4 +1,5 @@
 import type { Lab } from '@/engine/types';
+import { canReach } from '@/engine/reachability';
 
 /**
  * Lab 6 — Standard numbered ACL, one router between two PCs.
@@ -120,12 +121,29 @@ export const lab06StandardAcl: Lab = {
         if (pca?.kind !== 'pc') return false;
         const pingFailed =
           pca.lastPing?.target === '192.168.2.10' && pca.lastPing.ok === false;
+        if (!pingFailed) return false;
         // AND the learner must have inspected the ACL on R1. Forces a
         // discovery step rather than a config-and-go.
         const inspected = history.R1?.resolved.some((cmd) =>
           /^(do\s+)?show access-lists$/.test(cmd),
         );
-        return pingFailed && !!inspected;
+        if (!inspected) return false;
+        // The failure must be the ACL block specifically — not a stray
+        // `shutdown` or other misconfig that merely happens to drop the ping.
+        // lastPing stores only {target, ok}, so re-derive the reachability
+        // failure and confirm it is ACL 1 denying on R1 Gi0/1 outbound —
+        // exactly what the `[sim]` trailer reports. This proves the objective's
+        // intent: the standard ACL is what blocked PC-A.
+        const r = canReach(session, 'PC-A', '192.168.2.10');
+        if (r.ok) return false;
+        const f = r.failedAt;
+        return (
+          f.reason === 'acl-deny' &&
+          f.deviceId === 'R1' &&
+          f.iface === 'Gi0/1' &&
+          f.acl?.aclNumber === 1 &&
+          f.acl?.aclDirection === 'out'
+        );
       },
     },
   ],
