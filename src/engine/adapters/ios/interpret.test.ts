@@ -346,6 +346,21 @@ describe('IOS interpreter — `ip route` static routes', () => {
     expect(s.staticRoutes).toHaveLength(1);
   });
 
+  it('accepts the default route — `ip route 0.0.0.0 0.0.0.0 <next-hop>` (Lab 15)', () => {
+    // /0 is a legal mask on routes (default route) but not on interface
+    // addresses — the grammar uses isValidRouteMask, not isValidMask.
+    const s = applyCommand(configMode(), 'ip route 0.0.0.0 0.0.0.0 203.0.113.2').session;
+    expect(s.staticRoutes).toEqual([
+      {
+        prefix: '0.0.0.0',
+        mask: '0.0.0.0',
+        nextHop: '203.0.113.2',
+        source: 'static',
+        adminDistance: 1,
+      },
+    ]);
+  });
+
   it('routingTable merges derived connecteds with stored statics', () => {
     let s = run(fresh(), [
       'enable',

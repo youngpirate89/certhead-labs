@@ -410,6 +410,14 @@ export function isValidMask(value: string): boolean {
   return VALID_MASKS.has(value);
 }
 
+/** Like {@link isValidMask} but also accepts `0.0.0.0` — the /0 mask used by
+ *  the default route (`ip route 0.0.0.0 0.0.0.0 <next-hop>`). Interface-IP
+ *  validation keeps using isValidMask (a /0 interface address is nonsense),
+ *  so this helper is route-grammar-only. */
+export function isValidRouteMask(value: string): boolean {
+  return value === '0.0.0.0' || VALID_MASKS.has(value);
+}
+
 /** Build a fresh session from a lab's device + starting interface set.
  *  `structuredClone` is replaced by a deep-copy that preserves the OSPF
  *  neighbor Map — structuredClone DOES handle Maps, but we still call it

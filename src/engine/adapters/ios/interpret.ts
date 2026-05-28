@@ -13,6 +13,7 @@ import {
   isSubInterfaceId,
   isValidIpv4,
   isValidMask,
+  isValidRouteMask,
   parentInterfaceId,
   prompt as promptFor,
   routingTable,
@@ -836,7 +837,7 @@ function addStaticRoute(
   if (!isValidIpv4(prefix)) {
     return { session: s, output: err(`% Invalid input detected at "${prefix}".`) };
   }
-  if (!isValidMask(mask)) return { session: s, output: err('% Invalid subnet mask.') };
+  if (!isValidRouteMask(mask)) return { session: s, output: err('% Invalid subnet mask.') };
   const t = parseRouteTarget(s, target);
   if (!t) return { session: s, output: err(`% Invalid input detected at "${target}".`) };
   // Normalize the prefix to the actual network address so longest-prefix-match
@@ -867,7 +868,7 @@ function removeStaticRoute(
   mask: string,
   target: string,
 ): ApplyResult {
-  if (!isValidIpv4(prefix) || !isValidMask(mask)) {
+  if (!isValidIpv4(prefix) || !isValidRouteMask(mask)) {
     return { session: s, output: err('% Invalid input.') };
   }
   const t = parseRouteTarget(s, target);
