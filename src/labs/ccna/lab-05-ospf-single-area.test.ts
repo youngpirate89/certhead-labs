@@ -167,6 +167,46 @@ describe('lab-05-ospf-single-area — happy path', () => {
   });
 });
 
+describe('lab-05-ospf-single-area — ospf-config requires network coverage', () => {
+  it('two area-0 statements that cover NEITHER connected interface → ospf-config unmet', () => {
+    let ls = initLabSession(lab);
+    ls = runOn(ls, 'R1', [
+      'enable',
+      'configure terminal',
+      'router ospf 1',
+      'network 8.8.8.8 0.0.0.0 area 0',
+      'network 9.9.9.9 0.0.0.0 area 0',
+    ]);
+    ls = runOn(ls, 'R2', [
+      'enable',
+      'configure terminal',
+      'router ospf 1',
+      'network 8.8.8.8 0.0.0.0 area 0',
+      'network 9.9.9.9 0.0.0.0 area 0',
+    ]);
+    const g = grade(lab, ls);
+    expect(g.objectives.find((o) => o.id === 'ospf-config')?.met).toBe(false);
+  });
+
+  it('a single broad covering wildcard (0.0.0.0 255.255.255.255) covers both interfaces → ospf-config met', () => {
+    let ls = initLabSession(lab);
+    ls = runOn(ls, 'R1', [
+      'enable',
+      'configure terminal',
+      'router ospf 1',
+      'network 0.0.0.0 255.255.255.255 area 0',
+    ]);
+    ls = runOn(ls, 'R2', [
+      'enable',
+      'configure terminal',
+      'router ospf 1',
+      'network 0.0.0.0 255.255.255.255 area 0',
+    ]);
+    const g = grade(lab, ls);
+    expect(g.objectives.find((o) => o.id === 'ospf-config')?.met).toBe(true);
+  });
+});
+
 describe('lab-05-ospf-single-area — wrong-area pitfall', () => {
   it('OSPF on both sides but mismatched areas → no adjacency, no learned routes, ping still fails', () => {
     let ls = initLabSession(lab);

@@ -92,9 +92,15 @@ export const lab05OspfSingleArea: Lab = {
         if (r1?.kind !== 'router' || r2?.kind !== 'router') return false;
         if (r1.device.ospf.process === null) return false;
         if (r2.device.ospf.process === null) return false;
-        const r1Area0 = r1.device.ospf.networks.filter((n) => n.area === 0);
-        const r2Area0 = r2.device.ospf.networks.filter((n) => n.area === 0);
-        return r1Area0.length >= 2 && r2Area0.length >= 2;
+        // Each router must actually advertise BOTH of its connected networks
+        // into area 0 — every addressed interface's subnet has to be covered by
+        // an area-0 network statement. A bare count of statements is not enough:
+        // two bogus `network 8.8.8.8 0.0.0.0 area 0` lines would satisfy a count
+        // while forming no adjacency and exchanging no routes.
+        return (
+          advertisesConnectedNetworks(r1.device) &&
+          advertisesConnectedNetworks(r2.device)
+        );
       },
     },
     {
@@ -177,3 +183,33 @@ export const lab05OspfSingleArea: Lab = {
     ],
   },
 };
+
+/** True iff every addressed interface on `device` has its subnet covered by at
+ *  least one area-0 OSPF network statement. This mirrors real `network`
+ *  semantics: a statement enables OSPF on an interface when its (address,
+ *  wildcard) covers the interface IP — so ANY wildcard that correctly covers
+ *  the connected subnet counts (the exact `0.0.0.255` form OR a broader
+ *  covering wildcard like `0.0.0.0 255.255.255.255`). Kept local to the lab so
+ *  the objective check pulls in no engine code. */
+function advertisesConnectedNetworks(device: {
+  interfaces: Record<string, { ip: string | null; mask: string | null }>;
+  ospf: { networks: readonly { prefix: string; wildcard: string; area: number }[] };
+}): boolean {
+  const area0 = device.ospf.networks.filter((n) => n.area === 0);
+  const addressed = Object.values(device.interfaces).filter(
+    (i): i is { ip: string; mask: string } => !!i.ip && !!i.mask,
+  );
+  if (addressed.length === 0) return false;
+  return addressed.every((i) =>
+    area0.some((n) => wildcardCovers(n.prefix, n.wildcard, i.ip)),
+  );
+}
+
+/** Wildcard-bitmask cover test: bits set to 1 in `wildcard` are "don't care";
+ *  0 bits must match between `prefix` and `ip`. Mirrors the engine's OSPF
+ *  network matcher; kept local so this check pulls in no engine code. */
+function wildcardCovers(prefix: string, wildcard: string, ip: string): boolean {
+  const toInt = (s: string): number =>
+    s.split('.').reduce((acc, o) => ((acc << 8) | Number(o)) >>> 0, 0);
+  return ((toInt(prefix) ^ toInt(ip)) & (~toInt(wildcard) >>> 0)) === 0;
+}
