@@ -735,8 +735,9 @@ describe('config-subif — dot1Q subinterface mode', () => {
       parentId: 'Gi0/0',
       dot1qVlan: null,
       ip: null,
-      adminUp: false,
     });
+    // A subif has no independent admin state — the field does not exist.
+    expect('adminUp' in s.device.subInterfaces['Gi0/0.10']).toBe(false);
   });
 
   it('interface <subif> with non-existent parent stays in config and prints an error', () => {
@@ -773,22 +774,36 @@ describe('config-subif — dot1Q subinterface mode', () => {
     expect(s.device.interfaces['Gi0/0'].ip).toBeNull();
   });
 
-  it('no shutdown sets adminUp true, protocolUp tracks parent', () => {
-    const s = applyCommand(intoSubif10(), 'no shutdown').session;
-    const sub = s.device.subInterfaces['Gi0/0.10'];
-    expect(sub.adminUp).toBe(true);
-    // Parent Gi0/0 is adminUp + protocolUp (default true) in unit tests, so
-    // the subif's protocolUp resolves true immediately.
-    expect(sub.protocolUp).toBe(true);
-    expect(s.subIfConfiguredAt['Gi0/0.10']).toBeGreaterThan(0);
+  it('no shutdown on a subif is a harmless no-op (line state follows the parent)', () => {
+    // Real IOS swallows `[no] shutdown` on a subif; it is not required and not
+    // an error. It must NOT arm the verify gate either — the encap/ip config
+    // actions do that (see the encap/ip tests below).
+    const before = intoSubif10();
+    const after = applyCommand(before, 'no shutdown');
+    expect(after.output).toEqual([]);
+    expect(after.session.subIfConfiguredAt['Gi0/0.10']).toBeUndefined();
   });
 
-  it('shutdown sets adminUp/protocolUp false and clears the configured-at stamp', () => {
-    const up = applyCommand(intoSubif10(), 'no shutdown').session;
-    const down = applyCommand(up, 'shutdown').session;
-    expect(down.device.subInterfaces['Gi0/0.10'].adminUp).toBe(false);
-    expect(down.device.subInterfaces['Gi0/0.10'].protocolUp).toBe(false);
-    expect(down.subIfConfiguredAt['Gi0/0.10']).toBeUndefined();
+  it('shutdown on a subif is a harmless no-op too', () => {
+    const after = applyCommand(intoSubif10(), 'shutdown');
+    expect(after.output).toEqual([]);
+    expect(after.session.subIfConfiguredAt['Gi0/0.10']).toBeUndefined();
+  });
+
+  it('encapsulation and ip address each arm the verify gate (either order)', () => {
+    // The stamp is the verify-brief trigger now that per-subif no-shutdown is a
+    // no-op. Re-stamping on either L3-config action means the ip-before-encap
+    // path still completes the verify gate.
+    const encapFirst = run(intoSubif10(), [
+      'encapsulation dot1q 10',
+      'ip address 192.168.10.1 255.255.255.0',
+    ]);
+    expect(encapFirst.subIfConfiguredAt['Gi0/0.10']).toBeGreaterThan(0);
+    const ipFirst = run(intoSubif10(), [
+      'ip address 192.168.10.1 255.255.255.0',
+      'encapsulation dot1q 10',
+    ]);
+    expect(ipFirst.subIfConfiguredAt['Gi0/0.10']).toBeGreaterThan(0);
   });
 
   it('exit returns to config mode and clears activeSubIfId', () => {
@@ -803,11 +818,12 @@ describe('config-subif — dot1Q subinterface mode', () => {
     expect(s.activeSubIfId).toBeNull();
   });
 
-  it('show ip interface brief lists physical and subinterface rows together', () => {
+  it('show ip interface brief lists physical and subinterface rows together (up/up, no per-subif no shutdown)', () => {
+    // Physical-only recipe: the subif comes up/up off the parent — no per-subif
+    // `no shutdown` typed. Its line state (both columns) follows the parent.
     const s = run(intoSubif10(), [
       'encapsulation dot1q 10',
       'ip address 192.168.10.1 255.255.255.0',
-      'no shutdown',
       'end',
       'show ip interface brief',
     ]);
@@ -824,7 +840,6 @@ describe('config-subif — dot1Q subinterface mode', () => {
     const s = run(intoSubif10(), [
       'encapsulation dot1q 10',
       'ip address 192.168.10.1 255.255.255.0',
-      'no shutdown',
       'end',
     ]);
     const text = applyCommand(s, 'show running-config interface gi0/0.10')
@@ -836,7 +851,7 @@ describe('config-subif — dot1Q subinterface mode', () => {
     expect(text).not.toMatch(/ shutdown/);
   });
 
-  it('show running-config interface gi0/0.10 with partial state omits encap/ip', () => {
+  it('show running-config interface gi0/0.10 with partial state omits encap/ip and never prints shutdown', () => {
     const s = run(fresh(), [
       'enable',
       'configure terminal',
@@ -852,7 +867,8 @@ describe('config-subif — dot1Q subinterface mode', () => {
     expect(text).toMatch(/interface GigabitEthernet0\/0\.10/);
     expect(text).not.toMatch(/encapsulation/);
     expect(text).toMatch(/no ip address/);
-    expect(text).toMatch(/ shutdown/);
+    // A subif has no independent admin state — never a ` shutdown` line.
+    expect(text).not.toMatch(/ shutdown/);
   });
 
   it('no encapsulation dot1q clears the tag', () => {

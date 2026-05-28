@@ -20,10 +20,10 @@ import type { Lab } from '@/engine/types';
  *   R1 Gi0/0.20 → 192.168.20.1 / encapsulation dot1Q 20
  *
  * The switch is pre-configured (Lab 07/08 territory — VLANs, trunk, access
- * ports). The router is bare: the learner brings up Gi0/0, creates the two
- * subinterfaces, sets encapsulation + IPs + no shutdown, verifies with
- * show ip interface brief, then proves end-to-end reachability with a ping
- * from PC-A to PC-B.
+ * ports). The router is bare: the learner brings up the physical Gi0/0, creates
+ * the two subinterfaces, sets encapsulation + IPs (the subifs come up off the
+ * parent — no per-subif no shutdown), verifies with show ip interface brief,
+ * then proves end-to-end reachability with a ping from PC-A to PC-B.
  *
  * Six objectives (in completion order):
  *   1. `subif10-encap`     — Gi0/0.10 has encapsulation dot1q 10.
@@ -45,7 +45,7 @@ export const lab09IntervlanRouting: Lab = {
   estimatedMinutes: 15,
   isFree: false,
   scenario:
-    "The Sales team (VLAN 10, 192.168.10.0/24) and the Engineering team (VLAN 20, 192.168.20.0/24) sit on the same switch SW1 but on different VLANs. The two teams need to talk to each other. SW1 is already trunking to R1 on Gi0/0 (allowed VLANs 1,10,20) and the access ports are assigned correctly — but R1 has no IP configuration yet.\n\nYour task: configure router-on-a-stick on R1. Bring up Gi0/0 (no IP — the physical is the trunk carrier), create two subinterfaces Gi0/0.10 and Gi0/0.20, set dot1Q encapsulation matching each VLAN, assign the gateway IPs (192.168.10.1 and 192.168.20.1), `no shutdown` both subifs, verify with `show ip interface brief`, then prove the cross-VLAN path with a ping from PC-A to PC-B.",
+    "The Sales team (VLAN 10, 192.168.10.0/24) and the Engineering team (VLAN 20, 192.168.20.0/24) sit on the same switch SW1 but on different VLANs. The two teams need to talk to each other. SW1 is already trunking to R1 on Gi0/0 (allowed VLANs 1,10,20) and the access ports are assigned correctly — but R1 has no IP configuration yet.\n\nYour task: configure router-on-a-stick on R1. Bring up Gi0/0 (no IP — the physical is the trunk carrier), create two subinterfaces Gi0/0.10 and Gi0/0.20, set dot1Q encapsulation matching each VLAN, assign the gateway IPs (192.168.10.1 and 192.168.20.1) — the subinterfaces come up off the physical, so you don't `no shutdown` them individually — verify with `show ip interface brief`, then prove the cross-VLAN path with a ping from PC-A to PC-B.",
   topology: {
     // T-shape layout (per-device `position` overrides the renderer's default
     // linear left-to-right row). SW1 is the L2 hub at center; R1 stacks above
@@ -140,7 +140,7 @@ export const lab09IntervlanRouting: Lab = {
     },
     {
       id: 'subif10-ip',
-      text: 'R1 Gi0/0.10: assign ip address 192.168.10.1 255.255.255.0 (then no shutdown)',
+      text: 'R1 Gi0/0.10: assign ip address 192.168.10.1 255.255.255.0',
       check: (state) => {
         const sub = state.R1?.subInterfaces['Gi0/0.10'];
         return sub?.ip === '192.168.10.1' && sub?.mask === '255.255.255.0';
@@ -153,7 +153,7 @@ export const lab09IntervlanRouting: Lab = {
     },
     {
       id: 'subif20-ip',
-      text: 'R1 Gi0/0.20: assign ip address 192.168.20.1 255.255.255.0 (then no shutdown)',
+      text: 'R1 Gi0/0.20: assign ip address 192.168.20.1 255.255.255.0',
       check: (state) => {
         const sub = state.R1?.subInterfaces['Gi0/0.20'];
         return sub?.ip === '192.168.20.1' && sub?.mask === '255.255.255.0';
@@ -166,8 +166,9 @@ export const lab09IntervlanRouting: Lab = {
         const r1 = session.devices.R1;
         if (r1?.kind !== 'router') return false;
         // Engine monotonic-seq comparison: the show must run AFTER both subifs
-        // came up (no shutdown). lastShowIpIntBrief defaults to 0; an unset
-        // subIfConfiguredAt entry defaults to 0 too — both must be > 0.
+        // were configured (subIfConfiguredAt is stamped on the encap/ip config
+        // actions). lastShowIpIntBrief defaults to 0; an unset subIfConfiguredAt
+        // entry defaults to 0 too — both must be > 0.
         const cfg10 = r1.subIfConfiguredAt['Gi0/0.10'] ?? 0;
         const cfg20 = r1.subIfConfiguredAt['Gi0/0.20'] ?? 0;
         if (cfg10 === 0 || cfg20 === 0) return false;
@@ -193,7 +194,7 @@ export const lab09IntervlanRouting: Lab = {
     {
       afterSeconds: 180,
       text:
-        '`encapsulation dot1q 10` must come before `ip address` — IOS will reject the IP without it on a real router. Use the dot1Q tag matching the VLAN id.',
+        '`encapsulation dot1q 10` is what makes the subinterface forward and emit its connected route — set it with the dot1Q tag matching the VLAN id. (The order relative to `ip address` is not enforced.)',
     },
     {
       afterSeconds: 300,
@@ -203,7 +204,7 @@ export const lab09IntervlanRouting: Lab = {
     {
       afterSeconds: 420,
       text:
-        "If PC-A cannot ping PC-B, check that both Gi0/0.10 and Gi0/0.20 have 'no shutdown' applied — subinterfaces default to shutdown when created.",
+        "If PC-A cannot ping PC-B, confirm the physical Gi0/0 has 'no shutdown' — subinterfaces follow the parent's line state, so you don't 'no shutdown' Gi0/0.10 / Gi0/0.20 individually. Also check each subif's encapsulation and IP.",
     },
   ],
   solution: {
@@ -221,12 +222,11 @@ export const lab09IntervlanRouting: Lab = {
       },
       {
         device: 'R1',
-        note: 'Configure the VLAN 10 subinterface:',
+        note: 'Configure the VLAN 10 subinterface (it comes up off the physical — no per-subif no shutdown needed):',
         commands: [
           'interface Gi0/0.10',
           'encapsulation dot1q 10',
           'ip address 192.168.10.1 255.255.255.0',
-          'no shutdown',
           'exit',
         ],
       },
@@ -237,7 +237,6 @@ export const lab09IntervlanRouting: Lab = {
           'interface Gi0/0.20',
           'encapsulation dot1q 20',
           'ip address 192.168.20.1 255.255.255.0',
-          'no shutdown',
           'end',
           'show ip interface brief',
         ],

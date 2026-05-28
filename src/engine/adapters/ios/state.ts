@@ -190,11 +190,14 @@ export interface InterfaceState {
 
 /** A dot1Q subinterface — Lab 09 router-on-a-stick. Subinterfaces live ON a
  *  physical parent (`parentId`) and tag egress traffic with `dot1qVlan`. They
- *  contribute their own connected route (per dot1qVlan + ip/mask) and inherit
- *  their parent's physical line state: a subif is operational only when its
- *  parent physical is protocolUp AND the subif itself is adminUp. The dot1Q
- *  tag is checked at the cabled switch trunk's allowed-VLAN list (Lab 08
- *  trunk engine, unchanged). */
+ *  contribute their own connected route (per dot1qVlan + ip/mask) and their
+ *  LINE STATE FOLLOWS THE PHYSICAL PARENT: a subif is operational iff the
+ *  parent is up/up. Subinterfaces have no independent admin state — a per-subif
+ *  `[no] shutdown` is a no-op on real IOS, so the engine carries no `adminUp`
+ *  field here; `protocolUp` is derived solely from the parent. The dot1Q tag is
+ *  checked at the cabled switch trunk's allowed-VLAN list (Lab 08 trunk engine,
+ *  unchanged). [CONFIRMED-BY-SOURCE: Cisco CCNA curriculum 5.1.3.3 / 6.1.3.3;
+ *  Cisco Press Inter-VLAN Routing 4.2.] */
 export interface SubInterface {
   /** Canonical subif id, e.g. 'Gi0/0.10'. */
   readonly id: string;
@@ -205,10 +208,10 @@ export interface SubInterface {
   dot1qVlan: number | null;
   ip: string | null;
   mask: string | null;
-  adminUp: boolean;
-  /** Line-protocol state: true iff adminUp && parent physical is protocolUp.
-   *  Refreshed by the LabSession protocolUp pass (same one that handles
-   *  physical interfaces) — never set directly by the dispatcher. */
+  /** Line-protocol state: true iff the parent physical is admin-up AND
+   *  protocolUp (the subif inherits the parent's line state — it has no
+   *  independent admin state). Refreshed by the LabSession protocolUp pass
+   *  (same one that handles physical interfaces) — never set by the dispatcher. */
   protocolUp: boolean;
 }
 

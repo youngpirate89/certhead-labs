@@ -160,10 +160,11 @@ describe('canReach — Lab 09 router-on-a-stick', () => {
     expect(result.ok).toBe(false);
   });
 
-  it('Gi0/0.10 adminDown → PC-A cannot ping PC-B', () => {
+  it('shutdown Gi0/0.10 is a no-op → PC-A still pings PC-B (subif line state follows parent)', () => {
     let ls = initLabSession(roasLab());
     ls = solveR1(ls);
-    // Now shut down Gi0/0.10.
+    // `shutdown` on the subif is swallowed by IOS — it does NOT bring the subif
+    // down (only the parent physical can). Reachability is unaffected.
     ls = runOn(ls, 'R1', [
       'enable',
       'configure terminal',
@@ -171,12 +172,7 @@ describe('canReach — Lab 09 router-on-a-stick', () => {
       'shutdown',
       'end',
     ]);
-    const result = canReach(ls, 'PC-A', '192.168.20.10');
-    expect(result.ok).toBe(false);
-    // PC-A can't even reach its gateway, so the failure point is on PC-A.
-    if (!result.ok) {
-      expect(result.failedAt.reason).toBe('no-gateway');
-    }
+    expect(canReach(ls, 'PC-A', '192.168.20.10').ok).toBe(true);
   });
 
   it('parent Gi0/0 adminDown → PC-A cannot ping PC-B', () => {
@@ -230,6 +226,82 @@ describe('canReach — Lab 09 router-on-a-stick', () => {
     ]);
     expect(canReach(ls, 'PC-A', '192.168.10.1').ok).toBe(true);
     expect(canReach(ls, 'PC-A', '192.168.20.10').ok).toBe(false);
+  });
+});
+
+describe('canReach — Lab 09 textbook recipe (physical no shutdown ONLY)', () => {
+  /** Configure ROAS the way the curriculum teaches: `no shutdown` the physical
+   *  Gi0/0 only, then encap + IP on each subif — NO per-subif `no shutdown`.
+   *  The subifs come up off the parent. This is the false-fail the fix kills. */
+  function solveR1PhysicalOnly(ls: LabSession): LabSession {
+    return runOn(ls, 'R1', [
+      'enable',
+      'configure terminal',
+      'interface gi0/0',
+      'no shutdown',
+      'exit',
+      'interface gi0/0.10',
+      'encapsulation dot1q 10',
+      'ip address 192.168.10.1 255.255.255.0',
+      'exit',
+      'interface gi0/0.20',
+      'encapsulation dot1q 20',
+      'ip address 192.168.20.1 255.255.255.0',
+      'end',
+    ]);
+  }
+
+  it('HEADLINE: physical-only recipe (no per-subif no shutdown) → PC-A pings PC-B', () => {
+    let ls = initLabSession(roasLab());
+    ls = solveR1PhysicalOnly(ls);
+    expect(canReach(ls, 'PC-A', '192.168.20.10').ok).toBe(true);
+    expect(canReach(ls, 'PC-B', '192.168.10.10').ok).toBe(true);
+  });
+
+  it('shut the PHYSICAL Gi0/0 → ROAS breaks (the real troubleshooting lever survives)', () => {
+    let ls = initLabSession(roasLab());
+    ls = solveR1PhysicalOnly(ls);
+    ls = runOn(ls, 'R1', ['enable', 'configure terminal', 'interface gi0/0', 'shutdown', 'end']);
+    expect(canReach(ls, 'PC-A', '192.168.20.10').ok).toBe(false);
+  });
+});
+
+describe('ping vs tracert parity — Lab 09 ROAS trunk path', () => {
+  /** Run PC-A's tracert to dst and return whether the trace COMPLETED (reached
+   *  the destination). Mirrors the ping verdict from canReach — the two must
+   *  agree on the ROAS trunk path (the pc.ts trunk-hop protocolUp fix). */
+  async function tracertCompletes(ls: LabSession, dst: string): Promise<boolean> {
+    const { __setTracertDelayMs } = await import('./adapters/pc');
+    __setTracertDelayMs(0);
+    const result = applyToActive({ ...ls, activeDeviceId: 'PC-A' }, `tracert ${dst}`);
+    const lines: string[] = result.output.map((o) => o.text);
+    if (result.stream) {
+      for await (const out of result.stream) lines.push(out.text);
+    }
+    return lines.join('\n').includes('Trace complete');
+  }
+
+  it('healthy ROAS: ping succeeds AND tracert completes', async () => {
+    let ls = initLabSession(roasLab());
+    ls = solveR1(ls);
+    expect(canReach(ls, 'PC-A', '192.168.20.10').ok).toBe(true);
+    expect(await tracertCompletes(ls, '192.168.20.10')).toBe(true);
+  });
+
+  it('shut SW1 trunk Gi0/0: ping FAILS AND tracert does NOT complete (verdicts agree)', async () => {
+    let ls = initLabSession(roasLab());
+    ls = solveR1(ls);
+    // Drop the router↔switch trunk by shutting the switch end. protocolUp falls
+    // on both ends; ping and tracert must reach the same (failed) verdict.
+    ls = runOn(ls, 'SW1', [
+      'enable',
+      'configure terminal',
+      'interface gi0/0',
+      'shutdown',
+      'end',
+    ]);
+    expect(canReach(ls, 'PC-A', '192.168.20.10').ok).toBe(false);
+    expect(await tracertCompletes(ls, '192.168.20.10')).toBe(false);
   });
 });
 

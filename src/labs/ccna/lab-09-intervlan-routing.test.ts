@@ -95,6 +95,33 @@ describe('lab-09-intervlan-routing — happy path', () => {
     for (const o of g.objectives) expect(o.met).toBe(true);
   });
 
+  it('TEXTBOOK RECIPE: physical no shutdown ONLY (no per-subif no shutdown) → all objectives met', () => {
+    // The curriculum recipe: `no shutdown` the physical Gi0/0; the subifs come
+    // up off the parent. No per-subif `no shutdown` typed. This is the path the
+    // false-fail bug used to break — it must now reach allMet.
+    let ls = initLabSession(lab);
+    ls = runOn(ls, 'R1', [
+      'enable',
+      'configure terminal',
+      'interface gi0/0',
+      'no shutdown',
+      'exit',
+      'interface gi0/0.10',
+      'encapsulation dot1q 10',
+      'ip address 192.168.10.1 255.255.255.0',
+      'exit',
+      'interface gi0/0.20',
+      'encapsulation dot1q 20',
+      'ip address 192.168.20.1 255.255.255.0',
+      'end',
+    ]);
+    ls = runOn(ls, 'R1', ['enable', 'show ip interface brief']);
+    ls = runOn(ls, 'PC-A', ['ping 192.168.20.10']);
+    const g = grade(lab, ls);
+    expect(g.allMet).toBe(true);
+    for (const o of g.objectives) expect(o.met).toBe(true);
+  });
+
   it('PC-A can ping its gateway 192.168.10.1 after R1 config', () => {
     let ls = initLabSession(lab);
     ls = configureR1Roas(ls);
@@ -140,13 +167,26 @@ describe('lab-09-intervlan-routing — partial-credit guards', () => {
     expect(canReach(ls, 'PC-A', '192.168.20.10').ok).toBe(false);
   });
 
-  it('shutdown Gi0/0.10 → ping fails', () => {
+  it('shutdown Gi0/0.10 is a no-op → ping still succeeds (subif follows the parent)', () => {
     let ls = initLabSession(lab);
     ls = configureR1Roas(ls);
     ls = runOn(ls, 'R1', [
       'enable',
       'configure terminal',
       'interface gi0/0.10',
+      'shutdown',
+      'end',
+    ]);
+    expect(canReach(ls, 'PC-A', '192.168.20.10').ok).toBe(true);
+  });
+
+  it('shutdown the PHYSICAL Gi0/0 → ping fails (the real lever)', () => {
+    let ls = initLabSession(lab);
+    ls = configureR1Roas(ls);
+    ls = runOn(ls, 'R1', [
+      'enable',
+      'configure terminal',
+      'interface gi0/0',
       'shutdown',
       'end',
     ]);

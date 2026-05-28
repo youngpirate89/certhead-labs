@@ -759,9 +759,9 @@ function discoverHops(
       if (egressSubif.dot1qVlan === null) {
         return { hops, failedAt: fp('forward', currentId, egressIfaceId, 'no-route') };
       }
-      if (!egressSubif.adminUp) {
-        return { hops, failedAt: fp('forward', currentId, egressIfaceId, 'egress-down') };
-      }
+      // Subif line state follows the parent — the parent admin check below is
+      // the egress-down lever (a subif has no independent admin state). Mirrors
+      // reachability.ts.
       const parent = current.device.interfaces[egressSubif.parentId];
       if (!parent || !parent.adminUp) {
         return { hops, failedAt: fp('forward', currentId, egressSubif.parentId, 'egress-down') };
@@ -905,7 +905,10 @@ function findRouterGatewayThroughSwitch(
       } else continue;
 
       const myPort = sw.device.switchports[myIface];
-      if (!myPort || !myPort.adminUp) continue;
+      // protocolUp (not adminUp) gates the trunk hop — a shut on either end
+      // drops it. Matches reachability.trunkHopUp so ping and tracert agree
+      // on the ROAS trunk path (ping/tracert mirror-parity invariant).
+      if (!myPort || !myPort.protocolUp) continue;
       const peer = session.devices[peerEnd.deviceId];
       if (!peer) continue;
 
@@ -918,7 +921,7 @@ function findRouterGatewayThroughSwitch(
           if (sub.parentId !== peerEnd.iface) continue;
           if (sub.dot1qVlan !== vlan) continue;
           if (sub.ip !== gatewayIp) continue;
-          if (!sub.adminUp || !sub.protocolUp) continue;
+          if (!sub.protocolUp) continue;
           return { router: peer, routerParentIface: peerEnd.iface };
         }
         continue;
@@ -965,7 +968,10 @@ function subifEgressToDelivery(
     return { ok: false, failedAt: fp('forward', router.device.id, parent.id, 'dest-unreachable') };
   }
   const trunkPort = peer.device.switchports[peerEnd.iface];
-  if (!trunkPort || !trunkPort.adminUp) {
+  // protocolUp (not adminUp): the router→switch trunk hop is usable only when
+  // the line protocol is up on both ends. Mirrors reachability.deliverViaSubifTrunk
+  // so ping and tracert agree on the ROAS trunk path.
+  if (!trunkPort || !trunkPort.protocolUp) {
     return { ok: false, failedAt: fp('forward', router.device.id, parent.id, 'link-peer-down') };
   }
   const tag = subif.dot1qVlan!;

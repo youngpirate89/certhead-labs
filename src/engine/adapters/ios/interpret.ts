@@ -600,14 +600,14 @@ function enterInterface(s: Session, token: string): ApplyResult {
     if (!s.device.subInterfaces[id]) {
       // Lazy creation on first entry — matches IOS, which materialises the
       // subif as soon as `interface Gi0/0.<n>` is typed. defaults: no
-      // encapsulation, no ip, admin-down (subifs come up only on no shutdown).
+      // encapsulation, no ip. The subif has no independent admin state — its
+      // line state follows the parent, derived by the LabSession refresh pass.
       const sub: SubInterface = {
         id,
         parentId: parent,
         dot1qVlan: null,
         ip: null,
         mask: null,
-        adminUp: false,
         protocolUp: false,
       };
       s.device.subInterfaces[id] = sub;
@@ -639,6 +639,11 @@ function setEncapsulationDot1q(s: Session, vlanArg: string): ApplyResult {
     return { session: s, output: err('% VLAN id out of range') };
   }
   s.device.subInterfaces[s.activeSubIfId].dot1qVlan = vlan;
+  // Arm the verify gate: re-stamp on each subif L3-config action (encap OR ip,
+  // whichever runs last) so `show ip interface brief` can satisfy a verify-
+  // style objective. A subif has no per-subif `no shutdown` to key off anymore
+  // (line state follows the parent), so the config actions are the trigger.
+  s.subIfConfiguredAt[s.activeSubIfId] = nextEngineSeq();
   return { session: s, output: [] };
 }
 
@@ -649,6 +654,9 @@ function setIpAddress(s: Session, ip: string, mask: string): ApplyResult {
     const sub = s.device.subInterfaces[s.activeSubIfId];
     sub.ip = ip;
     sub.mask = mask;
+    // Arm the verify gate (see setEncapsulationDot1q): re-stamp on this L3-config
+    // action so the ip-before-encap order still completes verify-brief.
+    s.subIfConfiguredAt[s.activeSubIfId] = nextEngineSeq();
     return { session: s, output: [] };
   }
   if (s.currentInterface) {
@@ -660,7 +668,10 @@ function setIpAddress(s: Session, ip: string, mask: string): ApplyResult {
 
 function setAdmin(s: Session, up: boolean): ApplyResult {
   if (s.mode === 'config-subif' && s.activeSubIfId) {
-    return setSubIfAdmin(s, up);
+    // A dot1Q subinterface has no independent admin state — its line state
+    // follows the physical parent. Real IOS swallows `[no] shutdown` on a
+    // subif; accept it as a harmless no-op (not required, not an error).
+    return { session: s, output: [] };
   }
   if (!s.currentInterface) return { session: s, output: [] };
   const iface = s.device.interfaces[s.currentInterface];
@@ -675,61 +686,6 @@ function setAdmin(s: Session, up: boolean): ApplyResult {
         {
           kind: 'system',
           text: `%LINEPROTO-5-UPDOWN: Line protocol on Interface ${name}, changed state to up`,
-        },
-      ],
-    };
-  }
-  return { session: s, output: [] };
-}
-
-/** `[no] shutdown` on the active subinterface. Subif protocol-up resolves to
- *  adminUp AND parent physical's protocolUp; the lab-session refresh pass
- *  re-derives protocolUp after every command, so we set adminUp here and a
- *  provisional protocolUp matching IOS expectations — the refresh corrects
- *  it for the real link-state shortly after. Verify-style objectives compare
- *  `lastShowIpIntBrief` against the per-subif `subIfConfiguredAt` stamp set
- *  here, so the `no shutdown` IS the moment that arms the verify gate. */
-function setSubIfAdmin(s: Session, up: boolean): ApplyResult {
-  const subId = s.activeSubIfId;
-  if (!subId) return { session: s, output: [] };
-  const sub = s.device.subInterfaces[subId];
-  const changed = sub.adminUp !== up;
-  sub.adminUp = up;
-  const parent = s.device.interfaces[sub.parentId];
-  const parentUp = parent ? parent.adminUp && parent.protocolUp : false;
-  sub.protocolUp = up && parentUp;
-  if (up && changed) {
-    // Stamp so a later `show ip interface brief` can satisfy a verify-style
-    // objective for THIS subif. `shutdown` clears the stamp — verifying after
-    // a shutdown should not count. Uses the engine's monotonic seq counter
-    // (not Date.now()) so the ordering is bulletproof even when commands run
-    // in the same millisecond under test.
-    s.subIfConfiguredAt[subId] = nextEngineSeq();
-    const name = fullInterfaceName(subId);
-    const lines: { kind: 'system'; text: string }[] = [
-      { kind: 'system', text: `%LINK-5-CHANGED: Interface ${name}, changed state to up` },
-    ];
-    if (sub.protocolUp) {
-      lines.push({
-        kind: 'system',
-        text: `%LINEPROTO-5-UPDOWN: Line protocol on Interface ${name}, changed state to up`,
-      });
-    }
-    return { session: s, output: lines };
-  }
-  if (!up && changed) {
-    delete s.subIfConfiguredAt[subId];
-    const name = fullInterfaceName(subId);
-    return {
-      session: s,
-      output: [
-        {
-          kind: 'system',
-          text: `%LINK-5-CHANGED: Interface ${name}, changed state to administratively down`,
-        },
-        {
-          kind: 'system',
-          text: `%LINEPROTO-5-UPDOWN: Line protocol on Interface ${name}, changed state to down`,
         },
       ],
     };
@@ -1973,8 +1929,13 @@ function showIpIntBrief(s: Session): string[] {
     if (!subs) continue;
     for (const subId of subs.slice().sort(subOrder)) {
       const sub = s.device.subInterfaces[subId];
+      // Subif line state follows the parent (`i`): both columns derive from the
+      // parent — Status mirrors its admin state and Protocol its up/up state, so
+      // a shut parent renders the subif "down". Derived live here (not from the
+      // stored sub.protocolUp) so the render is correct even in adapter-only
+      // unit tests that don't run the LabSession refresh pass.
       rows.push(
-        formatIntBriefRow(fullInterfaceName(sub.id), sub.ip, sub.adminUp, sub.protocolUp),
+        formatIntBriefRow(fullInterfaceName(sub.id), sub.ip, i.adminUp, i.adminUp && i.protocolUp),
       );
     }
   }
@@ -2077,7 +2038,8 @@ function showRunningConfigInterface(s: Session, ifaceToken: string): ApplyResult
     if (sub.dot1qVlan !== null) lines.push(` encapsulation dot1Q ${sub.dot1qVlan}`);
     if (sub.ip && sub.mask) lines.push(` ip address ${sub.ip} ${sub.mask}`);
     else lines.push(' no ip address');
-    if (!sub.adminUp) lines.push(' shutdown');
+    // No ` shutdown` line — a subif has no independent admin state (line
+    // state follows the parent physical).
     lines.push('!');
     return { session: s, output: out(...lines) };
   }
@@ -2140,7 +2102,7 @@ function showRunningConfig(s: Session): string[] {
       if (sub.dot1qVlan !== null) lines.push(` encapsulation dot1Q ${sub.dot1qVlan}`);
       if (sub.ip && sub.mask) lines.push(` ip address ${sub.ip} ${sub.mask}`);
       else lines.push(' no ip address');
-      if (!sub.adminUp) lines.push(' shutdown');
+      // No ` shutdown` line — subif line state follows the parent physical.
       lines.push('!');
     }
   }

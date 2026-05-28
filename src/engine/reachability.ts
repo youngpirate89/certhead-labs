@@ -239,9 +239,8 @@ function walk(
         // no-route so the diagnosis points at "R1 has no route to X".
         return fail(direction, currentId, egressIfaceId, 'no-route');
       }
-      if (!egressSubif.adminUp) {
-        return fail(direction, currentId, egressIfaceId, 'egress-down');
-      }
+      // Subif line state follows the parent — the parent admin-state check
+      // below is the egress-down lever (a subif has no independent admin state).
       const parent = current.device.interfaces[egressSubif.parentId];
       if (!parent || !parent.adminUp) {
         return fail(direction, currentId, egressSubif.parentId, 'egress-down');
@@ -502,7 +501,7 @@ function findGatewayThroughSwitch(
           if (sub.parentId !== peerEnd.iface) continue;
           if (sub.dot1qVlan !== vlan) continue;
           if (sub.ip !== gatewayIp) continue;
-          if (!sub.adminUp || !sub.protocolUp) continue;
+          if (!sub.protocolUp) continue;
           return { router: peer, routerParentIface: peerEnd.iface };
         }
         continue;
@@ -666,8 +665,8 @@ function deliveryCheck(
     return fail(direction, owner.device.id, null, 'dest-unreachable');
   }
   // Router — confirm the interface holding dstIp is admin-up. Subifs count
-  // as long as both the subif AND its parent are admin-up (the parent owns
-  // the cable; without it the dot1Q frame never arrives at the subif).
+  // as long as their parent is admin-up (the parent owns the cable AND the
+  // subif's line state; without it the dot1Q frame never arrives at the subif).
   const iface = Object.values(owner.device.interfaces).find((i) => i.ip === dstIp);
   if (iface) {
     if (!iface.adminUp) {
@@ -677,9 +676,8 @@ function deliveryCheck(
   }
   const sub = Object.values(owner.device.subInterfaces).find((s) => s.ip === dstIp);
   if (sub) {
-    if (!sub.adminUp) {
-      return fail(direction, owner.device.id, sub.id, 'dest-unreachable');
-    }
+    // Subif line state follows the parent — the parent admin check is the
+    // delivery gate (a subif has no independent admin state).
     const parent = owner.device.interfaces[sub.parentId];
     if (!parent || !parent.adminUp) {
       return fail(direction, owner.device.id, sub.parentId, 'dest-unreachable');
@@ -791,7 +789,7 @@ function sourceIpOf(s: DeviceSession): string | null {
     if (i.adminUp && i.ip) return i.ip;
   }
   for (const sub of Object.values(s.device.subInterfaces)) {
-    if (sub.adminUp && sub.ip) return sub.ip;
+    if (sub.protocolUp && sub.ip) return sub.ip;
   }
   return null;
 }

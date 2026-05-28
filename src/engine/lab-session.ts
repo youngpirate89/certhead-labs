@@ -657,9 +657,9 @@ function pickPoolForIfaceSubnet(
 
 /** Recompute `protocolUp` for every physical interface AND subinterface on one
  *  router. Returns the same session if nothing changed (lets the outer refresh
- *  skip a clone). Subif protocolUp resolves to `adminUp && parent.protocolUp`
- *  — so this MUST run after the physical pass so each subif sees the fresh
- *  parent state. */
+ *  skip a clone). Subif protocolUp follows the parent (`parent.adminUp &&
+ *  parent.protocolUp`) — so this MUST run after the physical pass so each
+ *  subif sees the fresh parent state. */
 function refreshRouterProtocolUp(lab: LabSession, s: RouterSession): RouterSession {
   let mutated = false;
   const interfaces: Record<string, RouterSession['device']['interfaces'][string]> = {
@@ -677,8 +677,8 @@ function refreshRouterProtocolUp(lab: LabSession, s: RouterSession): RouterSessi
   };
   for (const [subId, sub] of Object.entries(s.device.subInterfaces)) {
     const parent = interfaces[sub.parentId];
-    const parentUp = parent ? parent.adminUp && parent.protocolUp : false;
-    const up = sub.adminUp && parentUp;
+    // Line state follows the parent — a subif has no independent admin state.
+    const up = parent ? parent.adminUp && parent.protocolUp : false;
     if (sub.protocolUp !== up) {
       subInterfaces[subId] = { ...sub, protocolUp: up };
       mutated = true;
