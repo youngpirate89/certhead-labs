@@ -103,7 +103,15 @@ const ipRouteSubtree: CommandNode = {
   help: 'Establish a static route',
   argument: arg('prefix', {
     argument: arg('mask', {
-      argument: arg('target', done('Add a static route')),
+      // `target` is terminal — `ip route <net> <mask> <nh>` runs as-is — but
+      // also accepts an optional trailing `<ad>` token so floating statics
+      // (e.g. `ip route 0.0.0.0 0.0.0.0 10.1.2.2 200`) parse without a
+      // second grammar path.
+      argument: arg('target', {
+        terminal: true,
+        help: 'Add a static route',
+        argument: arg('ad', done('Set administrative distance (1-255)')),
+      }),
     }),
   }),
 };

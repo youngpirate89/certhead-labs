@@ -398,6 +398,67 @@ describe('IOS interpreter — `ip route` static routes', () => {
   });
 });
 
+describe('IOS interpreter — floating static routes (Lab 16)', () => {
+  function configMode(): Session {
+    return run(fresh(), ['enable', 'configure terminal']);
+  }
+
+  it('parses an optional trailing AD and stores it on the route', () => {
+    const s = applyCommand(
+      configMode(),
+      'ip route 0.0.0.0 0.0.0.0 10.1.2.2 200',
+    ).session;
+    expect(s.staticRoutes).toEqual([
+      {
+        prefix: '0.0.0.0',
+        mask: '0.0.0.0',
+        nextHop: '10.1.2.2',
+        source: 'static',
+        adminDistance: 200,
+      },
+    ]);
+  });
+
+  it('rejects an AD outside 1..255', () => {
+    const cfg = configMode();
+    expect(applyCommand(cfg, 'ip route 0.0.0.0 0.0.0.0 10.1.2.2 0').output[0].kind).toBe('error');
+    expect(applyCommand(cfg, 'ip route 0.0.0.0 0.0.0.0 10.1.2.2 256').output[0].kind).toBe('error');
+    expect(applyCommand(cfg, 'ip route 0.0.0.0 0.0.0.0 10.1.2.2 abc').output[0].kind).toBe('error');
+  });
+
+  it('replaces AD in place when the same (prefix, target) is re-entered with a different AD', () => {
+    let s = configMode();
+    s = applyCommand(s, 'ip route 0.0.0.0 0.0.0.0 10.1.1.2').session;
+    s = applyCommand(s, 'ip route 0.0.0.0 0.0.0.0 10.1.1.2 150').session;
+    expect(s.staticRoutes).toHaveLength(1);
+    expect(s.staticRoutes[0].adminDistance).toBe(150);
+  });
+
+  it('keeps the floating backup in the table but hides it from `show ip route`', () => {
+    let s = configMode();
+    s = applyCommand(s, 'ip route 0.0.0.0 0.0.0.0 10.1.1.2').session;
+    s = applyCommand(s, 'ip route 0.0.0.0 0.0.0.0 10.1.2.2 200').session;
+    expect(s.staticRoutes).toHaveLength(2);
+    const text = applyCommand(s, 'do show ip route')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/S\s+0\.0\.0\.0\/0 \[1\/0\] via 10\.1\.1\.2/);
+    expect(text).not.toMatch(/via 10\.1\.2\.2/);
+  });
+
+  it('promotes the backup into `show ip route` once the primary is withdrawn', () => {
+    let s = configMode();
+    s = applyCommand(s, 'ip route 0.0.0.0 0.0.0.0 10.1.1.2').session;
+    s = applyCommand(s, 'ip route 0.0.0.0 0.0.0.0 10.1.2.2 200').session;
+    s = applyCommand(s, 'no ip route 0.0.0.0 0.0.0.0 10.1.1.2').session;
+    const text = applyCommand(s, 'do show ip route')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/S\s+0\.0\.0\.0\/0 \[200\/0\] via 10\.1\.2\.2/);
+    expect(text).not.toMatch(/via 10\.1\.1\.2/);
+  });
+});
+
 describe('IOS interpreter — `do` exec shortcut in config modes', () => {
   function configIf(): Session {
     return run(fresh(), ['enable', 'configure terminal', 'interface gi0/0']);

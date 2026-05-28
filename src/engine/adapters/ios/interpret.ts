@@ -354,7 +354,7 @@ function dispatch(
       // command[1] differentiates ip address (config-if) from ip route (config)
       // from ip access-group (config-if). All three share the `ip` keyword.
       if (command[1] === 'address') return setIpAddress(s, args.ip, args.mask);
-      if (command[1] === 'route') return addStaticRoute(s, args.prefix, args.mask, args.target);
+      if (command[1] === 'route') return addStaticRoute(s, args.prefix, args.mask, args.target, args.ad);
       if (command[1] === 'access-group') {
         return setAccessGroup(s, args.number, command[3] as 'in' | 'out');
       }
@@ -833,6 +833,7 @@ function addStaticRoute(
   prefix: string,
   mask: string,
   target: string,
+  adArg?: string,
 ): ApplyResult {
   if (!isValidIpv4(prefix)) {
     return { session: s, output: err(`% Invalid input detected at "${prefix}".`) };
@@ -840,6 +841,17 @@ function addStaticRoute(
   if (!isValidRouteMask(mask)) return { session: s, output: err('% Invalid subnet mask.') };
   const t = parseRouteTarget(s, target);
   if (!t) return { session: s, output: err(`% Invalid input detected at "${target}".`) };
+  // Optional trailing AD token (Lab 16: floating static routes). When absent
+  // the route gets the IOS default of 1; when present it must be an integer
+  // 1..255 — anything else is a hard parse error matching real IOS.
+  let adminDistance = 1;
+  if (adArg !== undefined) {
+    const n = Number.parseInt(adArg, 10);
+    if (!Number.isFinite(n) || String(n) !== adArg || n < 1 || n > 255) {
+      return { session: s, output: err(`% Invalid input detected at "${adArg}".`) };
+    }
+    adminDistance = n;
+  }
   // Normalize the prefix to the actual network address so longest-prefix-match
   // works correctly even if the user typed a host bit set.
   const network = networkAddress(prefix, mask);
@@ -848,17 +860,21 @@ function addStaticRoute(
     mask,
     ...t,
     source: 'static',
-    adminDistance: 1,
+    adminDistance,
   };
-  // Deduplicate: identical entries do not stack.
-  const dupe = s.staticRoutes.find(
+  // Same (prefix, mask, target) re-entered: replace in place — real IOS
+  // overwrites the existing entry's AD rather than stacking duplicates. A
+  // floating backup ALWAYS has a different next-hop than the primary, so
+  // this path only fires on idempotent re-entry, never on floating adds.
+  const dupeIdx = s.staticRoutes.findIndex(
     (r) =>
       r.prefix === route.prefix &&
       r.mask === route.mask &&
       r.nextHop === route.nextHop &&
       r.egressIface === route.egressIface,
   );
-  if (!dupe) s.staticRoutes.push(route);
+  if (dupeIdx < 0) s.staticRoutes.push(route);
+  else s.staticRoutes[dupeIdx] = route;
   return { session: s, output: [] };
 }
 
@@ -1761,7 +1777,21 @@ function showIpRoute(s: Session): string[] {
     'Codes: C - connected, S - static, O - OSPF',
     '',
   ];
-  const table = routingTable(s);
+  // RIB view: per (prefix, mask) display only the lowest-AD entry. Losers
+  // stay in routingTable() so LPM can promote them once a better route is
+  // withdrawn — the floating-static teaching point of Lab 16. Stable on
+  // tie: the earliest insertion at the winning AD wins, matching §5.
+  const full = routingTable(s);
+  const winnerIdxByKey = new Map<string, number>();
+  full.forEach((r, idx) => {
+    const key = `${r.prefix}/${r.mask}`;
+    const cur = winnerIdxByKey.get(key);
+    if (cur === undefined || r.adminDistance < full[cur].adminDistance) {
+      winnerIdxByKey.set(key, idx);
+    }
+  });
+  const winners = new Set(winnerIdxByKey.values());
+  const table = full.filter((_, idx) => winners.has(idx));
   if (table.length === 0) {
     lines.push('No routes installed.');
     return lines;
