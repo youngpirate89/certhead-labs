@@ -526,8 +526,18 @@ const extSrcAndDst: CommandNode = {
   }),
 };
 
+/** Protocol selector for `permit`/`deny` in config-ext-nacl. IOS shows the
+ *  named protocol list under `?` rather than a `<protocol>` placeholder — we
+ *  scope to the CCNA-relevant set (ip/tcp/udp/icmp). Each protocol child
+ *  shares the same downstream src→dst→`eq` sub-tree (`extSrcAndDst`); the
+ *  selected protocol is read by the interpreter from `command[1]`. */
 const extPermitDeny: CommandNode = {
-  argument: arg('protocol', extSrcAndDst),
+  children: {
+    ip: { help: 'Any Internet Protocol', ...extSrcAndDst },
+    tcp: { help: 'Transmission Control Protocol', ...extSrcAndDst },
+    udp: { help: 'User Datagram Protocol', ...extSrcAndDst },
+    icmp: { help: 'Internet Control Message Protocol', ...extSrcAndDst },
+  },
 };
 
 const configExtNaclMode: CommandNode = {

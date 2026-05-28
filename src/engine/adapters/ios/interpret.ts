@@ -1424,13 +1424,11 @@ function addExtAclEntry(
   if (!acl || acl.type !== 'extended') {
     return { session: s, output: err('% Invalid ACL state.') };
   }
-  const protocol = args.protocol as 'ip' | 'tcp' | 'udp' | 'icmp' | undefined;
-  if (!protocol || !['ip', 'tcp', 'udp', 'icmp'].includes(protocol)) {
-    return {
-      session: s,
-      output: err(`% Invalid input detected at "${args.protocol ?? ''}".`),
-    };
-  }
+  // Protocol arrives as a grammar keyword child (ip/tcp/udp/icmp), so the
+  // resolver places it at command[1]. Older revisions captured it as a free-
+  // form argument under `args.protocol`; the resolver guarantees the
+  // structural-children form now, so the cast is safe.
+  const protocol = command[1] as 'ip' | 'tcp' | 'udp' | 'icmp';
 
   const src = parseExtTuple(args, 'src');
   if ('error' in src) return { session: s, output: err(src.error) };

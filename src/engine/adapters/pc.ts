@@ -63,6 +63,10 @@ export interface PcSession {
   readonly kind: 'pc';
   readonly id: string;
   readonly hostname: string;
+  /** Lab-spec platform label — shown in the topology card badge (e.g.
+   *  `Server`, `Workstation`). Kept on the session so toTopologyView can
+   *  surface it without re-reading the LabDevice spec at render time. */
+  readonly platform: string;
   /** Single NIC label — kept stable for canvas labelling. */
   readonly nic: string;
   ip: string | null;
@@ -245,6 +249,7 @@ export const pcAdapter: DeviceAdapter<PcSession> = {
       kind: 'pc',
       id: spec.id,
       hostname: spec.id,
+      platform: spec.platform,
       nic,
       // DHCP clients start with no addressing; the lab-session DHCP refresh
       // pass populates ip/mask/gateway when a binding resolves. Static specs
@@ -323,7 +328,7 @@ export const pcAdapter: DeviceAdapter<PcSession> = {
       id: session.id,
       kind: 'pc',
       hostname: session.hostname,
-      platform: 'Workstation',
+      platform: session.platform,
       deviceClass: session.deviceClass,
       interfaces: [
         {

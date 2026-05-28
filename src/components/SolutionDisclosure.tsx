@@ -44,9 +44,20 @@ export function SolutionDisclosure({ steps }: Props) {
               <div className="mb-0.5 font-mono text-[10px] font-medium uppercase tracking-wider text-terminal-dim">
                 {step.device}
               </div>
-              <div className="overflow-x-auto rounded bg-terminal-bg px-2 py-1.5 font-mono text-[11px] leading-relaxed text-terminal-prompt">
+              <div className="rounded bg-terminal-bg px-2 py-1.5 font-mono text-[11px] leading-relaxed text-terminal-prompt">
                 {step.commands.map((cmd, j) => (
-                  <div key={j} className="whitespace-pre">
+                  <div
+                    key={j}
+                    // Hanging indent: wrapped continuation lines start 2ch
+                    // further right than the first line so the learner can
+                    // see at a glance that a wrap isn't a new command.
+                    // `whitespace-pre-wrap` preserves leading-space indents
+                    // (e.g. ` deny icmp ...` inside an ACL stanza) AND wraps
+                    // long lines on whitespace; `break-words` falls back to
+                    // breaking inside a long token if no whitespace exists.
+                    className="whitespace-pre-wrap break-words"
+                    style={{ paddingLeft: '2ch', textIndent: '-2ch' }}
+                  >
                     {cmd}
                   </div>
                 ))}
