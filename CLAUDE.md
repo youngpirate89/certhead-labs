@@ -4,7 +4,7 @@
 > the question-bank product. Do not conflate the two; they have different
 > architectures, different priorities, and different timelines.
 >
-> Last updated: 2026-05-29
+> Last updated: 2026-05-30
 
 ---
 
@@ -51,9 +51,9 @@ This project is **explicitly subordinate to CertHead's launch sequence.** Work o
 
 ---
 
-## 🎯 CURRENT FOCUS — CATALOG AT 13 LABS (LAB 13 IN PROGRESS)
+## 🎯 CURRENT FOCUS — CATALOG AT 13 LABS, ALL COMMITTED
 
-Status: Engine has generalized well past the original troubleshooting-pilot scope. Switch + VLAN + trunking landed; on-demand hint reveal landed; DHCP server landed; "See Solution" disclosure landed across the entire catalog; NAT/PAT landed; named extended ACLs landed (grammar hardened with explicit coverage for the 4 src/dst×any/host/bare combinations + `eq` port forms). Catalog is at 13 labs with Lab 13 (OSPF tshoot) in progress — Lab 12 signed off; Lab 13 lab + tests authored, cold-run pending.
+Status: Engine has generalized well past the original troubleshooting-pilot scope. Switch + VLAN + trunking landed; on-demand hint reveal landed; DHCP server landed; "See Solution" disclosure landed across the entire catalog; NAT/PAT landed; named extended ACLs landed (grammar hardened with explicit coverage for the 4 src/dst×any/host/bare combinations + `eq` port forms); Lab 13 (OSPF tshoot — mismatched area) signed off via tests + cold-run. Catalog is at 13 labs, all committed (solution field standard across every catalog lab).
 
 **Catalog (13 labs):**
 - Lab 01: Interface IP — free lab, live at `/try` ✅
@@ -69,7 +69,7 @@ Status: Engine has generalized well past the original troubleshooting-pilot scop
 - Lab 10: DHCP server — exclude range, pool config, binding, verify ✅
 - Lab 11: NAT/PAT overload — inside/outside roles, ACL-selected source, `ip nat inside source list ... overload`, verify ✅
 - Lab 12: Named Extended ACL — `ip access-list extended <name>`, `permit/deny <proto> <src> <dst>`, apply inbound close to source, verify ✅
-- Lab 13: OSPF tshoot — diagnose missing/wrong adjacency via `show ip ospf neighbor` (empty header rendered IOS-style) 🚧 in progress
+- Lab 13: OSPF tshoot — diagnose missing/wrong adjacency via `show ip ospf neighbor` (empty header rendered IOS-style) ✅
 
 **Engine capabilities now span:**
 - **Router:** interface config, static routes, OSPF single-area (neighbor state + O routes), standard ACLs (numbered 1–99) AND named extended ACLs (`ip access-list extended <name>` enters config-ext-nacl mode; `permit/deny <proto> <src> <dst> [eq <port>]` lines auto-sequence in 10s; `ip access-group <name|number> in|out` binds), protocol + destination matching in `evaluateAcl`/`canReach` (PC/router ping handlers + tracert pass `protocol: 'icmp'` so extended `deny icmp` entries fire), subinterfaces with config-subif mode (`interface Gi0/0.10`), `encapsulation dot1q <vlan>` (native option), subif-aware `canReach` for inter-VLAN routing, DHCP server (`ip dhcp pool`, `ip dhcp excluded-address`, `network` / `default-router` / `dns-server` / `lease` in config-dhcp mode), deterministic binding allocator that propagates ip/mask/gateway into DHCP-client PCs, NAT/PAT overload (`ip nat inside`/`outside` on interfaces, `ip nat inside source list <acl> interface <iface> overload` in config) with canReach-integrated `effectiveSrcIp` translation at the inside→outside boundary and a LabSession-refresh-populated translation table, full show suite incl. `show run interface <iface>`, `show ip dhcp pool|binding|conflict`, `show ip nat translations|statistics`, and `show access-lists` (renders Standard and Extended ACLs; stamps Session.lastShowAccessLists as the verify gate).
@@ -87,7 +87,7 @@ Status: Engine has generalized well past the original troubleshooting-pilot scop
 
 **CertHead state (drives the next move):** Live exams: CCNA, N10-009, SY0-701. Paid subscribers: 0 — pre-launch, building catalog depth in private is the +4–12 week phase, fully in-bounds. Nothing deployed beyond the free lab; catalog registry, `/embed`, custom domain, and the landing-page link to `/try` all still gated on the ≥300-paid bar.
 
-**Next — finish Lab 13 cold-run + sign-off, then Lab 14 candidate selection. Authoring checklist for every new lab: starting state + objectives + hints + `solution: LabSolution` block — all authored together in the same PR, never as a follow-up.**
+**Next — Lab 14 candidate selection: check CLAUDE.md strategic sequencing rules before starting. Authoring checklist for every new lab: starting state + objectives + hints + `solution: LabSolution` block — all authored together in the same PR, never as a follow-up.**
 
 ---
 
