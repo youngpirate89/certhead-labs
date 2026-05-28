@@ -55,12 +55,30 @@ describe('LED state derives from starting state on lab load', () => {
     expect(status['SW1:Gi0/0']).toBe('false');
   });
 
-  it('Lab 01 at load: no LEDs at all (free lab has no links — N=1 topology)', () => {
+  it('Lab 01 at load: R1↔SW1 cable is red (R1.Gi0/0 admin-down at boot)', () => {
+    // The free lab now ships a passive upstream switch (SW1) on Gi0/0 so the
+    // line protocol can come genuinely up after `no shutdown`. At load R1.Gi0/0
+    // is admin-down, so the either-end-down rule pulls both LEDs red — the
+    // visible signal that the link still needs bringing up.
     const status = ledMap(lab01InterfaceIp);
-    // Single-device lab has no cables, so no LEDs render. This is the
-    // "no regression" check the work order asks for — bottom-row PortIndicators
-    // (which still use the richer 'status' palette) remain unaffected.
-    expect(Object.keys(status)).toEqual([]);
+    expect(status['R1:Gi0/0']).toBe('false');
+    expect(status['SW1:Gi0/1']).toBe('false');
+  });
+
+  it('Lab 01 after no shutdown: R1↔SW1 cable goes green (genuine up/up)', () => {
+    let session = initLabSession(lab01InterfaceIp);
+    for (const line of [
+      'enable',
+      'configure terminal',
+      'interface gi0/0',
+      'ip address 192.168.1.1 255.255.255.0',
+      'no shutdown',
+    ]) {
+      session = applyToDevice(session, 'R1', line).session;
+    }
+    const status = ledMap(lab01InterfaceIp, session);
+    expect(status['R1:Gi0/0']).toBe('true');
+    expect(status['SW1:Gi0/1']).toBe('true');
   });
 
   it('no shutdown on a peer-up but IP-less router port flips LED to green', () => {

@@ -15,12 +15,21 @@ export const lab01InterfaceIp: Lab = {
   estimatedMinutes: 5,
   isFree: true,
   scenario:
-    "You've just unboxed an ISR4321 router for a new branch office. The chassis is racked and powered, but every interface is administratively down — a fresh-from-the-box state. The network team has assigned 192.168.1.1/24 to GigabitEthernet0/0 for the WAN uplink, and they're waiting on you to bring the link up.\n\nConfigure the interface, bring it up, and verify it with show ip interface brief. The terminal behaves like a real Cisco router — abbreviations work, ? shows context help, and Tab completes unique prefixes.",
+    "You've just unboxed an ISR4321 router for a new branch office. The chassis is racked and powered, but every interface is administratively down - a fresh-from-the-box state. The network team has assigned 192.168.1.1/24 to GigabitEthernet0/0, the uplink into the branch access switch (SW1), and they're waiting on you to bring the link up.\n\nConfigure the interface, bring it up, and verify it with show ip interface brief. The terminal behaves like a real Cisco router - abbreviations work, ? shows context help, and Tab completes unique prefixes.",
   topology: {
+    // R1 is the only device the learner configures. SW1 is a passive upstream
+    // access switch (the router's first hop is normally a switch): it carries
+    // no objectives, no solution steps, and needs no setup — its ports are
+    // admin-up by default. Its sole purpose is to give Gi0/0 a real link
+    // partner so `no shutdown` brings the line protocol genuinely up (up/up),
+    // which the verify objective and completion copy promise. Before
+    // `no shutdown`, Gi0/0 is still admin-down → protocol down (the lab's
+    // whole point); after, it reads up/up and the cable LED goes green.
     devices: [
       { id: 'R1', kind: 'router', platform: 'ISR4321', interfaces: ['Gi0/0', 'Gi0/1', 'Gi0/2'] },
+      { id: 'SW1', kind: 'switch', platform: 'C2960', interfaces: ['Gi0/1'] },
     ],
-    links: [],
+    links: [{ a: { deviceId: 'R1', iface: 'Gi0/0' }, b: { deviceId: 'SW1', iface: 'Gi0/1' } }],
   },
   objectives: [
     {
@@ -38,7 +47,8 @@ export const lab01InterfaceIp: Lab = {
     {
       id: 'verify',
       text: 'R1: run show ip interface brief to confirm Gi0/0 is up/up',
-      // History is per-device — lab-01 has one device, R1. Accept the command
+      // History is per-device. R1 is the learner's device (SW1 is a passive
+      // peer with no commands), so match on R1's history. Accept the command
       // from priv mode OR via `do` from config-family modes; both forms appear
       // in resolvedHistory as canonical strings.
       check: (_state, history) =>
