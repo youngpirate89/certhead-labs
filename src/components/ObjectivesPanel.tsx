@@ -190,15 +190,45 @@ export function ObjectivesPanel({
           <SolutionDisclosure steps={solution.steps} />
         )}
       </div>
-      {allMet && onReset && (
-        <div className="border-t border-panel-border p-3">
-          <button
-            type="button"
-            onClick={onReset}
-            className="w-full rounded-md border border-terminal-prompt/60 bg-terminal-prompt/10 px-3 py-2 font-sans text-sm font-semibold text-terminal-prompt transition hover:bg-terminal-prompt/20 focus:outline-none focus:ring-2 focus:ring-terminal-prompt focus:ring-offset-2 focus:ring-offset-panel-bg"
-          >
-            Reset lab
-          </button>
+      {allMet && (
+        // Shared completion moment — lifts every lab (free /try AND Pro
+        // catalog) above the bare header flip + reset button. A success card
+        // with affirming, deterministic copy: a genuine payoff, not a status
+        // change. Deliberately carries NO upgrade CTA and NO next-lab link:
+        //  - the /try funnel CTA ("Unlock with CertHead Pro") lives solely in
+        //    TryMode's CompletionBanner; duplicating it here would double the
+        //    funnel and would wrongly appear on Pro labs too.
+        //  - there is no wired in-app next-lab navigation (the catalog
+        //    registry is gated/unbuilt per CLAUDE.md), so we use static copy
+        //    rather than fabricate a link to nowhere.
+        <div className="animate-slide-up border-t border-terminal-prompt/40 bg-terminal-prompt/5 p-4">
+          <div className="flex items-start gap-3">
+            <div
+              aria-hidden
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-terminal-prompt/70 bg-terminal-prompt/20 text-terminal-prompt"
+            >
+              <span className="animate-check-pop text-sm font-bold">✓</span>
+            </div>
+            <div className="flex-1">
+              <p className="font-sans text-sm font-semibold text-terminal-prompt">
+                Lab complete
+              </p>
+              <p className="mt-0.5 font-sans text-xs leading-relaxed text-terminal-fg/80">
+                Every objective met. You configured and verified this scenario
+                end to end - the same workflow you'll use on the exam and on the
+                job.
+              </p>
+            </div>
+          </div>
+          {onReset && (
+            <button
+              type="button"
+              onClick={onReset}
+              className="mt-3 w-full rounded-md border border-terminal-prompt/60 bg-terminal-prompt/10 px-3 py-2 font-sans text-sm font-semibold text-terminal-prompt transition hover:bg-terminal-prompt/20 focus:outline-none focus:ring-2 focus:ring-terminal-prompt focus:ring-offset-2 focus:ring-offset-panel-bg"
+            >
+              Reset lab
+            </button>
+          )}
         </div>
       )}
     </div>
