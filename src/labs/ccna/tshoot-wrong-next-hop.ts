@@ -27,7 +27,7 @@ export const tshootWrongNextHop: Lab = {
   estimatedMinutes: 8,
   isFree: false,
   scenario:
-    "Trouble ticket: PC-A on 192.168.1.0/24 can’t reach PC-B on 192.168.2.0/24. The previous lab’s missing return route was added — but a typo crept in. The WAN link between R1 and R2 is a /30 (192.168.12.0/30); the only two valid hosts on that link are R1’s Gi0/0 at 192.168.12.1 and R2’s Gi0/0 at 192.168.12.2. Anything outside that pair isn’t reachable across this link.\n\nFrom PC-A, run `ping 192.168.2.10` and read the failure carefully — the engine names R2 and tells you the next-hop on R2 isn’t in that interface’s subnet. Remove R2’s broken static and add the correct one back. The lab passes when the round-trip works.",
+    "Trouble ticket: PC-A on 192.168.1.0/24 can’t reach PC-B on 192.168.2.0/24. The previous lab’s missing return route was added - but a typo crept in. The WAN link between R1 and R2 is a /30 (192.168.12.0/30); the only two valid hosts on that link are R1’s Gi0/0 at 192.168.12.1 and R2’s Gi0/0 at 192.168.12.2. Anything outside that pair isn’t reachable across this link.\n\nFrom PC-A, run `ping 192.168.2.10` and read the failure carefully - the engine names R2 and tells you the next-hop on R2 isn’t in that interface’s subnet. Remove R2’s broken static and add the correct one back. The lab passes when the round-trip works.",
   topology: {
     devices: [
       {
@@ -85,7 +85,7 @@ export const tshootWrongNextHop: Lab = {
   objectives: [
     {
       id: 'fix-r2-next-hop',
-      text: 'Restore full connectivity — PC-A can ping 192.168.2.10',
+      text: 'Configure the correct next-hop for 192.168.1.0/24 on R2',
       check: (_state, _history, session) => {
         const r2 = session.devices.R2;
         if (r2?.kind !== 'router') return false;
@@ -111,12 +111,12 @@ export const tshootWrongNextHop: Lab = {
     {
       afterSeconds: 90,
       text:
-        'Run `ping 192.168.2.10` on PC-A and read the message. Then click R2 → `enable` → `show ip route` and look at the static route line — what address does the next-hop point at, and is that address on the same /30 as R2’s WAN interface?',
+        'Run `ping 192.168.2.10` on PC-A and read the message. Then click R2 → `enable` → `show ip route` and look at the static route line - what address does the next-hop point at, and is that address on the same /30 as R2’s WAN interface?',
     },
     {
       afterSeconds: 240,
       text:
-        'On R2, remove the bad static and add the right one. The R1–R2 link is 192.168.12.0/30 — R1’s end is 192.168.12.1, R2’s end is 192.168.12.2. From R2: `enable`, `configure terminal`, `no ip route 192.168.1.0 255.255.255.0 192.168.12.99`, then `ip route 192.168.1.0 255.255.255.0 192.168.12.1`.',
+        'On R2, remove the bad static and add the right one. The R1-R2 link is 192.168.12.0/30 - R1’s end is 192.168.12.1, R2’s end is 192.168.12.2. From R2: `enable`, `configure terminal`, `no ip route 192.168.1.0 255.255.255.0 192.168.12.99`, then `ip route 192.168.1.0 255.255.255.0 192.168.12.1`.',
     },
   ],
   solution: {

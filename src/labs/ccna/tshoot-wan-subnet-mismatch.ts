@@ -29,7 +29,7 @@ export const tshootWanSubnetMismatch: Lab = {
   estimatedMinutes: 8,
   isFree: false,
   scenario:
-    "Trouble ticket: PC-A still can’t reach PC-B. Both routers have static routes pointing at the right next-hops on the WAN, but the link between R1 and R2 isn’t carrying traffic. The two ends of a point-to-point link have to live in the same subnet — if R1 thinks the link is one /30 and R2 thinks it’s a different /30, IP can’t cross.\n\nFrom PC-A, run `ping 192.168.2.10`. The engine names the link directly: it tells you the subnets on the two ends of the link at R1 Gi0/0 don’t match. Click R1 and R2 in turn and `show ip interface brief` — look at the WAN addresses and figure out which side is wrong. Fix R2’s WAN interface so both ends sit in the same /30.",
+    "Trouble ticket: PC-A still can’t reach PC-B. Both routers have static routes pointing at the right next-hops on the WAN, but the link between R1 and R2 isn’t carrying traffic. The two ends of a point-to-point link have to live in the same subnet - if R1 thinks the link is one /30 and R2 thinks it’s a different /30, IP can’t cross.\n\nFrom PC-A, run `ping 192.168.2.10`. The engine names the link directly: it tells you the subnets on the two ends of the link at R1 Gi0/0 don’t match. Click R1 and R2 in turn and `show ip interface brief` - look at the WAN addresses and figure out which side is wrong. Fix R2’s WAN interface so both ends sit in the same /30.",
   topology: {
     devices: [
       {
@@ -87,7 +87,7 @@ export const tshootWanSubnetMismatch: Lab = {
   objectives: [
     {
       id: 'fix-r2-wan',
-      text: 'Restore full connectivity — PC-A can ping 192.168.2.10',
+      text: "Correct R2's WAN interface IP to match the /30 subnet",
       check: (state) => {
         const i = state.R2?.interfaces['Gi0/0'];
         return (
@@ -111,7 +111,7 @@ export const tshootWanSubnetMismatch: Lab = {
     {
       afterSeconds: 90,
       text:
-        'Run `ping 192.168.2.10` on PC-A — the failure names R1 Gi0/0 and says the subnets on the two ends of the link don’t match. Click R1 → `enable` → `show ip interface brief` to see R1’s end of the link, then do the same on R2. Compute the network each side belongs to and find the mismatch.',
+        'Run `ping 192.168.2.10` on PC-A - the failure names R1 Gi0/0 and says the subnets on the two ends of the link don’t match. Click R1 → `enable` → `show ip interface brief` to see R1’s end of the link, then do the same on R2. Compute the network each side belongs to and find the mismatch.',
     },
     {
       afterSeconds: 240,
