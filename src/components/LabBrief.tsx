@@ -37,7 +37,7 @@ export function LabBrief({
           <span className="font-mono text-xs uppercase tracking-[0.15em] text-terminal-prompt">
             {examLabel} · Lab Scenario
           </span>
-          <span className="font-mono text-[11px] text-terminal-dim">
+          <span className="font-mono text-[11px] text-terminal-fg/70">
             {'●'.repeat(difficulty)}
             {'○'.repeat(Math.max(0, 5 - difficulty))} · ~{estimatedMinutes} min
           </span>
@@ -47,21 +47,21 @@ export function LabBrief({
           {title}
         </h1>
 
-        <div className="mt-5 space-y-3 font-sans text-[14px] leading-relaxed text-terminal-fg/85">
+        <div className="mt-5 space-y-3 font-sans text-[14px] leading-relaxed text-terminal-fg">
           {paragraphs.map((p, i) => (
             <p key={i}>{p}</p>
           ))}
         </div>
 
         <div className="mt-6">
-          <h2 className="font-sans text-xs font-semibold uppercase tracking-wide text-terminal-dim">
+          <h2 className="font-sans text-xs font-semibold uppercase tracking-wide text-terminal-fg/70">
             Your goals
           </h2>
           <ul className="mt-2 space-y-1.5">
             {objectives.map((o) => (
               <li
                 key={o.id}
-                className="flex gap-2 font-sans text-[13.5px] text-terminal-fg/85"
+                className="flex gap-2 font-sans text-[13.5px] text-terminal-fg"
               >
                 <span aria-hidden className="select-none text-terminal-prompt">
                   ▸
