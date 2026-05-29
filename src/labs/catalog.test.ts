@@ -18,6 +18,7 @@ const CATALOG_IDS = [
   'ccna-lab15-default-static-route',
   'ccna-lab16-floating-static-route',
   'ccna-lab17-ospf-passive-interface',
+  'ccna-lab18-ospf-tshoot-passive',
   'ccna-tshoot-return-route',
   'ccna-tshoot-wrong-next-hop',
   'ccna-tshoot-wan-subnet-mismatch',
