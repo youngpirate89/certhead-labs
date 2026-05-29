@@ -199,12 +199,14 @@ describe('FloatingTerminalPanel', () => {
     ).toBeNull();
   });
 
-  it('opens at the default size (600 wide, 420 tall)', () => {
+  it('opens at the default size (740 wide, 420 tall)', () => {
     const { container } = renderPanel();
     const panel = container.querySelector(
       '[data-floating-terminal-panel]',
     ) as HTMLElement;
-    expect(panel.style.width).toBe('600px');
+    // 740px holds 80-column IOS tables without wrapping at the 14px default
+    // font (see DEFAULT_PANEL_WIDTH rationale in FloatingTerminalPanel.tsx).
+    expect(panel.style.width).toBe('740px');
     expect(panel.style.height).toBe('420px');
   });
 
