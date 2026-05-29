@@ -20,6 +20,7 @@ const CATALOG_IDS = [
   'ccna-lab17-ospf-passive-interface',
   'ccna-lab18-ospf-tshoot-passive',
   'ccna-lab19-ospf-tshoot-hello-timers',
+  'ccna-lab20-ospf-tshoot-auth',
   'ccna-tshoot-return-route',
   'ccna-tshoot-wrong-next-hop',
   'ccna-tshoot-wan-subnet-mismatch',
