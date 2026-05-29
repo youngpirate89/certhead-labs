@@ -89,11 +89,23 @@ Status: Engine has generalized well past the original troubleshooting-pilot scop
 - **Solution disclosure:** every catalog lab ships a `solution: LabSolution` block. `LabSolution = { steps: SolutionStep[] }`, step = `{ device, commands, note? }`. Collapsible "See Solution" panel under the hints — closed by default, muted text + chevron, no warning copy. **Solution field is now standard on the Lab type — every new lab requires a solution block, authored at the same time as the lab (not added retroactively).** The type stays optional so pilot/throwaway labs in `_pilots/` can omit it; catalog membership implies a solution. Command block renders one `<div>` per command (no `.join('\n')` into a single string) with `whitespace-pre` to preserve leading indents — learners can read the block top to bottom and type each line exactly as shown.
 - **Extended ACL grammar:** hardened across the 4 src×dst combinations (`any|host <ip>|<ip> <wc>` for both source and destination) plus optional `eq <port|name>`. `show running-config interface <iface>` now mirrors the full `show running-config` and includes `ip access-group ... in|out` lines so the single-iface form doesn't silently drop bindings.
 
-853 tests passing, tsc clean. Free lab unchanged and live.
+863 tests passing, tsc clean. Free lab unchanged and live.
 
 **CertHead state (drives the next move):** Live exams: CCNA, N10-009, SY0-701. Paid subscribers: 0 — pre-launch, building catalog depth in private is the +4–12 week phase, fully in-bounds. Nothing deployed beyond the free lab; catalog registry, `/embed`, custom domain, and the landing-page link to `/try` all still gated on the ≥300-paid bar.
 
 **Next — Lab 20 candidate selection: check CLAUDE.md strategic sequencing rules before starting. Authoring checklist for every new lab: starting state + objectives + hints + `solution: LabSolution` block — all authored together in the same PR, never as a follow-up.**
+
+### 📌 Parked work (scoped, not started)
+
+- **Tshoot diagnostic-arc standardization** (scope doc: card-vs-objective audit, this session). Two systemic gaps across the troubleshooting labs:
+  - **Shape A:** the "confirm the break" diagnostic ping is instructed but ungraded in all 7 tshoot labs (02, 03, 04, egress-down, 11, 13, 18, 19). Benign (can't false-complete) — pedagogy enhancement, not a bug. Decision pending: adopt the 4-objective arc (observe → diagnose → fix → verify) catalog-wide, or leave as-is.
+  - **Shape B:** diagnostic show commands graded inconsistently. Lab 13 is the clearest outlier — no diagnose objective at all, unlike siblings 18/19 which grade the cause command. If standardizing, Lab 13 needs a diagnose objective to match.
+
+  This is a deliberate own-session sweep (7+ labs), STOP-checkpointed — not a tail-end add.
+
+- **Per-interface canvas IP labels** (tshoot difficulty-floor enhancement). Topology shows link CIDR (e.g. `192.168.12.0/30`) but not each router's interface IP. Showing per-iface IPs on the cable (the 3-label layout already supports this) lowers the derivation floor for weaker learners without giving away the answer in objective text. Enhancement, not a fix.
+
+- **Lab 09 indirectly-enforced "no shutdown Gi0/0":** acceptable as-is (subifs follow parent, so ping-cross-vlan gates it), noted for completeness — no action needed.
 
 ### 🧊 DEFERRED WORK — banked, build only when evidence demands (guardrail #21)
 
