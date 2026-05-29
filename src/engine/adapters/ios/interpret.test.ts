@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { applyCommand, contextHelp, tabComplete } from './interpret';
 import { createSession, buildDevice, prompt, routingTable, type Session } from './state';
+import { sanitizeInput } from '@/engine/terminal/sanitize';
 import { grade } from '@/engine/grading';
 import { lab01InterfaceIp } from '@/labs/ccna/lab-01-interface-ip';
 
@@ -554,6 +555,58 @@ describe('IOS interpreter — invalid-input `^` caret rendering', () => {
     const promptLen = prompt(priv).length + 1;
     // 'frobnicate' starts at offset 5: 'show '
     expect(out[0].text).toBe(' '.repeat(promptLen + 5) + '^');
+  });
+
+  it('carets a handler-rejected argument: too-short mask on `no ip route`', () => {
+    // The mask token resolves as an argument (arg slots accept any token), so
+    // the command RESOLVES and the rejection happens during handler-level
+    // validation in removeStaticRoute — not the resolver path. The caret must
+    // still land under the offending token (the mask), driven by the threaded
+    // argOffsets plumbing.
+    const cfg = run(fresh(), ['enable', 'configure terminal']);
+    const out = applyCommand(cfg, 'no ip route 192.168.1.0 255.255.0 192.168.12.99').output;
+    const promptLen = prompt(cfg).length + 1;
+    // '255.255.0' starts at offset 24:
+    //   'no '(3) + 'ip '(3) + 'route '(6) + '192.168.1.0 '(12) = 24
+    expect(out).toHaveLength(2);
+    expect(out[0].text).toBe(' '.repeat(promptLen + 24) + '^');
+    expect(out[1].text).toBe("% Invalid input detected at '^' marker.");
+  });
+
+  it('carets a bad IP argument on `ip address` (config-if)', () => {
+    const cfgIf = run(fresh(), ['enable', 'configure terminal', 'interface gi0/0']);
+    const out = applyCommand(cfgIf, 'ip address 10.0.0.999 255.255.255.0').output;
+    const promptLen = prompt(cfgIf).length + 1;
+    // '10.0.0.999' starts at offset 11: 'ip address '.
+    expect(out[0].text).toBe(' '.repeat(promptLen + 11) + '^');
+    expect(out[1].text).toBe("% Invalid input detected at '^' marker.");
+  });
+
+  it('carets the third positional arg: bad area on OSPF `network` (config-router)', () => {
+    const cfgRtr = run(fresh(), ['enable', 'configure terminal', 'router ospf 1']);
+    const out = applyCommand(cfgRtr, 'network 10.0.0.0 0.0.0.255 area abc').output;
+    const promptLen = prompt(cfgRtr).length + 1;
+    // 'abc' starts at offset 32:
+    //   'network '(8) + '10.0.0.0 '(9) + '0.0.0.255 '(10) + 'area '(5) = 32
+    expect(out[0].text).toBe(' '.repeat(promptLen + 32) + '^');
+    expect(out[1].text).toBe("% Invalid input detected at '^' marker.");
+  });
+
+  it('REGRESSION: caret column is computed against the SANITIZED line', () => {
+    // A learner's OS auto-substitutes the hyphen in `access-list` with an
+    // em-dash. The terminal sanitizes it 1:1 back to ASCII before the parser
+    // sees it; the offending out-of-range number must still caret correctly.
+    // Guards the post-sanitization column computation: if a future sanitize
+    // rule stopped being width-preserving, this column would shift.
+    const cfg = run(fresh(), ['enable', 'configure terminal']);
+    const rawWithEmDash = 'access—list 200 permit any';
+    const sanitized = sanitizeInput(rawWithEmDash);
+    expect(sanitized).toBe('access-list 200 permit any'); // em-dash → '-', same width
+    const out = applyCommand(cfg, sanitized).output;
+    const promptLen = prompt(cfg).length + 1;
+    // '200' starts at offset 12: 'access-list '.
+    expect(out[0].text).toBe(' '.repeat(promptLen + 12) + '^');
+    expect(out[1].text).toBe("% Invalid input detected at '^' marker.");
   });
 });
 

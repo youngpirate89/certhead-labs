@@ -79,6 +79,35 @@ function invalidInputOutput(promptStr: string, charOffset: number): CommandOutpu
 }
 
 /**
+ * Error-rendering context threaded from {@link applyCommand} into the dispatch
+ * handlers so handler-level argument validation can emit the same IOS-authentic
+ * caret + message as the resolver's invalid-input path.
+ *
+ * `argOffsets` maps each resolved argument's declared name (e.g. `mask`,
+ * `target`) to the char offset of its token within the user's typed line —
+ * computed from the resolver's per-arg token index mapped through the
+ * tokenizer's per-token offsets. The offsets are measured against the SANITIZED
+ * command string the parser actually saw (smart-punctuation already normalized
+ * 1:1 upstream in the terminal's onChange), so the caret column is stable.
+ */
+interface ErrCtx {
+  readonly promptStr: string;
+  readonly argOffsets: Readonly<Record<string, number>>;
+}
+
+/**
+ * Emit the IOS invalid-input error with a caret under the named argument's
+ * token. Single sink for handler-level validation failures — every converted
+ * call site funnels through here so the rendering stays identical to the
+ * resolver path. `argName` must be a resolved argument present in
+ * `ec.argOffsets`; if it is somehow absent the caret falls back to the start of
+ * the typed line rather than throwing (deterministic, never crashes a lab).
+ */
+function badInput(ec: ErrCtx, argName: string): CommandOutput[] {
+  return invalidInputOutput(ec.promptStr, ec.argOffsets[argName] ?? 0);
+}
+
+/**
  * Apply a raw command line to a session, returning a NEW session (the input is
  * never mutated) plus the output to print. Fully deterministic.
  *
@@ -139,8 +168,15 @@ export function applyCommand(
     case 'incomplete':
       return { session, output: err('% Incomplete command.') };
     case 'complete': {
-      if (doForm) return dispatchDo(session, result.command, result.args, raw, ctx, opts);
-      return dispatch(session, result.command, result.args, raw.trim(), ctx, opts);
+      // Map each resolved arg's token index through the active per-token
+      // offsets so handlers can caret an offending argument by name.
+      const argOffsets: Record<string, number> = {};
+      for (const [name, idx] of Object.entries(result.argPositions)) {
+        argOffsets[name] = activeOffsets[idx];
+      }
+      const ec: ErrCtx = { promptStr, argOffsets };
+      if (doForm) return dispatchDo(session, result.command, result.args, raw, ec, ctx, opts);
+      return dispatch(session, result.command, result.args, raw.trim(), ec, ctx, opts);
     }
   }
 }
@@ -160,10 +196,11 @@ function dispatchDo(
   command: string[],
   args: Record<string, string>,
   raw: string,
+  ec: ErrCtx,
   ctx: AdapterContext | undefined,
   opts: ApplyOptions | undefined,
 ): ApplyResult {
-  const inner = dispatch(prev, command, args, raw.trim(), ctx, opts);
+  const inner = dispatch(prev, command, args, raw.trim(), ec, ctx, opts);
   const record = opts?.record !== false;
   const last = inner.session.resolvedHistory.length - 1;
   const fixed: Session = {
@@ -270,6 +307,7 @@ function dispatch(
   command: string[],
   args: Record<string, string>,
   raw: string,
+  ec: ErrCtx,
   ctx: AdapterContext | undefined,
   opts: ApplyOptions | undefined,
 ): ApplyResult {
@@ -328,7 +366,7 @@ function dispatch(
 
     case 'router':
       // command = ['router', 'ospf'], args.pid = process id
-      if (command[1] === 'ospf') return enterRouterOspf(s, args.pid);
+      if (command[1] === 'ospf') return enterRouterOspf(s, args.pid, ec);
       return { session: s, output: err('% Unknown command.') };
 
     case 'hostname':
@@ -336,11 +374,11 @@ function dispatch(
       return { session: s, output: [] };
 
     case 'interface':
-      return enterInterface(s, args.iface);
+      return enterInterface(s, args.iface, ec);
 
     case 'encapsulation':
       // command shape in config-subif: ['encapsulation', 'dot1q'], args.vlan
-      if (command[1] === 'dot1q') return setEncapsulationDot1q(s, args.vlan);
+      if (command[1] === 'dot1q') return setEncapsulationDot1q(s, args.vlan, ec);
       return { session: s, output: err('% Unknown command.') };
 
     case 'description':
@@ -351,19 +389,19 @@ function dispatch(
       return setAdmin(s, false);
 
     case 'no':
-      return negate(s, command, args);
+      return negate(s, command, args, ec);
 
     case 'ip':
       // command[1] differentiates ip address (config-if) from ip route (config)
       // from ip access-group (config-if). All three share the `ip` keyword.
-      if (command[1] === 'address') return setIpAddress(s, args.ip, args.mask);
-      if (command[1] === 'route') return addStaticRoute(s, args.prefix, args.mask, args.target, args.ad);
+      if (command[1] === 'address') return setIpAddress(s, args.ip, args.mask, ec);
+      if (command[1] === 'route') return addStaticRoute(s, args.prefix, args.mask, args.target, args.ad, ec);
       if (command[1] === 'access-group') {
-        return setAccessGroup(s, args.number, command[3] as 'in' | 'out');
+        return setAccessGroup(s, args.number, command[3] as 'in' | 'out', ec);
       }
       if (command[1] === 'dhcp') {
         if (command[2] === 'pool') return enterDhcpPool(s, args.name);
-        if (command[2] === 'excluded-address') return addDhcpExcluded(s, args.start, args.end);
+        if (command[2] === 'excluded-address') return addDhcpExcluded(s, args.start, args.end, ec);
       }
       if (command[1] === 'nat') {
         // config-if: `ip nat inside|outside` marks the interface's NAT role.
@@ -376,18 +414,18 @@ function dispatch(
           return setNatRole(s, command[2]);
         }
         if (s.mode === 'config' && command[2] === 'inside') {
-          return addNatStatement(s, args.acl, args.iface);
+          return addNatStatement(s, args.acl, args.iface, ec);
         }
       }
       if (command[1] === 'access-list' && command[2] === 'extended') {
         return enterExtAcl(s, args.name);
       }
       if (command[1] === 'helper-address') {
-        return setHelperAddress(s, args.ip);
+        return setHelperAddress(s, args.ip, ec);
       }
       if (command[1] === 'ospf') {
-        if (command[2] === 'hello-interval') return setOspfTimer(s, 'hello', args.seconds);
-        if (command[2] === 'dead-interval') return setOspfTimer(s, 'dead', args.seconds);
+        if (command[2] === 'hello-interval') return setOspfTimer(s, 'hello', args.seconds, ec);
+        if (command[2] === 'dead-interval') return setOspfTimer(s, 'dead', args.seconds, ec);
       }
       return { session: s, output: err('% Incomplete command.') };
 
@@ -395,31 +433,31 @@ function dispatch(
     case 'deny':
       // Only reachable from config-ext-nacl (the grammar exposes permit/deny
       // here). Other modes' permit/deny resolve elsewhere or fail at parse.
-      return addExtAclEntry(s, head, command, args);
+      return addExtAclEntry(s, head, command, args, ec);
 
     case 'network':
       // In config-router this is an OSPF network statement; in config-dhcp it's
       // the pool's network/mask. Discriminate on the active mode.
-      if (s.mode === 'config-dhcp') return setDhcpNetwork(s, args.ip, args.mask);
-      return addOspfNetwork(s, args.prefix, args.wildcard, args.area);
+      if (s.mode === 'config-dhcp') return setDhcpNetwork(s, args.ip, args.mask, ec);
+      return addOspfNetwork(s, args.prefix, args.wildcard, args.area, ec);
 
     case 'passive-interface':
       // Only reachable from config-router (grammar exposes it nowhere else).
       // The argument is a free-form iface token — normalise + validate.
-      return setPassiveInterface(s, args.iface, true);
+      return setPassiveInterface(s, args.iface, true, ec);
 
     case 'default-router':
-      return setDhcpDefaultRouter(s, args.ip);
+      return setDhcpDefaultRouter(s, args.ip, ec);
 
     case 'dns-server':
-      return setDhcpDnsServer(s, args.ip);
+      return setDhcpDnsServer(s, args.ip, ec);
 
     case 'lease':
-      return setDhcpLease(s, args.days);
+      return setDhcpLease(s, args.days, ec);
 
     case 'access-list':
       // command = ['access-list', '<num>', 'permit'|'deny', ...source-form]
-      return addAclEntry(s, args.number, command[2] as 'permit' | 'deny', command, args);
+      return addAclEntry(s, args.number, command[2] as 'permit' | 'deny', command, args, ec);
 
     case 'show':
       return show(s, command, args);
@@ -597,9 +635,9 @@ function ping(
   return { session: s, output: pingFailureLines(target, result.failedAt) };
 }
 
-function enterInterface(s: Session, token: string): ApplyResult {
+function enterInterface(s: Session, token: string, ec: ErrCtx): ApplyResult {
   const id = normaliseInterface(token);
-  if (!id) return { session: s, output: err(`% Invalid input detected at "${token}".`) };
+  if (!id) return { session: s, output: badInput(ec, 'iface') };
   if (isSubInterfaceId(id)) {
     const parent = parentInterfaceId(id);
     if (!s.device.interfaces[parent]) {
@@ -639,13 +677,17 @@ function enterInterface(s: Session, token: string): ApplyResult {
 }
 
 /** `encapsulation dot1q <vlan>` on a subinterface. Range 1-4094. */
-function setEncapsulationDot1q(s: Session, vlanArg: string): ApplyResult {
+function setEncapsulationDot1q(s: Session, vlanArg: string, ec: ErrCtx): ApplyResult {
   if (s.mode !== 'config-subif' || !s.activeSubIfId) {
+    // Unreachable mode guard: the grammar exposes `encapsulation` only in
+    // config-subif, so a wrong-mode `encapsulation` resolves to the parser's
+    // invalid-input caret before reaching here. Left as a bare message — the
+    // offending token is a resolved keyword, not an argument with an offset.
     return { session: s, output: err('% Invalid input detected at "encapsulation".') };
   }
   const vlan = Number.parseInt(vlanArg, 10);
   if (!Number.isFinite(vlan) || String(vlan) !== vlanArg) {
-    return { session: s, output: err(`% Invalid input detected at "${vlanArg}".`) };
+    return { session: s, output: badInput(ec, 'vlan') };
   }
   if (vlan < 1 || vlan > 4094) {
     return { session: s, output: err('% VLAN id out of range') };
@@ -659,8 +701,8 @@ function setEncapsulationDot1q(s: Session, vlanArg: string): ApplyResult {
   return { session: s, output: [] };
 }
 
-function setIpAddress(s: Session, ip: string, mask: string): ApplyResult {
-  if (!isValidIpv4(ip)) return { session: s, output: err(`% Invalid input detected at "${ip}".`) };
+function setIpAddress(s: Session, ip: string, mask: string, ec: ErrCtx): ApplyResult {
+  if (!isValidIpv4(ip)) return { session: s, output: badInput(ec, 'ip') };
   if (!isValidMask(mask)) return { session: s, output: err('% Invalid subnet mask.') };
   if (s.mode === 'config-subif' && s.activeSubIfId) {
     const sub = s.device.subInterfaces[s.activeSubIfId];
@@ -705,14 +747,19 @@ function setAdmin(s: Session, up: boolean): ApplyResult {
   return { session: s, output: [] };
 }
 
-function negate(s: Session, command: string[], args: Record<string, string>): ApplyResult {
+function negate(
+  s: Session,
+  command: string[],
+  args: Record<string, string>,
+  ec: ErrCtx,
+): ApplyResult {
   // command = ['no', ...]
   // In config-ext-nacl mode, `no <sequence>` removes an entry — the grammar
   // captures the sequence under args.sequence and command[1] is the bare
   // sequence number rather than a known keyword. Detect that path first so
   // we don't fall into the keyword switch below.
   if (s.mode === 'config-ext-nacl' && args.sequence !== undefined) {
-    return removeExtAclEntry(s, args.sequence);
+    return removeExtAclEntry(s, args.sequence, ec);
   }
   switch (command[1]) {
     case 'shutdown':
@@ -722,15 +769,15 @@ function negate(s: Session, command: string[], args: Record<string, string>): Ap
       return { session: s, output: [] };
     case 'ip':
       if (command[2] === 'route') {
-        return removeStaticRoute(s, args.prefix, args.mask, args.target);
+        return removeStaticRoute(s, args.prefix, args.mask, args.target, ec);
       }
       if (command[2] === 'access-group') {
-        return clearAccessGroup(s, args.number, command[4] as 'in' | 'out');
+        return clearAccessGroup(s, args.number, command[4] as 'in' | 'out', ec);
       }
       if (command[2] === 'dhcp') {
         if (command[3] === 'pool') return removeDhcpPool(s, args.name);
         if (command[3] === 'excluded-address') {
-          return removeDhcpExcluded(s, args.start, args.end);
+          return removeDhcpExcluded(s, args.start, args.end, ec);
         }
       }
       if (command[2] === 'nat') {
@@ -740,7 +787,7 @@ function negate(s: Session, command: string[], args: Record<string, string>): Ap
           return clearNatRole(s, command[3]);
         }
         if (s.mode === 'config' && command[3] === 'inside') {
-          return removeNatStatement(s, args.acl, args.iface);
+          return removeNatStatement(s, args.acl, args.iface, ec);
         }
       }
       if (command[2] === 'access-list' && command[3] === 'extended') {
@@ -774,15 +821,15 @@ function negate(s: Session, command: string[], args: Record<string, string>): Ap
       }
       return { session: s, output: [] };
     case 'access-list':
-      return removeAcl(s, args.number);
+      return removeAcl(s, args.number, ec);
     case 'network':
       // `no network` discriminates by mode the same way the positive form does
       // (config-router → OSPF network; config-dhcp → pool network).
       if (s.mode === 'config-dhcp') return clearDhcpNetwork(s);
-      return removeOspfNetwork(s, args.prefix, args.wildcard, args.area);
+      return removeOspfNetwork(s, args.prefix, args.wildcard, args.area, ec);
     case 'passive-interface':
       // Mirror the positive form — only valid in config-router.
-      return setPassiveInterface(s, args.iface, false);
+      return setPassiveInterface(s, args.iface, false, ec);
     case 'default-router':
       return clearDhcpDefaultRouter(s);
     case 'dns-server':
@@ -811,14 +858,15 @@ function addStaticRoute(
   prefix: string,
   mask: string,
   target: string,
-  adArg?: string,
+  adArg: string | undefined,
+  ec: ErrCtx,
 ): ApplyResult {
   if (!isValidIpv4(prefix)) {
-    return { session: s, output: err(`% Invalid input detected at "${prefix}".`) };
+    return { session: s, output: badInput(ec, 'prefix') };
   }
   if (!isValidRouteMask(mask)) return { session: s, output: err('% Invalid subnet mask.') };
   const t = parseRouteTarget(s, target);
-  if (!t) return { session: s, output: err(`% Invalid input detected at "${target}".`) };
+  if (!t) return { session: s, output: badInput(ec, 'target') };
   // Optional trailing AD token (Lab 16: floating static routes). When absent
   // the route gets the IOS default of 1; when present it must be an integer
   // 1..255 — anything else is a hard parse error matching real IOS.
@@ -826,7 +874,7 @@ function addStaticRoute(
   if (adArg !== undefined) {
     const n = Number.parseInt(adArg, 10);
     if (!Number.isFinite(n) || String(n) !== adArg || n < 1 || n > 255) {
-      return { session: s, output: err(`% Invalid input detected at "${adArg}".`) };
+      return { session: s, output: badInput(ec, 'ad') };
     }
     adminDistance = n;
   }
@@ -861,12 +909,14 @@ function removeStaticRoute(
   prefix: string,
   mask: string,
   target: string,
+  ec: ErrCtx,
 ): ApplyResult {
-  if (!isValidIpv4(prefix) || !isValidRouteMask(mask)) {
-    return { session: s, output: err('% Invalid input.') };
-  }
+  // Split the prefix/mask validation so the caret lands on the actual
+  // offending token (IOS stops at the first one it can't parse).
+  if (!isValidIpv4(prefix)) return { session: s, output: badInput(ec, 'prefix') };
+  if (!isValidRouteMask(mask)) return { session: s, output: badInput(ec, 'mask') };
   const t = parseRouteTarget(s, target);
-  if (!t) return { session: s, output: err(`% Invalid input detected at "${target}".`) };
+  if (!t) return { session: s, output: badInput(ec, 'target') };
   const network = networkAddress(prefix, mask);
   const before = s.staticRoutes.length;
   s.staticRoutes = s.staticRoutes.filter(
@@ -884,10 +934,10 @@ function removeStaticRoute(
   return { session: s, output: [] };
 }
 
-function enterRouterOspf(s: Session, pidArg: string): ApplyResult {
+function enterRouterOspf(s: Session, pidArg: string, ec: ErrCtx): ApplyResult {
   const pid = Number.parseInt(pidArg, 10);
   if (!Number.isFinite(pid) || pid < 1 || pid > 65535 || String(pid) !== pidArg) {
-    return { session: s, output: err(`% Invalid input detected at "${pidArg}".`) };
+    return { session: s, output: badInput(ec, 'pid') };
   }
   s.mode = 'config-router';
   // First entry into the process: stamp the process id and derive router-id.
@@ -918,16 +968,17 @@ function addOspfNetwork(
   prefix: string,
   wildcard: string,
   areaArg: string,
+  ec: ErrCtx,
 ): ApplyResult {
   if (!isValidIpv4(prefix)) {
-    return { session: s, output: err(`% Invalid input detected at "${prefix}".`) };
+    return { session: s, output: badInput(ec, 'prefix') };
   }
   if (!isValidWildcard(wildcard)) {
-    return { session: s, output: err(`% Invalid input detected at "${wildcard}".`) };
+    return { session: s, output: badInput(ec, 'wildcard') };
   }
   const area = Number.parseInt(areaArg, 10);
   if (!Number.isFinite(area) || area < 0 || String(area) !== areaArg) {
-    return { session: s, output: err(`% Invalid input detected at "${areaArg}".`) };
+    return { session: s, output: badInput(ec, 'area') };
   }
   // Dedup — identical entries collapse, matching IOS.
   const dupe = s.device.ospf.networks.find(
@@ -953,12 +1004,21 @@ function addOspfNetwork(
  *  this router so a typo surfaces an IOS-style error rather than silently
  *  growing the set. Subinterfaces are accepted (Lab 09 ROAS); the lookup
  *  walks both physical and dot1Q maps and stores the canonical id either way. */
-function setPassiveInterface(s: Session, token: string, mark: boolean): ApplyResult {
+function setPassiveInterface(
+  s: Session,
+  token: string,
+  mark: boolean,
+  ec: ErrCtx,
+): ApplyResult {
   if (s.mode !== 'config-router') {
+    // Unreachable mode guard: the grammar exposes `passive-interface` only in
+    // config-router, so a wrong-mode use hits the parser's invalid-input caret
+    // before reaching here. Left as a bare message — the offending token is a
+    // resolved keyword, not an argument with an offset.
     return { session: s, output: err('% Invalid input detected at "passive-interface".') };
   }
   const id = normaliseInterface(token);
-  if (!id) return { session: s, output: err(`% Invalid input detected at "${token}".`) };
+  if (!id) return { session: s, output: badInput(ec, 'iface') };
   const exists =
     s.device.interfaces[id] !== undefined ||
     s.device.subInterfaces[id] !== undefined;
@@ -975,13 +1035,14 @@ function removeOspfNetwork(
   prefix: string,
   wildcard: string,
   areaArg: string,
+  ec: ErrCtx,
 ): ApplyResult {
-  if (!isValidIpv4(prefix) || !isValidWildcard(wildcard)) {
-    return { session: s, output: err('% Invalid input.') };
-  }
+  // Split the combined validation so the caret lands on the offending token.
+  if (!isValidIpv4(prefix)) return { session: s, output: badInput(ec, 'prefix') };
+  if (!isValidWildcard(wildcard)) return { session: s, output: badInput(ec, 'wildcard') };
   const area = Number.parseInt(areaArg, 10);
   if (!Number.isFinite(area) || area < 0) {
-    return { session: s, output: err('% Invalid input.') };
+    return { session: s, output: badInput(ec, 'area') };
   }
   const before = s.device.ospf.networks.length;
   s.device.ospf.networks = s.device.ospf.networks.filter(
@@ -1020,13 +1081,20 @@ function removeDhcpPool(s: Session, name: string): ApplyResult {
 }
 
 /** `ip dhcp excluded-address <start> [end]` — `end` is optional (single host). */
-function addDhcpExcluded(s: Session, start: string, end: string | undefined): ApplyResult {
+function addDhcpExcluded(
+  s: Session,
+  start: string,
+  end: string | undefined,
+  ec: ErrCtx,
+): ApplyResult {
   if (!isValidIpv4(start)) {
-    return { session: s, output: err(`% Invalid input detected at "${start}".`) };
+    return { session: s, output: badInput(ec, 'start') };
   }
   const resolvedEnd = end ?? start;
   if (!isValidIpv4(resolvedEnd)) {
-    return { session: s, output: err(`% Invalid input detected at "${resolvedEnd}".`) };
+    // Only reachable when `end` was explicitly supplied (an absent end defaults
+    // to the already-validated start), so the caret targets the `end` token.
+    return { session: s, output: badInput(ec, 'end') };
   }
   if (ipToInt(resolvedEnd) < ipToInt(start)) {
     return { session: s, output: err('% End address must be >= start address.') };
@@ -1043,9 +1111,10 @@ function removeDhcpExcluded(
   s: Session,
   start: string,
   end: string | undefined,
+  ec: ErrCtx,
 ): ApplyResult {
   if (!isValidIpv4(start)) {
-    return { session: s, output: err(`% Invalid input detected at "${start}".`) };
+    return { session: s, output: badInput(ec, 'start') };
   }
   const resolvedEnd = end ?? start;
   const before = s.device.dhcpExcluded.length;
@@ -1067,10 +1136,10 @@ function activeDhcpPool(s: Session): DhcpPool | null {
   return s.device.dhcpPools.get(s.activeDhcpPool) ?? null;
 }
 
-function setDhcpNetwork(s: Session, ip: string, mask: string): ApplyResult {
+function setDhcpNetwork(s: Session, ip: string, mask: string, ec: ErrCtx): ApplyResult {
   const pool = activeDhcpPool(s);
   if (!pool) return { session: s, output: err('% No active DHCP pool.') };
-  if (!isValidIpv4(ip)) return { session: s, output: err(`% Invalid input detected at "${ip}".`) };
+  if (!isValidIpv4(ip)) return { session: s, output: badInput(ec, 'ip') };
   if (!isValidMask(mask)) return { session: s, output: err('% Invalid subnet mask.') };
   // Normalize the network address — IOS accepts a host IP and silently
   // applies the mask; we mirror that so `network 192.168.1.123 255.255.255.0`
@@ -1088,10 +1157,10 @@ function clearDhcpNetwork(s: Session): ApplyResult {
   return { session: s, output: [] };
 }
 
-function setDhcpDefaultRouter(s: Session, ip: string): ApplyResult {
+function setDhcpDefaultRouter(s: Session, ip: string, ec: ErrCtx): ApplyResult {
   const pool = activeDhcpPool(s);
   if (!pool) return { session: s, output: err('% No active DHCP pool.') };
-  if (!isValidIpv4(ip)) return { session: s, output: err(`% Invalid input detected at "${ip}".`) };
+  if (!isValidIpv4(ip)) return { session: s, output: badInput(ec, 'ip') };
   pool.defaultRouter = ip;
   return { session: s, output: [] };
 }
@@ -1103,10 +1172,10 @@ function clearDhcpDefaultRouter(s: Session): ApplyResult {
   return { session: s, output: [] };
 }
 
-function setDhcpDnsServer(s: Session, ip: string): ApplyResult {
+function setDhcpDnsServer(s: Session, ip: string, ec: ErrCtx): ApplyResult {
   const pool = activeDhcpPool(s);
   if (!pool) return { session: s, output: err('% No active DHCP pool.') };
-  if (!isValidIpv4(ip)) return { session: s, output: err(`% Invalid input detected at "${ip}".`) };
+  if (!isValidIpv4(ip)) return { session: s, output: badInput(ec, 'ip') };
   pool.dnsServer = ip;
   return { session: s, output: [] };
 }
@@ -1118,12 +1187,12 @@ function clearDhcpDnsServer(s: Session): ApplyResult {
   return { session: s, output: [] };
 }
 
-function setDhcpLease(s: Session, daysArg: string): ApplyResult {
+function setDhcpLease(s: Session, daysArg: string, ec: ErrCtx): ApplyResult {
   const pool = activeDhcpPool(s);
   if (!pool) return { session: s, output: err('% No active DHCP pool.') };
   const days = Number.parseInt(daysArg, 10);
   if (!Number.isFinite(days) || String(days) !== daysArg || days < 0) {
-    return { session: s, output: err(`% Invalid input detected at "${daysArg}".`) };
+    return { session: s, output: badInput(ec, 'days') };
   }
   pool.leaseDays = days;
   return { session: s, output: [] };
@@ -1157,10 +1226,11 @@ function addAclEntry(
   action: 'permit' | 'deny',
   command: string[],
   args: Record<string, string>,
+  ec: ErrCtx,
 ): ApplyResult {
   const number = parseAclNumber(numberArg);
   if (number === null) {
-    return { session: s, output: err(`% Invalid input detected at "${numberArg}".`) };
+    return { session: s, output: badInput(ec, 'number') };
   }
   // command shape:
   //   ['access-list', '<n>', 'permit'|'deny', 'any']
@@ -1174,17 +1244,17 @@ function addAclEntry(
     wildcard = '255.255.255.255';
   } else if (sourceForm === 'host') {
     if (!isValidIpv4(args.source)) {
-      return { session: s, output: err(`% Invalid input detected at "${args.source}".`) };
+      return { session: s, output: badInput(ec, 'source') };
     }
     source = args.source;
     wildcard = null;
   } else {
     // Bare-network form: <src> <wildcard>
     if (!isValidIpv4(args.source)) {
-      return { session: s, output: err(`% Invalid input detected at "${args.source}".`) };
+      return { session: s, output: badInput(ec, 'source') };
     }
     if (!isValidIpv4(args.wildcard)) {
-      return { session: s, output: err(`% Invalid input detected at "${args.wildcard}".`) };
+      return { session: s, output: badInput(ec, 'wildcard') };
     }
     source = args.source;
     wildcard = args.wildcard;
@@ -1204,10 +1274,10 @@ function addAclEntry(
 /** Remove an entire numbered ACL with `no access-list <n>`. Real IOS errors if
  *  the ACL doesn't exist; we silently no-op to keep teardown-by-script idempotent
  *  (pedagogy doesn't care, and an error would surprise students reading scripts). */
-function removeAcl(s: Session, numberArg: string): ApplyResult {
+function removeAcl(s: Session, numberArg: string, ec: ErrCtx): ApplyResult {
   const number = parseAclNumber(numberArg);
   if (number === null) {
-    return { session: s, output: err(`% Invalid input detected at "${numberArg}".`) };
+    return { session: s, output: badInput(ec, 'number') };
   }
   s.device.acls.delete(number);
   return { session: s, output: [] };
@@ -1239,10 +1309,11 @@ function setAccessGroup(
   s: Session,
   idArg: string,
   direction: 'in' | 'out',
+  ec: ErrCtx,
 ): ApplyResult {
   const aclId = parseAclId(idArg);
   if (aclId === null) {
-    return { session: s, output: err(`% Invalid input detected at "${idArg}".`) };
+    return { session: s, output: badInput(ec, 'number') };
   }
   if (!s.currentInterface) return { session: s, output: [] };
   s.device.interfaces[s.currentInterface].accessGroups[direction] = aclId;
@@ -1257,10 +1328,11 @@ function clearAccessGroup(
   s: Session,
   idArg: string,
   direction: 'in' | 'out',
+  ec: ErrCtx,
 ): ApplyResult {
   const aclId = parseAclId(idArg);
   if (aclId === null) {
-    return { session: s, output: err(`% Invalid input detected at "${idArg}".`) };
+    return { session: s, output: badInput(ec, 'number') };
   }
   if (!s.currentInterface) return { session: s, output: [] };
   const iface = s.device.interfaces[s.currentInterface];
@@ -1275,9 +1347,9 @@ function clearAccessGroup(
 /** Set the active interface's DHCP relay target. Grammar only exposes this in
  *  config-if so currentInterface must be set; defensive guard mirrors the
  *  NAT-role handlers above. */
-function setHelperAddress(s: Session, ip: string): ApplyResult {
+function setHelperAddress(s: Session, ip: string, ec: ErrCtx): ApplyResult {
   if (!isValidIpv4(ip)) {
-    return { session: s, output: err(`% Invalid input detected at "${ip}".`) };
+    return { session: s, output: badInput(ec, 'ip') };
   }
   if (!s.currentInterface) return { session: s, output: [] };
   s.device.interfaces[s.currentInterface].helperAddress = ip;
@@ -1299,10 +1371,15 @@ function clearHelperAddress(s: Session): ApplyResult {
  *  commands treat an unset field as the protocol default. Grammar exposes this
  *  only in config-if so currentInterface is set — guard defensively like the
  *  NAT/helper handlers so a desynced session no-ops rather than crashing. */
-function setOspfTimer(s: Session, which: 'hello' | 'dead', raw: string): ApplyResult {
+function setOspfTimer(
+  s: Session,
+  which: 'hello' | 'dead',
+  raw: string,
+  ec: ErrCtx,
+): ApplyResult {
   const n = Number(raw);
   if (!Number.isInteger(n) || n < 1 || n > 65535) {
-    return { session: s, output: err(`% Invalid input detected at "${raw}".`) };
+    return { session: s, output: badInput(ec, 'seconds') };
   }
   if (!s.currentInterface) return { session: s, output: [] };
   const iface = s.device.interfaces[s.currentInterface];
@@ -1352,10 +1429,11 @@ function addNatStatement(
   s: Session,
   aclArg: string,
   ifaceArg: string,
+  ec: ErrCtx,
 ): ApplyResult {
   const aclId = parseAclNumber(aclArg);
   if (aclId === null) {
-    return { session: s, output: err(`% Invalid input detected at "${aclArg}".`) };
+    return { session: s, output: badInput(ec, 'acl') };
   }
   const ifaceId = normaliseInterface(ifaceArg);
   if (!ifaceId || !s.device.interfaces[ifaceId]) {
@@ -1380,10 +1458,11 @@ function removeNatStatement(
   s: Session,
   aclArg: string,
   ifaceArg: string,
+  ec: ErrCtx,
 ): ApplyResult {
   const aclId = parseAclNumber(aclArg);
   if (aclId === null) {
-    return { session: s, output: err(`% Invalid input detected at "${aclArg}".`) };
+    return { session: s, output: badInput(ec, 'acl') };
   }
   const ifaceId = normaliseInterface(ifaceArg);
   if (!ifaceId) {
@@ -1460,7 +1539,7 @@ function removeExtAcl(s: Session, name: string): ApplyResult {
 function parseExtTuple(
   args: Record<string, string>,
   side: 'src' | 'dst',
-): { ip: string; wildcard: string } | { error: string } {
+): { ip: string; wildcard: string } | { errorArg: string } {
   const ipKey = `${side}-ip`;
   const wcKey = `${side}-wildcard`;
   const rawIp = args[ipKey];
@@ -1470,14 +1549,15 @@ function parseExtTuple(
     return { ip: '0.0.0.0', wildcard: '255.255.255.255' };
   }
   if (!isValidIpv4(rawIp)) {
-    return { error: `% Invalid input detected at "${rawIp}".` };
+    // Return the offending arg's grammar name so the caller carets it.
+    return { errorArg: ipKey };
   }
   if (rawWc === undefined) {
     // `host <ip>` — the IP was captured under host, no wildcard arg.
     return { ip: rawIp, wildcard: '0.0.0.0' };
   }
   if (!isValidIpv4(rawWc)) {
-    return { error: `% Invalid input detected at "${rawWc}".` };
+    return { errorArg: wcKey };
   }
   return { ip: rawIp, wildcard: rawWc };
 }
@@ -1491,6 +1571,7 @@ function addExtAclEntry(
   action: 'permit' | 'deny',
   command: string[],
   args: Record<string, string>,
+  ec: ErrCtx,
 ): ApplyResult {
   if (s.mode !== 'config-ext-nacl' || !s.activeAcl) {
     return { session: s, output: err('% No active extended ACL.') };
@@ -1506,9 +1587,9 @@ function addExtAclEntry(
   const protocol = command[1] as 'ip' | 'tcp' | 'udp' | 'icmp';
 
   const src = parseExtTuple(args, 'src');
-  if ('error' in src) return { session: s, output: err(src.error) };
+  if ('errorArg' in src) return { session: s, output: badInput(ec, src.errorArg) };
   const dst = parseExtTuple(args, 'dst');
-  if ('error' in dst) return { session: s, output: err(dst.error) };
+  if ('errorArg' in dst) return { session: s, output: badInput(ec, dst.errorArg) };
 
   // Optional `eq <port>`. Grammar captures it as args.port whenever the user
   // typed `eq <port>`; we surface a clean IOS-style error when the protocol
@@ -1523,7 +1604,7 @@ function addExtAclEntry(
     }
     const port = parseAclPort(args.port);
     if (port === null) {
-      return { session: s, output: err(`% Invalid input detected at "${args.port}".`) };
+      return { session: s, output: badInput(ec, 'port') };
     }
     dstPort = port;
   }
@@ -1554,7 +1635,7 @@ function addExtAclEntry(
 
 /** `no <sequence>` in config-ext-nacl — remove the entry with that line
  *  number. Soft no-op if no matching entry (IOS silently accepts). */
-function removeExtAclEntry(s: Session, seqArg: string): ApplyResult {
+function removeExtAclEntry(s: Session, seqArg: string, ec: ErrCtx): ApplyResult {
   if (s.mode !== 'config-ext-nacl' || !s.activeAcl) {
     return { session: s, output: err('% No active extended ACL.') };
   }
@@ -1564,7 +1645,7 @@ function removeExtAclEntry(s: Session, seqArg: string): ApplyResult {
   }
   const seq = Number.parseInt(seqArg, 10);
   if (!Number.isFinite(seq) || String(seq) !== seqArg) {
-    return { session: s, output: err(`% Invalid input detected at "${seqArg}".`) };
+    return { session: s, output: badInput(ec, 'sequence') };
   }
   acl.entries = acl.entries.filter((e) => e.sequence !== seq);
   return { session: s, output: [] };

@@ -516,6 +516,16 @@ describe('switch — trunk mode + allowed VLAN configuration', () => {
     );
     expect(nonNumeric.output.some((o) => o.kind === 'error' && /Invalid input/.test(o.text))).toBe(true);
   });
+
+  it('carets the offending vlan id on `switchport access vlan` (config-if)', () => {
+    const cfgIf = run(fresh(), ['enable', 'configure terminal', 'interface fa0/3']);
+    const { output } = applySwitchCommand(cfgIf, 'switchport access vlan 5000');
+    // 'SW1(config-if)#' + space = promptLen; '5000' starts at offset 23:
+    //   'switchport '(11) + 'access '(7) + 'vlan '(5) = 23
+    const promptLen = switchAdapter.prompt(cfgIf).length + 1;
+    expect(output[0].text).toBe(' '.repeat(promptLen + 23) + '^');
+    expect(output[1].text).toBe("% Invalid input detected at '^' marker.");
+  });
 });
 
 describe('switch — show interfaces trunk', () => {

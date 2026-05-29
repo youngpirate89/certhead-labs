@@ -56,6 +56,13 @@ export type ResolveResult =
       kind: 'complete';
       command: string[];
       args: Record<string, string>;
+      /**
+       * Token index (into the input `tokens`) where each captured argument was
+       * consumed, keyed by the argument's declared name. Adapters map this
+       * through the tokenizer's per-token offsets to position IOS-style `^`
+       * carets under an offending argument during handler-level validation.
+       */
+      argPositions: Record<string, number>;
       run?: CommandHandler;
     }
   | { kind: 'incomplete'; command: string[] }
@@ -84,6 +91,7 @@ export function resolve(tokens: readonly string[], root: CommandNode): ResolveRe
   let node = root;
   const command: string[] = [];
   const args: Record<string, string> = {};
+  const argPositions: Record<string, number> = {};
 
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
@@ -103,6 +111,7 @@ export function resolve(tokens: readonly string[], root: CommandNode): ResolveRe
     // No keyword match — fall back to an argument slot if the node has one.
     if (node.argument) {
       args[node.argument.name] = token;
+      argPositions[node.argument.name] = i;
       command.push(token);
       node = node.argument.node;
       continue;
@@ -112,7 +121,7 @@ export function resolve(tokens: readonly string[], root: CommandNode): ResolveRe
   }
 
   if (node.run || node.terminal) {
-    return { kind: 'complete', command, args, run: node.run };
+    return { kind: 'complete', command, args, argPositions, run: node.run };
   }
   return { kind: 'incomplete', command };
 }
