@@ -39,13 +39,13 @@ import type { Lab } from '@/engine/types';
  */
 export const lab09IntervlanRouting: Lab = {
   id: 'ccna-lab09-intervlan-routing',
-  title: 'Inter-VLAN Routing — Router-on-a-Stick',
+  title: 'Inter-VLAN Routing - Router-on-a-Stick',
   exam: 'CCNA 200-301',
   difficulty: 3,
   estimatedMinutes: 15,
   isFree: false,
   scenario:
-    "The Sales team (VLAN 10, 192.168.10.0/24) and the Engineering team (VLAN 20, 192.168.20.0/24) sit on the same switch SW1 but on different VLANs. The two teams need to talk to each other. SW1 is already trunking to R1 on Gi0/0 (allowed VLANs 1,10,20) and the access ports are assigned correctly — but R1 has no IP configuration yet.\n\nYour task: configure router-on-a-stick on R1. Bring up Gi0/0 (no IP — the physical is the trunk carrier), create two subinterfaces Gi0/0.10 and Gi0/0.20, set dot1Q encapsulation matching each VLAN, assign the gateway IPs (192.168.10.1 and 192.168.20.1) — the subinterfaces come up off the physical, so you don't `no shutdown` them individually — verify with `show ip interface brief`, then prove the cross-VLAN path with a ping from PC-A to PC-B.",
+    "The Sales team (VLAN 10, 192.168.10.0/24) and the Engineering team (VLAN 20, 192.168.20.0/24) sit on the same switch SW1 but on different VLANs. The two teams need to talk to each other. SW1 is already trunking to R1 on Gi0/0 (allowed VLANs 1,10,20) and the access ports are assigned correctly - but R1 has no IP configuration yet.\n\nYour task: configure router-on-a-stick on R1. Bring up Gi0/0 (no IP - the physical is the trunk carrier), create two subinterfaces Gi0/0.10 and Gi0/0.20, set dot1Q encapsulation matching each VLAN, assign the gateway IPs (192.168.10.1 and 192.168.20.1) - the subinterfaces come up off the physical, so you don't `no shutdown` them individually - verify with `show ip interface brief`, then prove the cross-VLAN path with a ping from PC-A to PC-B.",
   topology: {
     // T-shape layout (per-device `position` overrides the renderer's default
     // linear left-to-right row). SW1 is the L2 hub at center; R1 stacks above
@@ -194,7 +194,7 @@ export const lab09IntervlanRouting: Lab = {
     {
       afterSeconds: 180,
       text:
-        '`encapsulation dot1q 10` is what makes the subinterface forward and emit its connected route — set it with the dot1Q tag matching the VLAN id. (The order relative to `ip address` is not enforced.)',
+        '`encapsulation dot1q 10` is what makes the subinterface forward and emit its connected route - set it with the dot1Q tag matching the VLAN id. (The order relative to `ip address` is not enforced.)',
     },
     {
       afterSeconds: 300,
@@ -204,14 +204,14 @@ export const lab09IntervlanRouting: Lab = {
     {
       afterSeconds: 420,
       text:
-        "If PC-A cannot ping PC-B, confirm the physical Gi0/0 has 'no shutdown' — subinterfaces follow the parent's line state, so you don't 'no shutdown' Gi0/0.10 / Gi0/0.20 individually. Also check each subif's encapsulation and IP.",
+        "If PC-A cannot ping PC-B, confirm the physical Gi0/0 has 'no shutdown' - subinterfaces follow the parent's line state, so you don't 'no shutdown' Gi0/0.10 / Gi0/0.20 individually. Also check each subif's encapsulation and IP.",
     },
   ],
   solution: {
     steps: [
       {
         device: 'R1',
-        note: 'Bring up the physical trunk-facing interface (no IP — the L3 lives on the subifs):',
+        note: 'Bring up the physical trunk-facing interface (no IP - the L3 lives on the subifs):',
         commands: [
           'enable',
           'configure terminal',
@@ -222,7 +222,7 @@ export const lab09IntervlanRouting: Lab = {
       },
       {
         device: 'R1',
-        note: 'Configure the VLAN 10 subinterface (it comes up off the physical — no per-subif no shutdown needed):',
+        note: 'Configure the VLAN 10 subinterface (it comes up off the physical - no per-subif no shutdown needed):',
         commands: [
           'interface Gi0/0.10',
           'encapsulation dot1q 10',

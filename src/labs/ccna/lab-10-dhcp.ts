@@ -81,7 +81,7 @@ export const lab10Dhcp: Lab = {
     },
     {
       id: 'pool-network',
-      text: 'R1: ip dhcp pool LAN — network 192.168.1.0 255.255.255.0',
+      text: 'R1: ip dhcp pool LAN - network 192.168.1.0 255.255.255.0',
       check: (state) => {
         const pool = state.R1?.dhcpPools.get('LAN');
         return pool?.network === '192.168.1.0' && pool?.mask === '255.255.255.0';
@@ -128,12 +128,12 @@ export const lab10Dhcp: Lab = {
     {
       afterSeconds: 150,
       text:
-        "Create the pool with `ip dhcp pool LAN`. You'll enter `R1(config-dhcp)#` — set `network`, `default-router`, and `dns-server` there.",
+        "Create the pool with `ip dhcp pool LAN`. You'll enter `R1(config-dhcp)#` - set `network`, `default-router`, and `dns-server` there.",
     },
     {
       afterSeconds: 270,
       text:
-        'Verify with `show ip dhcp binding`. PC-A should appear with an address starting at 192.168.1.11 — the first slot after the excluded range.',
+        'Verify with `show ip dhcp binding`. PC-A should appear with an address starting at 192.168.1.11 - the first slot after the excluded range.',
     },
   ],
   solution: {

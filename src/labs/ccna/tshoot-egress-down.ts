@@ -39,7 +39,7 @@ export const tshootEgressDown: Lab = {
   estimatedMinutes: 5,
   isFree: false,
   scenario:
-    "Trouble ticket: PC-A on 192.168.1.0/24 can't reach PC-B on 192.168.2.0/24. The NOC has confirmed both routers' configurations and routing tables look correct on paper — R1 has a static route to PC-B's subnet, R2 has the return route. Despite that, the round-trip is dead. Something on the wire isn't carrying traffic.\n\nFrom PC-A, run `ping 192.168.2.10` and read the message — the engine names the device and interface that's failing. The R1–R2 link uses 10.0.0.0/30 (R1 Gi0/2 ↔ R2 Gi0/2). Fix the one thing that's wrong. The lab passes when PC-A can ping PC-B end-to-end.",
+    "Trouble ticket: PC-A on 192.168.1.0/24 can't reach PC-B on 192.168.2.0/24. The NOC has confirmed both routers' configurations and routing tables look correct on paper - R1 has a static route to PC-B's subnet, R2 has the return route. Despite that, the round-trip is dead. Something on the wire isn't carrying traffic.\n\nFrom PC-A, run `ping 192.168.2.10` and read the message - the engine names the device and interface that's failing. The R1-R2 link uses 10.0.0.0/30 (R1 Gi0/2 ↔ R2 Gi0/2). Fix the one thing that's wrong. The lab passes when PC-A can ping PC-B end-to-end.",
   topology: {
     devices: [
       {
@@ -107,7 +107,7 @@ export const tshootEgressDown: Lab = {
       // function still looks for R1 Gi0/2 adminUp (the seed has no other
       // way to satisfy the symptom), so the grading is identical — only
       // the learner-facing wording moves away from spoiling the fix.
-      text: 'Restore WAN connectivity — PC-A can ping 192.168.2.10',
+      text: 'Restore WAN connectivity - PC-A can ping 192.168.2.10',
       check: (state) => state.R1?.interfaces['Gi0/2'].adminUp === true,
     },
     {
@@ -133,7 +133,7 @@ export const tshootEgressDown: Lab = {
     {
       afterSeconds: 180,
       text:
-        'From PC-A run `ping 192.168.2.10` and read the failure line — it names the router and interface that\'s the problem. Click that router → `enable` → `show ip interface brief` and look at the Status column.',
+        'From PC-A run `ping 192.168.2.10` and read the failure line - it names the router and interface that\'s the problem. Click that router → `enable` → `show ip interface brief` and look at the Status column.',
     },
     {
       afterSeconds: 300,
@@ -145,7 +145,7 @@ export const tshootEgressDown: Lab = {
     steps: [
       {
         device: 'R1',
-        note: "Bring R1's WAN interface back up — it was administratively down:",
+        note: "Bring R1's WAN interface back up - it was administratively down:",
         commands: [
           'enable',
           'configure terminal',

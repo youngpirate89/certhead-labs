@@ -37,7 +37,7 @@ export const lab13OspfTshoot: Lab = {
   estimatedMinutes: 10,
   isFree: false,
   scenario:
-    "Trouble ticket: PC-A on 192.168.1.0/24 can't reach PC-B on 192.168.2.0/24. The NOC tells you both routers were brought up with OSPF process 1, but no routes are propagating between them.\n\nFrom PC-A, run `ping 192.168.2.10` to confirm the break. Then click into each router and inspect the OSPF state — `show ip ospf neighbor` will tell you whether adjacency formed, and `show ip ospf` will show what area each router thinks it's in. The network was meant to be single-area (area 0) throughout. Fix the misconfiguration and confirm end-to-end reachability.",
+    "Trouble ticket: PC-A on 192.168.1.0/24 can't reach PC-B on 192.168.2.0/24. The NOC tells you both routers were brought up with OSPF process 1, but no routes are propagating between them.\n\nFrom PC-A, run `ping 192.168.2.10` to confirm the break. Then click into each router and inspect the OSPF state - `show ip ospf neighbor` will tell you whether adjacency formed, and `show ip ospf` will show what area each router thinks it's in. The network was meant to be single-area (area 0) throughout. Fix the misconfiguration and confirm end-to-end reachability.",
   topology: {
     devices: [
       {
@@ -104,7 +104,7 @@ export const lab13OspfTshoot: Lab = {
   objectives: [
     {
       id: 'adjacency',
-      text: 'Restore OSPF adjacency — R1 and R2 must reach FULL neighbor state',
+      text: 'Restore OSPF adjacency - R1 and R2 must reach FULL neighbor state',
       check: (_state, _history, session) => {
         const r1 = session.devices.R1;
         const r2 = session.devices.R2;
@@ -135,12 +135,12 @@ export const lab13OspfTshoot: Lab = {
     {
       afterSeconds: 45,
       text:
-        'Start with `show ip ospf neighbor` on R1 — an empty table (header row only, no FULL entries) means adjacency never formed. Try the same command on R2; it will also be empty.',
+        'Start with `show ip ospf neighbor` on R1 - an empty table (header row only, no FULL entries) means adjacency never formed. Try the same command on R2; it will also be empty.',
     },
     {
       afterSeconds: 120,
       text:
-        "Run `show ip ospf` on both routers. Look at the area each router has on the shared WAN link (`10.0.0.0/30`) — OSPF requires the area to match on both sides for adjacency to form. One of the routers is wrong.",
+        "Run `show ip ospf` on both routers. Look at the area each router has on the shared WAN link (`10.0.0.0/30`) - OSPF requires the area to match on both sides for adjacency to form. One of the routers is wrong.",
     },
     {
       afterSeconds: 240,
@@ -152,17 +152,17 @@ export const lab13OspfTshoot: Lab = {
     steps: [
       {
         device: 'R1',
-        note: "Diagnose — confirm R1's neighbor table is empty and that R1 is in area 0:",
+        note: "Diagnose - confirm R1's neighbor table is empty and that R1 is in area 0:",
         commands: ['enable', 'show ip ospf neighbor', 'show ip ospf'],
       },
       {
         device: 'R2',
-        note: 'Diagnose — R2 is in area 1 on the WAN side; should be area 0:',
+        note: 'Diagnose - R2 is in area 1 on the WAN side; should be area 0:',
         commands: ['enable', 'show ip ospf neighbor', 'show ip ospf'],
       },
       {
         device: 'R2',
-        note: "Fix — replace R2's network statements with area 0 equivalents:",
+        note: "Fix - replace R2's network statements with area 0 equivalents:",
         commands: [
           'configure terminal',
           'router ospf 1',

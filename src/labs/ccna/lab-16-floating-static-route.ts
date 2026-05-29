@@ -39,7 +39,7 @@ export const lab16FloatingStaticRoute: Lab = {
   estimatedMinutes: 10,
   isFree: false,
   scenario:
-    "PC-A on the branch LAN (192.168.1.0/24) reaches the internet through R1. R1 is dual-homed: a primary WAN link to R2 (10.1.1.0/30) and a backup WAN link to R3 (10.1.2.0/30). The business rule is simple — use R2 by default, and only fall back to R3 when R2 is unreachable. Both circuits are billed, but the R3 path is a more expensive standby that should sit idle whenever R2 is healthy.\n\nA floating static route is the standard tool for this. Both defaults point at 0.0.0.0/0, but the backup gets a higher administrative distance (200) so the routing process only installs it when the primary is gone. Configure both defaults on R1, then verify with `show ip route` — only the primary should appear in the table. The backup lives in the running-config as insurance against the day R2 goes dark.",
+    "PC-A on the branch LAN (192.168.1.0/24) reaches the internet through R1. R1 is dual-homed: a primary WAN link to R2 (10.1.1.0/30) and a backup WAN link to R3 (10.1.2.0/30). The business rule is simple - use R2 by default, and only fall back to R3 when R2 is unreachable. Both circuits are billed, but the R3 path is a more expensive standby that should sit idle whenever R2 is healthy.\n\nA floating static route is the standard tool for this. Both defaults point at 0.0.0.0/0, but the backup gets a higher administrative distance (200) so the routing process only installs it when the primary is gone. Configure both defaults on R1, then verify with `show ip route` - only the primary should appear in the table. The backup lives in the running-config as insurance against the day R2 goes dark.",
   topology: {
     devices: [
       {
@@ -161,11 +161,11 @@ export const lab16FloatingStaticRoute: Lab = {
     },
     {
       afterSeconds: 180,
-      text: 'Syntax is `ip route <net> <mask> <next-hop> <AD>`. The AD slot is optional — when omitted, statics default to 1. For the backup, use a high AD like 200.',
+      text: 'Syntax is `ip route <net> <mask> <next-hop> <AD>`. The AD slot is optional - when omitted, statics default to 1. For the backup, use a high AD like 200.',
     },
     {
       afterSeconds: 300,
-      text: 'Run `show ip route` on R1. Only `S* 0.0.0.0/0 [1/0] via 10.1.1.2` appears — the backup via 10.1.2.2 is in the running-config but not in the routing table while the primary is healthy.',
+      text: 'Run `show ip route` on R1. Only `S* 0.0.0.0/0 [1/0] via 10.1.1.2` appears - the backup via 10.1.2.2 is in the running-config but not in the routing table while the primary is healthy.',
     },
   ],
   solution: {
@@ -183,7 +183,7 @@ export const lab16FloatingStaticRoute: Lab = {
       },
       {
         device: 'R1',
-        note: 'Confirm only the primary route is installed — the backup is hidden until the primary disappears:',
+        note: 'Confirm only the primary route is installed - the backup is hidden until the primary disappears:',
         commands: ['show ip route'],
       },
     ],

@@ -49,7 +49,7 @@ export const lab11NatPat: Lab = {
   estimatedMinutes: 12,
   isFree: false,
   scenario:
-    "R1 is your branch router. PC-A (192.168.1.10/24, gateway 192.168.1.1) sits on the LAN attached to R1's Gi0/0. R1's WAN interface Gi0/1 (203.0.113.1/30) cables to the ISP router (203.0.113.2). The ISP has no route to your 192.168.1.0/24 LAN — that's the internet, after all.\n\nFrom PC-A run `ping 203.0.113.2` first. You'll see the round-trip fail: R1 forwards the packet, the ISP receives it, but the reply has nowhere to go. Configure NAT overload (PAT) on R1 so that PC-A's private source address gets translated to R1's public WAN IP on the way out. After the config lands, PC-A can reach the ISP and `show ip nat translations` on R1 shows the active translation.",
+    "R1 is your branch router. PC-A (192.168.1.10/24, gateway 192.168.1.1) sits on the LAN attached to R1's Gi0/0. R1's WAN interface Gi0/1 (203.0.113.1/30) cables to the ISP router (203.0.113.2). The ISP has no route to your 192.168.1.0/24 LAN - that's the internet, after all.\n\nFrom PC-A run `ping 203.0.113.2` first. You'll see the round-trip fail: R1 forwards the packet, the ISP receives it, but the reply has nowhere to go. Configure NAT overload (PAT) on R1 so that PC-A's private source address gets translated to R1's public WAN IP on the way out. After the config lands, PC-A can reach the ISP and `show ip nat translations` on R1 shows the active translation.",
   topology: {
     devices: [
       {
@@ -200,7 +200,7 @@ export const lab11NatPat: Lab = {
       },
       {
         device: 'R1',
-        note: "Apply PAT overload — borrow Gi0/1's IP as the translated source:",
+        note: "Apply PAT overload - borrow Gi0/1's IP as the translated source:",
         commands: [
           'ip nat inside source list 1 interface GigabitEthernet0/1 overload',
         ],

@@ -37,7 +37,7 @@ export const lab12ExtendedAcl: Lab = {
   estimatedMinutes: 12,
   isFree: false,
   scenario:
-    "The security team wants ICMP traffic from the office LAN (192.168.1.0/24) to be blocked at the application server (192.168.2.10) — but all other traffic (HTTP, SSH, DNS, etc.) must continue to flow normally. Create a named extended ACL called BLOCK-ICMP on R1 that denies icmp from the LAN to the server's host address and permits all other IP traffic. Apply it inbound on R1's Gi0/0 — the LAN-facing interface — because Cisco best practice is to filter extended ACL traffic as close to the source as possible. Verify the block by pinging from PC-A.",
+    "The security team wants ICMP traffic from the office LAN (192.168.1.0/24) to be blocked at the application server (192.168.2.10) - but all other traffic (HTTP, SSH, DNS, etc.) must continue to flow normally. Create a named extended ACL called BLOCK-ICMP on R1 that denies icmp from the LAN to the server's host address and permits all other IP traffic. Apply it inbound on R1's Gi0/0 - the LAN-facing interface - because Cisco best practice is to filter extended ACL traffic as close to the source as possible. Verify the block by pinging from PC-A.",
   topology: {
     devices: [
       {
@@ -168,12 +168,12 @@ export const lab12ExtendedAcl: Lab = {
     {
       afterSeconds: 60,
       text:
-        "Create the named ACL with `ip access-list extended BLOCK-ICMP` (in global config). The prompt will change to `R1(config-ext-nacl)#` — you're now adding entries to BLOCK-ICMP.",
+        "Create the named ACL with `ip access-list extended BLOCK-ICMP` (in global config). The prompt will change to `R1(config-ext-nacl)#` - you're now adding entries to BLOCK-ICMP.",
     },
     {
       afterSeconds: 180,
       text:
-        'Inside the ACL: `deny icmp 192.168.1.0 0.0.0.255 host 192.168.2.10`, then `permit ip any any`. Order matters — the deny must come first or the permit would catch everything before the deny is reached.',
+        'Inside the ACL: `deny icmp 192.168.1.0 0.0.0.255 host 192.168.2.10`, then `permit ip any any`. Order matters - the deny must come first or the permit would catch everything before the deny is reached.',
     },
     {
       afterSeconds: 300,
@@ -190,7 +190,7 @@ export const lab12ExtendedAcl: Lab = {
       },
       {
         device: 'R1',
-        note: 'Create the named extended ACL and add entries — deny first, then permit:',
+        note: 'Create the named extended ACL and add entries - deny first, then permit:',
         commands: [
           'ip access-list extended BLOCK-ICMP',
           ' deny icmp 192.168.1.0 0.0.0.255 host 192.168.2.10',
@@ -214,7 +214,7 @@ export const lab12ExtendedAcl: Lab = {
       },
       {
         device: 'PC-A',
-        note: 'Confirm the block — the ping must fail:',
+        note: 'Confirm the block - the ping must fail:',
         commands: ['ping 192.168.2.10'],
       },
     ],

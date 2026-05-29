@@ -77,7 +77,7 @@ export const lab06StandardAcl: Lab = {
   objectives: [
     {
       id: 'acl-defined',
-      text: 'R1: define ACL 1 — deny host 192.168.1.10, then permit 192.168.1.0 0.0.0.255',
+      text: 'R1: define ACL 1 - deny host 192.168.1.10, then permit 192.168.1.0 0.0.0.255',
       check: (_state, _history, session) => {
         const r1 = session.devices.R1;
         if (r1?.kind !== 'router') return false;
@@ -158,14 +158,14 @@ export const lab06StandardAcl: Lab = {
     },
     {
       afterSeconds: 300,
-      text: 'Apply the ACL closest to the destination — outbound on the interface facing PC-B: ip access-group 1 out (under interface Gi0/1)',
+      text: 'Apply the ACL closest to the destination - outbound on the interface facing PC-B: ip access-group 1 out (under interface Gi0/1)',
     },
   ],
   solution: {
     steps: [
       {
         device: 'R1',
-        note: 'Define ACL 1 — deny PC-A first, then permit the rest of the subnet:',
+        note: 'Define ACL 1 - deny PC-A first, then permit the rest of the subnet:',
         commands: [
           'enable',
           'configure terminal',

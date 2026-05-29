@@ -25,7 +25,7 @@ export const tshootReturnRoute: Lab = {
   estimatedMinutes: 8,
   isFree: false,
   scenario:
-    "Trouble ticket: PC-A on 192.168.1.0/24 can’t reach PC-B on 192.168.2.0/24. Both routers were already configured by the NOC — interfaces are up, the WAN link between R1 and R2 is in place, and R1 has a static route forward to PC-B’s subnet. Despite all that, ping fails.\n\nFrom PC-A, run `ping 192.168.2.10` and read the message carefully — the engine names the device where the packet dies. Fix that one missing piece. The lab passes when PC-A can ping PC-B end-to-end.",
+    "Trouble ticket: PC-A on 192.168.1.0/24 can't reach PC-B on 192.168.2.0/24. Both routers were already configured by the NOC - interfaces are up, the WAN link between R1 and R2 is in place, and R1 has a static route forward to PC-B's subnet. Despite all that, ping fails.\n\nFrom PC-A, run `ping 192.168.2.10` and read the message carefully - the engine names the device where the packet dies. Fix that one missing piece. The lab passes when PC-A can ping PC-B end-to-end.",
   topology: {
     devices: [
       {
@@ -82,7 +82,7 @@ export const tshootReturnRoute: Lab = {
   objectives: [
     {
       id: 'fix-r2-return',
-      text: 'Restore full connectivity — PC-A can ping 192.168.2.10',
+      text: 'Restore full connectivity - PC-A can ping 192.168.2.10',
       check: (_state, _history, session) => {
         const r2 = session.devices.R2;
         if (r2?.kind !== 'router') return false;
@@ -108,7 +108,7 @@ export const tshootReturnRoute: Lab = {
     {
       afterSeconds: 90,
       text:
-        'From PC-A run `ping 192.168.2.10` and read the failure line. If you want to confirm the diagnosis, click R1 and R2 in turn, `enable`, then `show ip route` — compare what each router knows about the OTHER PC’s subnet.',
+        'From PC-A run `ping 192.168.2.10` and read the failure line. If you want to confirm the diagnosis, click R1 and R2 in turn, `enable`, then `show ip route` - compare what each router knows about the OTHER PC\'s subnet.',
     },
     {
       afterSeconds: 240,
@@ -120,7 +120,7 @@ export const tshootReturnRoute: Lab = {
     steps: [
       {
         device: 'R2',
-        note: 'Add the missing return route back to PC-A’s subnet:',
+        note: 'Add the missing return route back to PC-A\'s subnet:',
         commands: [
           'enable',
           'configure terminal',
