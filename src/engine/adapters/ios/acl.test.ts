@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { applyCommand } from './interpret';
-import { createSession, buildDevice, type Session } from './state';
+import { createSession, buildDevice, prompt, type Session } from './state';
 import {
   initLabSession,
   applyToActive,
@@ -151,10 +151,15 @@ describe('access-list command — state mutation', () => {
   });
 
   it('rejects an out-of-range ACL number with the IOS caret error', () => {
-    const out = applyCommand(inConfig(fresh()), 'access-list 200 permit any').output;
-    expect(out[0].text).toMatch(/Invalid input/);
+    const cfg = inConfig(fresh());
+    const out = applyCommand(cfg, 'access-list 200 permit any').output;
+    // Caret under the offending number token, then the canonical message.
+    // '200' starts at offset 12: 'access-list '.
+    const promptLen = prompt(cfg).length + 1;
+    expect(out[0].text).toBe(' '.repeat(promptLen + 12) + '^');
+    expect(out[1].text).toBe("% Invalid input detected at '^' marker.");
     // ACL must not be created.
-    const s = applyCommand(inConfig(fresh()), 'access-list 200 permit any').session;
+    const s = applyCommand(cfg, 'access-list 200 permit any').session;
     expect(s.device.acls.size).toBe(0);
   });
 

@@ -51,6 +51,24 @@ function invalidInputOutput(promptStr: string, charOffset: number): CommandOutpu
   ];
 }
 
+/**
+ * Error-rendering context threaded into the switch dispatch handlers so
+ * handler-level argument validation emits the same caret + message as the
+ * resolver's invalid-input path. Mirrors the router adapter's ErrCtx —
+ * `argOffsets` maps each resolved argument's name to its token's char offset
+ * within the (sanitized) typed line.
+ */
+interface ErrCtx {
+  readonly promptStr: string;
+  readonly argOffsets: Readonly<Record<string, number>>;
+}
+
+/** Emit the IOS invalid-input caret error under the named argument's token.
+ *  Single sink for switch handler-level validation failures. */
+function badInput(ec: ErrCtx, argName: string): CommandOutput[] {
+  return invalidInputOutput(ec.promptStr, ec.argOffsets[argName] ?? 0);
+}
+
 export function applySwitchCommand(
   session: SwitchSession,
   raw: string,
@@ -94,8 +112,13 @@ export function applySwitchCommand(
     case 'incomplete':
       return { session, output: err('% Incomplete command.') };
     case 'complete': {
-      if (doForm) return dispatchDo(session, result.command, result.args, raw, opts);
-      return dispatch(session, result.command, result.args, raw.trim(), opts);
+      const argOffsets: Record<string, number> = {};
+      for (const [name, idx] of Object.entries(result.argPositions)) {
+        argOffsets[name] = activeOffsets[idx];
+      }
+      const ec: ErrCtx = { promptStr, argOffsets };
+      if (doForm) return dispatchDo(session, result.command, result.args, raw, ec, opts);
+      return dispatch(session, result.command, result.args, raw.trim(), ec, opts);
     }
   }
 }
@@ -105,9 +128,10 @@ function dispatchDo(
   command: string[],
   args: Record<string, string>,
   raw: string,
+  ec: ErrCtx,
   opts: ApplyOptions | undefined,
 ): ApplyResult {
-  const inner = dispatch(prev, command, args, raw.trim(), opts);
+  const inner = dispatch(prev, command, args, raw.trim(), ec, opts);
   const record = opts?.record !== false;
   const last = inner.session.resolvedHistory.length - 1;
   const fixed: SwitchSession = {
@@ -183,6 +207,7 @@ function dispatch(
   command: string[],
   args: Record<string, string>,
   raw: string,
+  ec: ErrCtx,
   opts: ApplyOptions | undefined,
 ): ApplyResult {
   const s: SwitchSession = structuredClone(prev);
@@ -233,16 +258,16 @@ function dispatch(
       return { session: s, output: [] };
 
     case 'interface':
-      return enterInterface(s, args.iface);
+      return enterInterface(s, args.iface, ec);
 
     case 'vlan':
-      return enterVlan(s, args.id);
+      return enterVlan(s, args.id, ec);
 
     case 'name':
       return setVlanName(s, args.name);
 
     case 'switchport':
-      return handleSwitchport(s, command, args);
+      return handleSwitchport(s, command, args, ec);
 
     case 'ip':
       // `ip address <ip> <mask>` on a switchport — explicitly rejected on L2.
@@ -263,7 +288,7 @@ function dispatch(
       return setSwitchportAdmin(s, false);
 
     case 'no':
-      return negate(s, command, args);
+      return negate(s, command, args, ec);
 
     case 'show':
       return show(s, command, args, opts);
@@ -276,10 +301,10 @@ function dispatch(
   }
 }
 
-function enterInterface(s: SwitchSession, token: string): ApplyResult {
+function enterInterface(s: SwitchSession, token: string, ec: ErrCtx): ApplyResult {
   const id = normaliseSwitchportId(token);
   if (!id) {
-    return { session: s, output: err(`% Invalid input detected at "${token}".`) };
+    return { session: s, output: badInput(ec, 'iface') };
   }
   if (!s.device.switchports[id]) {
     return { session: s, output: err(`% Invalid interface ${fullSwitchportName(id)}`) };
@@ -290,10 +315,10 @@ function enterInterface(s: SwitchSession, token: string): ApplyResult {
   return { session: s, output: [] };
 }
 
-function enterVlan(s: SwitchSession, idArg: string): ApplyResult {
+function enterVlan(s: SwitchSession, idArg: string, ec: ErrCtx): ApplyResult {
   const id = Number.parseInt(idArg, 10);
   if (!isValidVlanId(id) || String(id) !== idArg) {
-    return { session: s, output: err(`% Invalid input detected at "${idArg}".`) };
+    return { session: s, output: badInput(ec, 'id') };
   }
   if (isReservedVlan(id)) {
     return {
@@ -324,6 +349,7 @@ function handleSwitchport(
   s: SwitchSession,
   command: string[],
   args: Record<string, string>,
+  ec: ErrCtx,
 ): ApplyResult {
   // command shape:
   //   ['switchport', 'mode', 'access']
@@ -356,13 +382,13 @@ function handleSwitchport(
     };
   }
 
-  if (command[1] === 'trunk') return handleSwitchportTrunk(s, port, command, args);
+  if (command[1] === 'trunk') return handleSwitchportTrunk(s, port, command, args, ec);
 
   if (command[1] === 'access' && command[2] === 'vlan') {
     const idArg = args.id;
     const id = Number.parseInt(idArg, 10);
     if (!isValidVlanId(id) || String(id) !== idArg) {
-      return { session: s, output: err(`% Invalid input detected at "${idArg}".`) };
+      return { session: s, output: badInput(ec, 'id') };
     }
     if (isReservedVlan(id)) {
       return {
@@ -407,6 +433,7 @@ function handleSwitchportTrunk(
   port: Switchport,
   command: string[],
   args: Record<string, string>,
+  ec: ErrCtx,
 ): ApplyResult {
   if (command[2] === 'allowed' && command[3] === 'vlan') {
     const op = command[4];
@@ -421,7 +448,7 @@ function handleSwitchportTrunk(
     if (op === 'add' || op === 'remove') {
       const parsed = parseVlanList(args.list ?? '');
       if (!parsed) {
-        return { session: s, output: err(`% Invalid input detected at "${args.list}".`) };
+        return { session: s, output: badInput(ec, 'list') };
       }
       const current = port.trunkAllowedVlans === 'all' ? allVlans() : [...port.trunkAllowedVlans];
       const next = op === 'add' ? unionSorted(current, parsed) : differenceSorted(current, parsed);
@@ -431,7 +458,7 @@ function handleSwitchportTrunk(
     // Bare `switchport trunk allowed vlan <list>` — replace.
     const parsed = parseVlanList(args.list ?? '');
     if (!parsed) {
-      return { session: s, output: err(`% Invalid input detected at "${args.list}".`) };
+      return { session: s, output: badInput(ec, 'list') };
     }
     port.trunkAllowedVlans = parsed;
     return { session: s, output: [] };
@@ -441,7 +468,7 @@ function handleSwitchportTrunk(
     const idArg = args.id;
     const id = Number.parseInt(idArg, 10);
     if (!isValidVlanId(id) || String(id) !== idArg) {
-      return { session: s, output: err(`% Invalid input detected at "${idArg}".`) };
+      return { session: s, output: badInput(ec, 'id') };
     }
     if (isReservedVlan(id)) {
       return {
@@ -503,6 +530,7 @@ function negate(
   s: SwitchSession,
   command: string[],
   args: Record<string, string>,
+  ec: ErrCtx,
 ): ApplyResult {
   switch (command[1]) {
     case 'shutdown':
@@ -514,7 +542,7 @@ function negate(
       const idArg = args.id;
       const id = Number.parseInt(idArg, 10);
       if (!isValidVlanId(id) || String(id) !== idArg) {
-        return { session: s, output: err(`% Invalid input detected at "${idArg}".`) };
+        return { session: s, output: badInput(ec, 'id') };
       }
       if (id === 1) {
         return { session: s, output: err('% Default VLAN 1 may not be deleted.') };
