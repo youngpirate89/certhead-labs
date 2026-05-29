@@ -18,7 +18,10 @@ import {
   prompt as promptFor,
   routingTable,
   deriveRouterId,
+  OSPF_DEFAULT_HELLO_INTERVAL,
+  OSPF_DEFAULT_DEAD_INTERVAL,
 } from './state';
+import { matchingNetwork } from './ospf';
 import {
   type Route,
   ipInSubnet,
@@ -382,6 +385,10 @@ function dispatch(
       if (command[1] === 'helper-address') {
         return setHelperAddress(s, args.ip);
       }
+      if (command[1] === 'ospf') {
+        if (command[2] === 'hello-interval') return setOspfTimer(s, 'hello', args.seconds);
+        if (command[2] === 'dead-interval') return setOspfTimer(s, 'dead', args.seconds);
+      }
       return { session: s, output: err('% Incomplete command.') };
 
     case 'permit':
@@ -741,6 +748,10 @@ function negate(s: Session, command: string[], args: Record<string, string>): Ap
       }
       if (command[2] === 'helper-address') {
         return clearHelperAddress(s);
+      }
+      if (command[2] === 'ospf') {
+        if (command[3] === 'hello-interval') return clearOspfTimer(s, 'hello');
+        if (command[3] === 'dead-interval') return clearOspfTimer(s, 'dead');
       }
       // `no ip address`:
       //   - in config-subif → clear the active subinterface's IP+mask
@@ -1280,6 +1291,36 @@ function clearHelperAddress(s: Session): ApplyResult {
   return { session: s, output: [] };
 }
 
+// ---------- OSPF interface timers: ip ospf hello-interval|dead-interval <n>
+//            (config-if) — Lab 19 ----------
+
+/** Set the active interface's OSPF hello or dead interval (1..65535 sec, the
+ *  IOS range). Stored as an explicit override; the recompute layer and show
+ *  commands treat an unset field as the protocol default. Grammar exposes this
+ *  only in config-if so currentInterface is set — guard defensively like the
+ *  NAT/helper handlers so a desynced session no-ops rather than crashing. */
+function setOspfTimer(s: Session, which: 'hello' | 'dead', raw: string): ApplyResult {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > 65535) {
+    return { session: s, output: err(`% Invalid input detected at "${raw}".`) };
+  }
+  if (!s.currentInterface) return { session: s, output: [] };
+  const iface = s.device.interfaces[s.currentInterface];
+  if (which === 'hello') iface.ospfHelloInterval = n;
+  else iface.ospfDeadInterval = n;
+  return { session: s, output: [] };
+}
+
+/** Reset the active interface's OSPF hello or dead interval to the protocol
+ *  default by clearing the override (`no ip ospf hello-interval`). */
+function clearOspfTimer(s: Session, which: 'hello' | 'dead'): ApplyResult {
+  if (!s.currentInterface) return { session: s, output: [] };
+  const iface = s.device.interfaces[s.currentInterface];
+  if (which === 'hello') iface.ospfHelloInterval = undefined;
+  else iface.ospfDeadInterval = undefined;
+  return { session: s, output: [] };
+}
+
 // ---------- NAT: ip nat inside|outside (config-if) + ip nat inside source list
 //            <acl> interface <iface> overload (config) ----------
 
@@ -1599,6 +1640,9 @@ function show(
       if (command[3] === 'neighbor') {
         return { session: s, output: out(...showIpOspfNeighbor(s)) };
       }
+      if (command[3] === 'interface') {
+        return { session: s, output: out(...showIpOspfInterface(s, args.iface)) };
+      }
       // Bare `show ip ospf`. Stamp the verify gate only when at least one
       // interface is passive — mirrors lastShowAccessLists / lastShowDhcpBinding:
       // an observe-before-configure run prints the header without a passive
@@ -1885,6 +1929,58 @@ function showIpOspf(s: Session): string[] {
   return lines;
 }
 
+/** Render `show ip ospf interface [<iface>]` — per-interface OSPF settings.
+ *  The line that matters for Lab 19 is `Timer intervals configured, Hello N,
+ *  Dead N, ...`: comparing it on both ends reveals the timer mismatch. With no
+ *  iface argument we list every OSPF-enabled interface (covered by a network
+ *  statement) in declaration order; with one, we scope to it. Network Type is
+ *  rendered POINT_TO_POINT to stay consistent with the neighbor table's
+ *  no-DR/BDR rendering. */
+function showIpOspfInterface(s: Session, ifaceToken?: string): string[] {
+  const o = s.device.ospf;
+  if (o.process === null) return ['% OSPF instance not configured.'];
+
+  let ids: string[];
+  if (ifaceToken !== undefined) {
+    const id = normaliseInterface(ifaceToken);
+    if (!id || !s.device.interfaces[id]) return [`% Invalid interface ${ifaceToken}`];
+    ids = [id];
+  } else {
+    ids = Object.keys(s.device.interfaces).filter((id) => {
+      const i = s.device.interfaces[id];
+      return i.ip !== null && matchingNetwork(o.networks, i.ip) !== null;
+    });
+  }
+
+  const lines: string[] = [];
+  for (const id of ids) {
+    const i = s.device.interfaces[id];
+    const state = i.adminUp ? 'up' : 'administratively down';
+    const proto = i.adminUp && i.protocolUp ? 'up' : 'down';
+    const net = i.ip ? matchingNetwork(o.networks, i.ip) : null;
+    if (!net) {
+      lines.push(`${i.name} is ${state}, line protocol is ${proto}`);
+      lines.push('  OSPF not enabled on this interface');
+      continue;
+    }
+    const hello = i.ospfHelloInterval ?? OSPF_DEFAULT_HELLO_INTERVAL;
+    const dead = i.ospfDeadInterval ?? OSPF_DEFAULT_DEAD_INTERVAL;
+    lines.push(`${i.name} is ${state}, line protocol is ${proto}`);
+    if (i.ip && i.mask) {
+      lines.push(`  Internet Address ${i.ip}/${maskToCidr(i.mask)}, Area ${net.area}`);
+    }
+    lines.push(
+      `  Process ID ${o.process}, Router ID ${o.routerId ?? '0.0.0.0'}, Network Type POINT_TO_POINT, Cost: 1`,
+    );
+    lines.push(
+      `  Timer intervals configured, Hello ${hello}, Dead ${dead}, Wait ${dead}, Retransmit 5`,
+    );
+  }
+  // OSPF configured but no interface is covered by a network statement.
+  if (lines.length === 0) return ['% OSPF instance not configured.'];
+  return lines;
+}
+
 function uniqueAreas(s: Session): number[] {
   const seen = new Set<number>();
   for (const n of s.device.ospf.networks) seen.add(n.area);
@@ -2101,6 +2197,8 @@ function showRunningConfigInterface(s: Session, ifaceToken: string): ApplyResult
   if (i.helperAddress) lines.push(` ip helper-address ${i.helperAddress}`);
   if (i.accessGroups.in !== null) lines.push(` ip access-group ${i.accessGroups.in} in`);
   if (i.accessGroups.out !== null) lines.push(` ip access-group ${i.accessGroups.out} out`);
+  if (i.ospfHelloInterval !== undefined) lines.push(` ip ospf hello-interval ${i.ospfHelloInterval}`);
+  if (i.ospfDeadInterval !== undefined) lines.push(` ip ospf dead-interval ${i.ospfDeadInterval}`);
   if (!i.adminUp) lines.push(' shutdown');
   lines.push('!');
   return { session: s, output: out(...lines) };
@@ -2134,6 +2232,8 @@ function showRunningConfig(s: Session): string[] {
     if (i.helperAddress) lines.push(` ip helper-address ${i.helperAddress}`);
     if (i.accessGroups.in !== null) lines.push(` ip access-group ${i.accessGroups.in} in`);
     if (i.accessGroups.out !== null) lines.push(` ip access-group ${i.accessGroups.out} out`);
+    if (i.ospfHelloInterval !== undefined) lines.push(` ip ospf hello-interval ${i.ospfHelloInterval}`);
+    if (i.ospfDeadInterval !== undefined) lines.push(` ip ospf dead-interval ${i.ospfDeadInterval}`);
     if (!i.adminUp) lines.push(' shutdown');
     lines.push('!');
     const subs = subsByParent.get(i.id);

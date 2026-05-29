@@ -478,6 +478,191 @@ describe('OSPF — passive-interface', () => {
   });
 });
 
+describe('OSPF — interface hello/dead timers (config-if)', () => {
+  function ifaceConfig(s: Session, iface: string): Session {
+    return applyCommand(configRouter(s), `interface ${iface}`).session;
+  }
+
+  it('`ip ospf hello-interval 5` stores the override on the interface', () => {
+    const s = applyCommand(ifaceConfig(fresh2iface(), 'gi0/2'), 'ip ospf hello-interval 5').session;
+    expect(s.device.interfaces['Gi0/2'].ospfHelloInterval).toBe(5);
+  });
+
+  it('`ip ospf dead-interval 20` stores the override on the interface', () => {
+    const s = applyCommand(ifaceConfig(fresh2iface(), 'gi0/2'), 'ip ospf dead-interval 20').session;
+    expect(s.device.interfaces['Gi0/2'].ospfDeadInterval).toBe(20);
+  });
+
+  it('`no ip ospf hello-interval` resets to default (clears the override)', () => {
+    let s = applyCommand(ifaceConfig(fresh2iface(), 'gi0/2'), 'ip ospf hello-interval 5').session;
+    s = applyCommand(s, 'no ip ospf hello-interval').session;
+    expect(s.device.interfaces['Gi0/2'].ospfHelloInterval).toBeUndefined();
+  });
+
+  it('rejects an out-of-range interval with an IOS-style error', () => {
+    const after = applyCommand(ifaceConfig(fresh2iface(), 'gi0/2'), 'ip ospf hello-interval 70000');
+    const text = after.output.map((o) => o.text).join('\n');
+    expect(text).toMatch(/% Invalid input detected/);
+    expect(after.session.device.interfaces['Gi0/2'].ospfHelloInterval).toBeUndefined();
+  });
+
+  it('rejects a zero interval', () => {
+    const after = applyCommand(ifaceConfig(fresh2iface(), 'gi0/2'), 'ip ospf hello-interval 0');
+    expect(after.output.map((o) => o.text).join('\n')).toMatch(/% Invalid input detected/);
+    expect(after.session.device.interfaces['Gi0/2'].ospfHelloInterval).toBeUndefined();
+  });
+});
+
+describe('OSPF — timer mismatch suppresses adjacency', () => {
+  function bothConfigured(): LabSession {
+    let ls = initLabSession(twoRouterLink());
+    ls = runOn(ls, 'R1', [
+      'enable',
+      'configure terminal',
+      'router ospf 1',
+      'network 10.0.0.0 0.0.0.3 area 0',
+      'network 192.168.1.0 0.0.0.255 area 0',
+    ]);
+    ls = runOn(ls, 'R2', [
+      'enable',
+      'configure terminal',
+      'router ospf 1',
+      'network 10.0.0.0 0.0.0.3 area 0',
+      'network 192.168.2.0 0.0.0.255 area 0',
+    ]);
+    return ls;
+  }
+
+  it('matching defaults on both ends → adjacency forms (baseline)', () => {
+    const ls = bothConfigured();
+    expect(asRouter(ls.devices.R1).device.ospf.neighbors.size).toBe(1);
+  });
+
+  it('mismatched hello-interval on one end → no adjacency', () => {
+    let ls = bothConfigured();
+    ls = runOn(ls, 'R2', [
+      'enable',
+      'configure terminal',
+      'interface gi0/2',
+      'ip ospf hello-interval 5',
+    ]);
+    expect(asRouter(ls.devices.R1).device.ospf.neighbors.size).toBe(0);
+    expect(asRouter(ls.devices.R2).device.ospf.neighbors.size).toBe(0);
+  });
+
+  it('mismatched dead-interval on one end → no adjacency', () => {
+    let ls = bothConfigured();
+    ls = runOn(ls, 'R2', [
+      'enable',
+      'configure terminal',
+      'interface gi0/2',
+      'ip ospf dead-interval 20',
+    ]);
+    expect(asRouter(ls.devices.R1).device.ospf.neighbors.size).toBe(0);
+  });
+
+  it('aligning the timers back to match re-forms the adjacency', () => {
+    let ls = bothConfigured();
+    ls = runOn(ls, 'R2', [
+      'enable',
+      'configure terminal',
+      'interface gi0/2',
+      'ip ospf hello-interval 5',
+      'ip ospf dead-interval 20',
+    ]);
+    expect(asRouter(ls.devices.R1).device.ospf.neighbors.size).toBe(0);
+    // Match R1's defaults by resetting R2's overrides.
+    ls = runOn(ls, 'R2', [
+      'enable',
+      'configure terminal',
+      'interface gi0/2',
+      'no ip ospf hello-interval',
+      'no ip ospf dead-interval',
+    ]);
+    expect(asRouter(ls.devices.R1).device.ospf.neighbors.size).toBe(1);
+  });
+
+  it('explicitly setting BOTH ends to the same non-default values forms adjacency', () => {
+    let ls = bothConfigured();
+    ls = runOn(ls, 'R1', [
+      'enable',
+      'configure terminal',
+      'interface gi0/2',
+      'ip ospf hello-interval 5',
+      'ip ospf dead-interval 20',
+    ]);
+    ls = runOn(ls, 'R2', [
+      'enable',
+      'configure terminal',
+      'interface gi0/2',
+      'ip ospf hello-interval 5',
+      'ip ospf dead-interval 20',
+    ]);
+    expect(asRouter(ls.devices.R1).device.ospf.neighbors.size).toBe(1);
+  });
+});
+
+describe('OSPF — show ip ospf interface', () => {
+  function r1WithTimers(): LabSession {
+    let ls = initLabSession(twoRouterLink());
+    ls = runOn(ls, 'R1', [
+      'enable',
+      'configure terminal',
+      'router ospf 1',
+      'network 10.0.0.0 0.0.0.3 area 0',
+      'network 192.168.1.0 0.0.0.255 area 0',
+      'exit',
+      'interface gi0/2',
+      'ip ospf hello-interval 5',
+      'ip ospf dead-interval 20',
+    ]);
+    return ls;
+  }
+
+  it('per-interface form prints the Timer intervals line with the overridden values', () => {
+    const { lastOutput } = runOnWithOutput(r1WithTimers(), 'R1', [
+      'enable',
+      'show ip ospf interface gi0/2',
+    ]);
+    expect(lastOutput).toMatch(/GigabitEthernet0\/2 is up, line protocol is up/);
+    expect(lastOutput).toMatch(/Internet Address 10\.0\.0\.1\/30, Area 0/);
+    expect(lastOutput).toMatch(/Timer intervals configured, Hello 5, Dead 20/);
+  });
+
+  it('an OSPF interface with no override shows the protocol defaults (Hello 10, Dead 40)', () => {
+    let ls = initLabSession(twoRouterLink());
+    ls = runOn(ls, 'R1', [
+      'enable',
+      'configure terminal',
+      'router ospf 1',
+      'network 192.168.1.0 0.0.0.255 area 0',
+    ]);
+    const { lastOutput } = runOnWithOutput(ls, 'R1', [
+      'enable',
+      'show ip ospf interface gi0/0',
+    ]);
+    expect(lastOutput).toMatch(/Timer intervals configured, Hello 10, Dead 40/);
+  });
+
+  it('bare form lists every OSPF-enabled interface', () => {
+    const { lastOutput } = runOnWithOutput(r1WithTimers(), 'R1', [
+      'enable',
+      'show ip ospf interface',
+    ]);
+    expect(lastOutput).toMatch(/GigabitEthernet0\/0 is/);
+    expect(lastOutput).toMatch(/GigabitEthernet0\/2 is/);
+  });
+
+  it('show running-config emits the non-default ip ospf timer lines', () => {
+    const { lastOutput } = runOnWithOutput(r1WithTimers(), 'R1', [
+      'enable',
+      'show running-config',
+    ]);
+    expect(lastOutput).toMatch(/ ip ospf hello-interval 5/);
+    expect(lastOutput).toMatch(/ ip ospf dead-interval 20/);
+  });
+});
+
 describe('OSPF — show ip ospf neighbor output', () => {
   it('renders FULL/  - for a P2P neighbor and the iface long-form', () => {
     let ls = initLabSession(twoRouterLink());

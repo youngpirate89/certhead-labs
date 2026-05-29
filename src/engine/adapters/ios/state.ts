@@ -194,7 +194,22 @@ export interface InterfaceState {
    *  remote device whose interface owns `helperAddress`, instead of looking
    *  for a same-subnet pool on this router. Undefined = no relay. */
   helperAddress?: string;
+  /** OSPF hello/dead interval overrides set by `ip ospf hello-interval <n>` /
+   *  `ip ospf dead-interval <n>` (Lab 19). Undefined = the protocol default
+   *  (OSPF_DEFAULT_HELLO_INTERVAL / OSPF_DEFAULT_DEAD_INTERVAL). recomputeOspf
+   *  compares the EFFECTIVE values on both ends of a link — a mismatch (e.g.
+   *  one side overridden, the other at default) suppresses neighbor formation,
+   *  matching IOS, where hellos with mismatched timers are dropped. These are
+   *  static config values, not a simulated timer. */
+  ospfHelloInterval?: number;
+  ospfDeadInterval?: number;
 }
+
+/** OSPF interface timer defaults (seconds), applied when an interface carries
+ *  no explicit `ip ospf hello-interval` / `dead-interval` override. Broadcast
+ *  and point-to-point Ethernet both default to hello 10 / dead 40 (4× hello). */
+export const OSPF_DEFAULT_HELLO_INTERVAL = 10;
+export const OSPF_DEFAULT_DEAD_INTERVAL = 40;
 
 /** A dot1Q subinterface — Lab 09 router-on-a-stick. Subinterfaces live ON a
  *  physical parent (`parentId`) and tag egress traffic with `dot1qVlan`. They

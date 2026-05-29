@@ -2,13 +2,16 @@
  * OSPF neighbor formation + route injection — synchronous, scenario-scoped.
  *
  * Per CLAUDE.md guardrail #8 the engine is deterministic; OSPF here is NOT a
- * timer-based protocol implementation. Hellos, dead intervals, DR/BDR
- * elections, and LSAs are intentionally omitted. Adjacency is evaluated
+ * timer-based protocol implementation. There is no control-plane traffic:
+ * DR/BDR elections and LSAs are intentionally omitted. Adjacency is evaluated
  * SYNCHRONOUSLY after any change to interface admin state or to the per-
- * router OSPF config (process / networks). For the curated scenarios we
- * ship — two routers exchanging routes across a /30 link — this captures
- * the misconfigurations CCNA learners need to recognize (missing network
- * statement, mismatched area) without simulating control-plane traffic.
+ * router OSPF config (process / networks / passive / timers). For the curated
+ * scenarios we ship — two routers exchanging routes across a /30 link — this
+ * captures the misconfigurations CCNA learners need to recognize (missing
+ * network statement, mismatched area, mismatched hello/dead intervals)
+ * without simulating control-plane traffic. The hello/dead intervals are
+ * compared as STATIC config values (Lab 19), not run as actual timers — a
+ * mismatch suppresses neighbor formation the same way an area mismatch does.
  *
  * The single entry point is {@link recomputeOspf}: pass the per-device
  * router sessions + link list, get back new sessions with neighbor maps +
@@ -17,6 +20,7 @@
  * refresh layer can skip a no-op replacement.
  */
 import type { Session, OspfNetwork, OspfNeighborState } from './state';
+import { OSPF_DEFAULT_HELLO_INTERVAL, OSPF_DEFAULT_DEAD_INTERVAL } from './state';
 import type { Link } from '@/engine/types';
 import { ipInSubnet, networkAddress, type Route } from './routing';
 
@@ -26,6 +30,10 @@ interface IfaceView {
   readonly ip: string;
   readonly mask: string;
   readonly adminUp: boolean;
+  /** Effective OSPF hello/dead intervals — the configured override, or the
+   *  protocol default when unset. Compared end-to-end for adjacency. */
+  readonly helloInterval: number;
+  readonly deadInterval: number;
 }
 
 /**
@@ -74,6 +82,11 @@ export function recomputeOspf(
     // hello-active.
     if (aSession.device.ospf.passive.has(a.ifaceId)) continue;
     if (bSession.device.ospf.passive.has(b.ifaceId)) continue;
+    // Hello and dead intervals must match on both ends — IOS drops hellos
+    // whose timers disagree, so the adjacency never forms (Lab 19). We
+    // compare the effective (configured-or-default) values statically.
+    if (a.helloInterval !== b.helloInterval) continue;
+    if (a.deadInterval !== b.deadInterval) continue;
 
     const aRid = aSession.device.ospf.routerId ?? a.ip;
     const bRid = bSession.device.ospf.routerId ?? b.ip;
@@ -130,8 +143,10 @@ export function recomputeOspf(
   return result;
 }
 
-/** First network statement whose (prefix, wildcard) covers ip, or null. */
-function matchingNetwork(
+/** First network statement whose (prefix, wildcard) covers ip, or null.
+ *  Exported so `show ip ospf interface` can decide which interfaces OSPF
+ *  considers enabled and report each one's area. */
+export function matchingNetwork(
   networks: readonly OspfNetwork[],
   ip: string,
 ): OspfNetwork | null {
@@ -169,6 +184,8 @@ function resolveEnd(
     ip: i.ip,
     mask: i.mask,
     adminUp: i.adminUp,
+    helloInterval: i.ospfHelloInterval ?? OSPF_DEFAULT_HELLO_INTERVAL,
+    deadInterval: i.ospfDeadInterval ?? OSPF_DEFAULT_DEAD_INTERVAL,
   };
 }
 

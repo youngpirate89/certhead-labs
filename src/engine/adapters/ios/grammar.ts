@@ -31,6 +31,14 @@ const showSubtree: CommandNode = {
           help: 'OSPF process summary',
           children: {
             neighbor: done('OSPF neighbor table'),
+            // `show ip ospf interface` dumps every OSPF interface; the
+            // optional iface argument scopes it to one (where the hello/dead
+            // timer line lives — Lab 19's diagnostic).
+            interface: {
+              terminal: true,
+              help: 'OSPF interface settings (timers, area, cost)',
+              argument: arg('iface', done('Per-interface OSPF settings')),
+            },
           },
         },
         dhcp: {
@@ -371,6 +379,19 @@ const configIfMode: CommandNode = {
           help: 'Forward DHCP broadcasts to a remote server',
           argument: arg('ip', done('Apply DHCP relay target')),
         },
+        ospf: {
+          help: 'OSPF interface parameters',
+          children: {
+            'hello-interval': {
+              help: 'Time between OSPF hello packets (seconds)',
+              argument: arg('seconds', done('Apply hello interval')),
+            },
+            'dead-interval': {
+              help: 'Interval before declaring a silent neighbor down (seconds)',
+              argument: arg('seconds', done('Apply dead interval')),
+            },
+          },
+        },
       },
     },
     description: {
@@ -402,6 +423,13 @@ const configIfMode: CommandNode = {
               },
             },
             'helper-address': done('Remove the DHCP relay target'),
+            ospf: {
+              help: 'Reset OSPF interface parameters to default',
+              children: {
+                'hello-interval': done('Reset hello interval to default'),
+                'dead-interval': done('Reset dead interval to default'),
+              },
+            },
           },
         },
       },
