@@ -58,8 +58,23 @@ export interface FloatingTerminalPanelProps {
 
 /** Initial panel dimensions when first opened. Resize state lives in
  *  component-local useState, so a lab reload returns to these defaults
- *  (matches the position-not-persisted decision). */
-const DEFAULT_PANEL_WIDTH = 600;
+ *  (matches the position-not-persisted decision).
+ *
+ *  Width is sized to hold 80-column IOS output without wrapping at the
+ *  default terminal font (14px, see terminalTheme FONT_SIZES.default). Fixed
+ *  IOS tables (`show ip interface brief`, `show ip dhcp binding`) are written
+ *  at ~80 cols; the terminal body wraps (`whitespace-pre-wrap`) so a too-narrow
+ *  panel folds the Protocol column / trailing values onto new lines. Budget:
+ *    text   = 82ch × 8.4px  ≈ 689px   (8.4px = ~0.6em advance, the widest glyph
+ *                                       in the font-mono stack at 14px; 82ch =
+ *                                       80 cols + a 2-col margin)
+ *    + 32px  Terminal body padding (px-4 → 16px each side)
+ *    + 16px  vertical scrollbar gutter (overflow-y-auto)
+ *    +  2px  panel border (1px each side)
+ *    ≈ 739px → 740px
+ *  The user can still resize narrower (MIN_PANEL_WIDTH unchanged); this only
+ *  moves the *default* so tabular show output reads cleanly on first open. */
+const DEFAULT_PANEL_WIDTH = 740;
 const DEFAULT_PANEL_HEIGHT = 420;
 /** Floor sizes — below these the tab strip wraps and the terminal becomes
  *  illegible. Hardcoded rather than measured because a dynamic measurement
