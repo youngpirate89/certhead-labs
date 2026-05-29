@@ -51,6 +51,14 @@ export interface OspfState {
   /** Neighbors keyed by neighbor router-id. Kept as a Map so iteration order
    *  is insertion order — show output reads deterministically. */
   neighbors: Map<string, OspfNeighborState>;
+  /** Interfaces marked `passive-interface` under `router ospf <pid>`. A
+   *  passive interface keeps its prefix advertised (the network statement
+   *  still matches) but suppresses hello processing on that iface — no
+   *  neighbor forms on a link where either endpoint is passive. Stored as a
+   *  Set of canonical iface ids so `passive Gi0/0` dedups, iteration order is
+   *  insertion-stable (the show-output renderer reads it directly), and
+   *  structuredClone handles it without extra plumbing. (Lab 17.) */
+  passive: Set<string>;
 }
 
 /** One ACE in a standard OR extended ACL.
@@ -280,6 +288,14 @@ export interface Session {
    *  actually run after at least one ACL exists (mirrors lastShowDhcpBinding
    *  / lastShowNatTranslations). */
   lastShowAccessLists: number;
+  /** Monotonic engine-seq stamp updated each time the learner runs bare `show
+   *  ip ospf` AND at least one OSPF interface is passive. Lab 17's verify-style
+   *  objective compares this against 0 to require the show to run AFTER the
+   *  learner has marked an interface passive (mirrors `lastShowAccessLists` /
+   *  `lastShowDhcpBinding`). Gating on a non-empty passive set is what makes
+   *  this observe-AFTER-configure: an inspect run before any passive-interface
+   *  prints the header without a passive entry and does NOT satisfy the gate. */
+  lastShowIpOspf: number;
   /** Monotonic engine-seq stamp updated each time the learner runs `show ip
    *  dhcp binding`. Verify-style objectives compare this against 0 to require
    *  the show command to actually have been run (mirrors `lastShowIpIntBrief`
@@ -437,6 +453,7 @@ export function createSession(device: DeviceState): Session {
     lastShowDhcpBinding: 0,
     lastShowNatTranslations: 0,
     lastShowAccessLists: 0,
+    lastShowIpOspf: 0,
     subIfConfiguredAt: {},
     device: cloneDevice(device),
     history: [],
@@ -501,7 +518,7 @@ export function buildDevice(spec: {
     // No subinterfaces on a freshly-booted router — they're created lazily
     // by `interface gi0/0.<n>` from config mode.
     subInterfaces: {},
-    ospf: { process: null, routerId: null, networks: [], neighbors: new Map() },
+    ospf: { process: null, routerId: null, networks: [], neighbors: new Map(), passive: new Set() },
     acls: new Map(),
     dhcpPools: new Map(),
     dhcpExcluded: [],

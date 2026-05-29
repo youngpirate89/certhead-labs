@@ -67,6 +67,13 @@ export function recomputeOspf(
     const bMatch = matchingNetwork(bSession.device.ospf.networks, b.ip);
     if (!aMatch || !bMatch) continue;
     if (aMatch.area !== bMatch.area) continue;
+    // Passive on either side suppresses hello processing → no neighbor forms,
+    // but the prefix stays advertised (the network statement still matches).
+    // Lab 17: tagging the LAN iface as passive is the teaching point — it
+    // doesn't drop the WAN adjacency because only the WAN iface remains
+    // hello-active.
+    if (aSession.device.ospf.passive.has(a.ifaceId)) continue;
+    if (bSession.device.ospf.passive.has(b.ifaceId)) continue;
 
     const aRid = aSession.device.ospf.routerId ?? a.ip;
     const bRid = bSession.device.ospf.routerId ?? b.ip;

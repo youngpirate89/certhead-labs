@@ -304,13 +304,20 @@ const networkSubtree: CommandNode = {
   }),
 };
 
+const passiveInterfaceSubtree: CommandNode = {
+  help: 'Suppress OSPF hello processing on the named interface',
+  argument: arg('iface', done('Mark this interface passive')),
+};
+
 const configRouterMode: CommandNode = {
   children: {
     network: networkSubtree,
+    'passive-interface': passiveInterfaceSubtree,
     no: {
       help: 'Negate a command',
       children: {
         network: networkSubtree,
+        'passive-interface': passiveInterfaceSubtree,
       },
     },
     exit: done('Exit OSPF configuration'),

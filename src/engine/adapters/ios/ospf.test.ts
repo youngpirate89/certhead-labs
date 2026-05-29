@@ -343,6 +343,141 @@ describe('OSPF — route injection', () => {
   });
 });
 
+describe('OSPF — passive-interface', () => {
+  it('`passive-interface gi0/0` in config-router stores the canonical id', () => {
+    let s = configRouter(fresh2iface());
+    s = applyCommand(s, 'router ospf 1').session;
+    s = applyCommand(s, 'passive-interface gi0/0').session;
+    expect(s.device.ospf.passive.has('Gi0/0')).toBe(true);
+  });
+
+  it('`no passive-interface gi0/0` clears it', () => {
+    let s = configRouter(fresh2iface());
+    s = applyCommand(s, 'router ospf 1').session;
+    s = applyCommand(s, 'passive-interface gi0/0').session;
+    s = applyCommand(s, 'no passive-interface gi0/0').session;
+    expect(s.device.ospf.passive.has('Gi0/0')).toBe(false);
+  });
+
+  it('rejects an unknown interface with an IOS-style error', () => {
+    let s = configRouter(fresh2iface());
+    s = applyCommand(s, 'router ospf 1').session;
+    const after = applyCommand(s, 'passive-interface gi9/9');
+    const text = after.output.map((o) => o.text).join('\n');
+    expect(text).toMatch(/% Invalid interface/);
+    expect(after.session.device.ospf.passive.size).toBe(0);
+  });
+
+  it('`show ip ospf` lists passive interfaces under a Passive Interface(s) block', () => {
+    let s = configRouter(fresh2iface());
+    s = applyCommand(s, 'interface gi0/0').session;
+    s = applyCommand(s, 'ip address 192.168.1.1 255.255.255.0').session;
+    s = applyCommand(s, 'no shutdown').session;
+    s = applyCommand(s, 'exit').session;
+    s = applyCommand(s, 'router ospf 1').session;
+    s = applyCommand(s, 'network 192.168.1.0 0.0.0.255 area 0').session;
+    s = applyCommand(s, 'passive-interface gi0/0').session;
+    const text = applyCommand(s, 'do show ip ospf')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/Passive Interface\(s\):/);
+    expect(text).toMatch(/GigabitEthernet0\/0/);
+  });
+
+  it('changing the process id clears the passive set', () => {
+    let s = configRouter(fresh2iface());
+    s = applyCommand(s, 'router ospf 1').session;
+    s = applyCommand(s, 'passive-interface gi0/0').session;
+    expect(s.device.ospf.passive.size).toBe(1);
+    // `router ospf <pid>` only resolves from config, so step back out first.
+    s = applyCommand(s, 'exit').session;
+    s = applyCommand(s, 'router ospf 2').session;
+    expect(s.device.ospf.passive.size).toBe(0);
+  });
+
+  it('marking the WAN iface passive on one side drops the FULL adjacency', () => {
+    let ls = initLabSession(twoRouterLink());
+    ls = runOn(ls, 'R1', [
+      'enable',
+      'configure terminal',
+      'router ospf 1',
+      'network 10.0.0.0 0.0.0.3 area 0',
+    ]);
+    ls = runOn(ls, 'R2', [
+      'enable',
+      'configure terminal',
+      'router ospf 1',
+      'network 10.0.0.0 0.0.0.3 area 0',
+    ]);
+    expect(asRouter(ls.devices.R1).device.ospf.neighbors.size).toBe(1);
+    // Mark the WAN iface passive on R1 — neighbor must drop on both sides.
+    ls = runOn(ls, 'R1', [
+      'enable',
+      'configure terminal',
+      'router ospf 1',
+      'passive-interface gi0/2',
+    ]);
+    expect(asRouter(ls.devices.R1).device.ospf.neighbors.size).toBe(0);
+    expect(asRouter(ls.devices.R2).device.ospf.neighbors.size).toBe(0);
+  });
+
+  it('marking only the LAN iface passive leaves the WAN adjacency intact and routes flowing', () => {
+    let ls = initLabSession(twoRouterLink());
+    ls = runOn(ls, 'R1', [
+      'enable',
+      'configure terminal',
+      'router ospf 1',
+      'network 10.0.0.0 0.0.0.3 area 0',
+      'network 192.168.1.0 0.0.0.255 area 0',
+    ]);
+    ls = runOn(ls, 'R2', [
+      'enable',
+      'configure terminal',
+      'router ospf 1',
+      'network 10.0.0.0 0.0.0.3 area 0',
+      'network 192.168.2.0 0.0.0.255 area 0',
+    ]);
+    expect(asRouter(ls.devices.R1).device.ospf.neighbors.size).toBe(1);
+    // Tag the LAN iface passive on both routers — WAN adjacency unaffected.
+    ls = runOn(ls, 'R1', [
+      'enable',
+      'configure terminal',
+      'router ospf 1',
+      'passive-interface gi0/0',
+    ]);
+    ls = runOn(ls, 'R2', [
+      'enable',
+      'configure terminal',
+      'router ospf 1',
+      'passive-interface gi0/0',
+    ]);
+    const r1 = asRouter(ls.devices.R1);
+    expect(r1.device.ospf.neighbors.size).toBe(1);
+    expect(r1.ospfRoutes).toEqual([
+      expect.objectContaining({
+        prefix: '192.168.2.0',
+        mask: '255.255.255.0',
+        source: 'ospf',
+      }),
+    ]);
+  });
+
+  it('show running-config emits the router ospf block with network + passive-interface lines', () => {
+    let ls = initLabSession(twoRouterLink());
+    ls = runOn(ls, 'R1', [
+      'enable',
+      'configure terminal',
+      'router ospf 1',
+      'network 192.168.1.0 0.0.0.255 area 0',
+      'passive-interface gi0/0',
+    ]);
+    const { lastOutput } = runOnWithOutput(ls, 'R1', ['enable', 'show running-config']);
+    expect(lastOutput).toMatch(/router ospf 1/);
+    expect(lastOutput).toMatch(/ network 192\.168\.1\.0 0\.0\.0\.255 area 0/);
+    expect(lastOutput).toMatch(/ passive-interface GigabitEthernet0\/0/);
+  });
+});
+
 describe('OSPF — show ip ospf neighbor output', () => {
   it('renders FULL/  - for a P2P neighbor and the iface long-form', () => {
     let ls = initLabSession(twoRouterLink());

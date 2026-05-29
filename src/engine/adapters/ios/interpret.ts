@@ -396,6 +396,11 @@ function dispatch(
       if (s.mode === 'config-dhcp') return setDhcpNetwork(s, args.ip, args.mask);
       return addOspfNetwork(s, args.prefix, args.wildcard, args.area);
 
+    case 'passive-interface':
+      // Only reachable from config-router (grammar exposes it nowhere else).
+      // The argument is a free-form iface token — normalise + validate.
+      return setPassiveInterface(s, args.iface, true);
+
     case 'default-router':
       return setDhcpDefaultRouter(s, args.ip);
 
@@ -764,6 +769,9 @@ function negate(s: Session, command: string[], args: Record<string, string>): Ap
       // (config-router → OSPF network; config-dhcp → pool network).
       if (s.mode === 'config-dhcp') return clearDhcpNetwork(s);
       return removeOspfNetwork(s, args.prefix, args.wildcard, args.area);
+    case 'passive-interface':
+      // Mirror the positive form — only valid in config-router.
+      return setPassiveInterface(s, args.iface, false);
     case 'default-router':
       return clearDhcpDefaultRouter(s);
     case 'dns-server':
@@ -882,6 +890,7 @@ function enterRouterOspf(s: Session, pidArg: string): ApplyResult {
     // we keep the model simple: only one OSPF process at a time.
     s.device.ospf.networks = [];
     s.device.ospf.neighbors = new Map();
+    s.device.ospf.passive = new Set();
   }
   return { session: s, output: [] };
 }
@@ -925,6 +934,28 @@ function addOspfNetwork(
       s.device.ospf.routerId = deriveRouterId(s.device);
     }
   }
+  return { session: s, output: [] };
+}
+
+/** `[no] passive-interface <iface>` in config-router. Add or remove the
+ *  iface from the OSPF passive set. Validates that the named iface exists on
+ *  this router so a typo surfaces an IOS-style error rather than silently
+ *  growing the set. Subinterfaces are accepted (Lab 09 ROAS); the lookup
+ *  walks both physical and dot1Q maps and stores the canonical id either way. */
+function setPassiveInterface(s: Session, token: string, mark: boolean): ApplyResult {
+  if (s.mode !== 'config-router') {
+    return { session: s, output: err('% Invalid input detected at "passive-interface".') };
+  }
+  const id = normaliseInterface(token);
+  if (!id) return { session: s, output: err(`% Invalid input detected at "${token}".`) };
+  const exists =
+    s.device.interfaces[id] !== undefined ||
+    s.device.subInterfaces[id] !== undefined;
+  if (!exists) {
+    return { session: s, output: err(`% Invalid interface ${fullInterfaceName(id)}`) };
+  }
+  if (mark) s.device.ospf.passive.add(id);
+  else s.device.ospf.passive.delete(id);
   return { session: s, output: [] };
 }
 
@@ -1568,6 +1599,12 @@ function show(
       if (command[3] === 'neighbor') {
         return { session: s, output: out(...showIpOspfNeighbor(s)) };
       }
+      // Bare `show ip ospf`. Stamp the verify gate only when at least one
+      // interface is passive — mirrors lastShowAccessLists / lastShowDhcpBinding:
+      // an observe-before-configure run prints the header without a passive
+      // entry and must NOT satisfy a verify objective. The learner has to add
+      // passive-interface first, then re-run the show. (Lab 17.)
+      if (s.device.ospf.passive.size > 0) s.lastShowIpOspf = nextEngineSeq();
       return { session: s, output: out(...showIpOspf(s)) };
     }
     if (command[2] === 'dhcp') {
@@ -1823,7 +1860,10 @@ function showIpOspfNeighbor(s: Session): string[] {
   return lines;
 }
 
-/** Render `show ip ospf` — process summary. Minimal but standard-looking. */
+/** Render `show ip ospf` — process summary. Minimal but standard-looking.
+ *  When at least one interface is `passive-interface`, append the IOS-style
+ *  "Passive Interface(s):" block so the learner can confirm the marking
+ *  landed (Lab 17 teaching point). */
 function showIpOspf(s: Session): string[] {
   const o = s.device.ospf;
   if (o.process === null) {
@@ -1831,11 +1871,18 @@ function showIpOspf(s: Session): string[] {
   }
   const id = o.routerId ?? '0.0.0.0';
   const areas = uniqueAreas(s).length;
-  return [
+  const lines = [
     `Routing Process "ospf ${o.process}" with ID ${id}`,
     'Supports only single TOS(TOS0) routes',
     `Number of areas in this router is ${areas}. ${areas} normal 0 stub 0 nssa`,
   ];
+  if (o.passive.size > 0) {
+    lines.push('Passive Interface(s):');
+    for (const ifaceId of o.passive) {
+      lines.push(`  ${fullInterfaceName(ifaceId)}`);
+    }
+  }
+  return lines;
 }
 
 function uniqueAreas(s: Session): number[] {
@@ -2136,6 +2183,20 @@ function showRunningConfig(s: Session): string[] {
     }
   }
   if (s.device.acls.size > 0) lines.push('!');
+  // OSPF block — emitted when the process is configured. Network statements
+  // first (preserved insertion order), then passive-interface lines (Lab 17).
+  // Matches the order a learner would have typed them and lets the solution
+  // disclosure read like a real `show running-config` capture.
+  if (s.device.ospf.process !== null) {
+    lines.push(`router ospf ${s.device.ospf.process}`);
+    for (const n of s.device.ospf.networks) {
+      lines.push(` network ${n.prefix} ${n.wildcard} area ${n.area}`);
+    }
+    for (const ifaceId of s.device.ospf.passive) {
+      lines.push(` passive-interface ${fullInterfaceName(ifaceId)}`);
+    }
+    lines.push('!');
+  }
   lines.push('end');
   return lines;
 }
