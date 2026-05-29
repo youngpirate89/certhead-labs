@@ -28,6 +28,7 @@ import { lab15DefaultStaticRoute } from './ccna/lab-15-default-static-route';
 import { lab16FloatingStaticRoute } from './ccna/lab-16-floating-static-route';
 import { lab17OspfPassiveInterface } from './ccna/lab-17-ospf-passive-interface';
 import { lab18OspfTshootPassive } from './ccna/lab-18-ospf-tshoot-passive';
+import { lab19OspfTshootHelloTimers } from './ccna/lab-19-ospf-tshoot-hello-timers';
 import { tshootReturnRoute } from './ccna/tshoot-return-route';
 import { tshootWrongNextHop } from './ccna/tshoot-wrong-next-hop';
 import { tshootWanSubnetMismatch } from './ccna/tshoot-wan-subnet-mismatch';
@@ -49,6 +50,7 @@ const CATALOG: readonly Lab[] = [
   lab16FloatingStaticRoute,
   lab17OspfPassiveInterface,
   lab18OspfTshootPassive,
+  lab19OspfTshootHelloTimers,
   tshootReturnRoute,
   tshootWrongNextHop,
   tshootWanSubnetMismatch,
