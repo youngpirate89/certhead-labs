@@ -40,6 +40,12 @@ import type { Lab } from '@/engine/types';
  *
  * Pro-tier (`isFree: false`); reachable through getLabById once /embed
  * lands. Catalog entry follows Lab 10 in the registry.
+ *
+ * KNOWN SIMPLIFICATION: PAT translation table is config-derived, not
+ * traffic-derived. Real IOS dynamic PAT entries are traffic-triggered
+ * (`show ip nat translations` is empty until the first matching packet).
+ * Deliberate engine simplification — revisit only on learner signal. Tracked
+ * separately from the show-running-config NAT rendering fix.
  */
 export const lab11NatPat: Lab = {
   id: 'ccna-lab11-nat-pat',

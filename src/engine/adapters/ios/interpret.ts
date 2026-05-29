@@ -2197,6 +2197,8 @@ function showRunningConfigInterface(s: Session, ifaceToken: string): ApplyResult
   if (i.helperAddress) lines.push(` ip helper-address ${i.helperAddress}`);
   if (i.accessGroups.in !== null) lines.push(` ip access-group ${i.accessGroups.in} in`);
   if (i.accessGroups.out !== null) lines.push(` ip access-group ${i.accessGroups.out} out`);
+  if (i.natRole === 'inside') lines.push(' ip nat inside');
+  else if (i.natRole === 'outside') lines.push(' ip nat outside');
   if (i.ospfHelloInterval !== undefined) lines.push(` ip ospf hello-interval ${i.ospfHelloInterval}`);
   if (i.ospfDeadInterval !== undefined) lines.push(` ip ospf dead-interval ${i.ospfDeadInterval}`);
   if (!i.adminUp) lines.push(' shutdown');
@@ -2232,6 +2234,8 @@ function showRunningConfig(s: Session): string[] {
     if (i.helperAddress) lines.push(` ip helper-address ${i.helperAddress}`);
     if (i.accessGroups.in !== null) lines.push(` ip access-group ${i.accessGroups.in} in`);
     if (i.accessGroups.out !== null) lines.push(` ip access-group ${i.accessGroups.out} out`);
+    if (i.natRole === 'inside') lines.push(' ip nat inside');
+    else if (i.natRole === 'outside') lines.push(' ip nat outside');
     if (i.ospfHelloInterval !== undefined) lines.push(` ip ospf hello-interval ${i.ospfHelloInterval}`);
     if (i.ospfDeadInterval !== undefined) lines.push(` ip ospf dead-interval ${i.ospfDeadInterval}`);
     if (!i.adminUp) lines.push(' shutdown');
@@ -2283,6 +2287,19 @@ function showRunningConfig(s: Session): string[] {
     }
   }
   if (s.device.acls.size > 0) lines.push('!');
+  // NAT statements appear after the ACL block — matches IOS ordering, where
+  // the global `ip nat inside source list ... overload` line sits below the
+  // access-list it references (Lab 11). `outsideInterface` is the canonical
+  // short id; expand via fullInterfaceName so the line reads with the full
+  // IOS name (GigabitEthernet0/1) like every other interface reference in
+  // this dump and real running-config — the interface NAT roles render in
+  // their own stanzas above.
+  for (const stmt of s.device.natStatements) {
+    lines.push(
+      `ip nat inside source list ${stmt.aclId} interface ${fullInterfaceName(stmt.outsideInterface)} overload`,
+    );
+  }
+  if (s.device.natStatements.length > 0) lines.push('!');
   // OSPF block — emitted when the process is configured. Network statements
   // first (preserved insertion order), then passive-interface lines (Lab 17).
   // Matches the order a learner would have typed them and lets the solution

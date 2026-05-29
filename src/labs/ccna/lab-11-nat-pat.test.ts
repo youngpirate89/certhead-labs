@@ -17,6 +17,16 @@ function runOn(ls: LabSession, deviceId: string, lines: string[]): LabSession {
   return cur;
 }
 
+/** Run a single command on `deviceId` and return its rendered output as one
+ *  newline-joined string — for asserting on `show` output (does not mutate the
+ *  passed session). Mirrors the capture pattern in lab-14-dhcp-relay.test.ts. */
+function showOn(ls: LabSession, deviceId: string, line: string): string {
+  const cur = ls.activeDeviceId === deviceId ? ls : { ...ls, activeDeviceId: deviceId };
+  return applyToActive(cur, line)
+    .output.map((o) => o.text)
+    .join('\n');
+}
+
 /** Run every objective against the current session and return the boolean
  *  list — same shape the UI panel renders. Lets a single assertion cover
  *  "all six pass" without coupling to objective text. */
@@ -187,5 +197,31 @@ describe('Lab 11 — full solution', () => {
   it('all 6 objectives pass after the full solution sequence', () => {
     const ls = applyFullSolution(initLabSession(lab11NatPat));
     expect(checkAll(ls)).toEqual([true, true, true, true, true, true]);
+  });
+});
+
+describe('Lab 11 — show running-config renders NAT config', () => {
+  it('full show running-config includes both interface NAT roles and the global overload statement', () => {
+    const ls = applyFullSolution(initLabSession(lab11NatPat));
+    const text = showOn(ls, 'R1', 'show running-config');
+    expect(text).toContain('ip nat inside');
+    expect(text).toContain('ip nat outside');
+    expect(text).toContain(
+      'ip nat inside source list 1 interface GigabitEthernet0/1 overload',
+    );
+  });
+
+  it('show running-config interface Gi0/0 (inside) includes ip nat inside', () => {
+    const ls = applyFullSolution(initLabSession(lab11NatPat));
+    const text = showOn(ls, 'R1', 'show running-config interface Gi0/0');
+    expect(text).toContain('ip nat inside');
+    expect(text).not.toContain('ip nat outside');
+  });
+
+  it('show running-config interface Gi0/1 (outside) includes ip nat outside', () => {
+    const ls = applyFullSolution(initLabSession(lab11NatPat));
+    const text = showOn(ls, 'R1', 'show running-config interface Gi0/1');
+    expect(text).toContain('ip nat outside');
+    expect(text).not.toContain('ip nat inside');
   });
 });
