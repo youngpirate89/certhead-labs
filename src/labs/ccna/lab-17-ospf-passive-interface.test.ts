@@ -106,7 +106,7 @@ describe('Lab 17 — passive-interface configuration', () => {
   });
 
   it('show ip ospf renders the passive interface block after marking', () => {
-    let lab = runOn(fresh(), 'R1', PASSIVE_R1);
+    const lab = runOn(fresh(), 'R1', PASSIVE_R1);
     const { output } = applyToDevice(setActive(lab, 'R1'), 'R1', 'show ip ospf');
     const text = output.map((o) => o.text).join('\n');
     expect(text).toMatch(/Passive Interface\(s\):/);
@@ -114,7 +114,7 @@ describe('Lab 17 — passive-interface configuration', () => {
   });
 
   it('show running-config on R1 includes the router ospf 1 + passive-interface lines', () => {
-    let lab = runOn(fresh(), 'R1', PASSIVE_R1);
+    const lab = runOn(fresh(), 'R1', PASSIVE_R1);
     const { output } = applyToDevice(setActive(lab, 'R1'), 'R1', 'show running-config');
     const text = output.map((o) => o.text).join('\n');
     expect(text).toMatch(/router ospf 1/);

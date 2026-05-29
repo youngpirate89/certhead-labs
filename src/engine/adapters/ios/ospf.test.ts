@@ -682,7 +682,7 @@ describe('OSPF — show ip ospf neighbor output', () => {
     ]);
     const { lastOutput } = runOnWithOutput(ls, 'R1', ['enable', 'show ip ospf neighbor']);
     expect(lastOutput).toMatch(/Neighbor ID\s+Pri\s+State\s+Dead Time\s+Address\s+Interface/);
-    expect(lastOutput).toMatch(/FULL\/  -/);
+    expect(lastOutput).toMatch(/FULL\/ {2}-/);
     expect(lastOutput).toMatch(/10\.0\.0\.2\s+GigabitEthernet0\/2/);
   });
 
