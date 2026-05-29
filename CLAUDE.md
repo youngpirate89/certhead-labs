@@ -89,7 +89,7 @@ Status: Engine has generalized well past the original troubleshooting-pilot scop
 - **Solution disclosure:** every catalog lab ships a `solution: LabSolution` block. `LabSolution = { steps: SolutionStep[] }`, step = `{ device, commands, note? }`. Collapsible "See Solution" panel under the hints — closed by default, muted text + chevron, no warning copy. **Solution field is now standard on the Lab type — every new lab requires a solution block, authored at the same time as the lab (not added retroactively).** The type stays optional so pilot/throwaway labs in `_pilots/` can omit it; catalog membership implies a solution. Command block renders one `<div>` per command (no `.join('\n')` into a single string) with `whitespace-pre` to preserve leading indents — learners can read the block top to bottom and type each line exactly as shown.
 - **Extended ACL grammar:** hardened across the 4 src×dst combinations (`any|host <ip>|<ip> <wc>` for both source and destination) plus optional `eq <port|name>`. `show running-config interface <iface>` now mirrors the full `show running-config` and includes `ip access-group ... in|out` lines so the single-iface form doesn't silently drop bindings.
 
-841 tests passing, tsc clean. Free lab unchanged and live.
+853 tests passing, tsc clean. Free lab unchanged and live.
 
 **CertHead state (drives the next move):** Live exams: CCNA, N10-009, SY0-701. Paid subscribers: 0 — pre-launch, building catalog depth in private is the +4–12 week phase, fully in-bounds. Nothing deployed beyond the free lab; catalog registry, `/embed`, custom domain, and the landing-page link to `/try` all still gated on the ≥300-paid bar.
 
