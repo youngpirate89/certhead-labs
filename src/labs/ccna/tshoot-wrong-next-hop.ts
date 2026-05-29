@@ -89,12 +89,22 @@ export const tshootWrongNextHop: Lab = {
       check: (_state, _history, session) => {
         const r2 = session.devices.R2;
         if (r2?.kind !== 'router') return false;
-        return r2.staticRoutes.some(
+        // Outcome, not gesture: the correct return route must EXIST and the
+        // seeded wrong static (next-hop outside the /30) must be GONE. Adding
+        // the right route while leaving .99 in place is not a fixed config.
+        const hasCorrect = r2.staticRoutes.some(
           (r) =>
             r.prefix === '192.168.1.0' &&
             r.mask === '255.255.255.0' &&
             r.nextHop === '192.168.12.1',
         );
+        const wrongStillPresent = r2.staticRoutes.some(
+          (r) =>
+            r.prefix === '192.168.1.0' &&
+            r.mask === '255.255.255.0' &&
+            r.nextHop === '192.168.12.99',
+        );
+        return hasCorrect && !wrongStillPresent;
       },
     },
     {

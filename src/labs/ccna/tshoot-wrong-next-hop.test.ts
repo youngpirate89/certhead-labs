@@ -114,6 +114,46 @@ describe('tshoot-wrong-next-hop — bad static next-hop on R2', () => {
     expect(g.objectives.find((o) => o.id === 'reach-pc-a-to-pc-b')?.met).toBe(true);
   });
 
+  it('ADVERSARIAL: adding the correct route but leaving the wrong .99 in place does NOT credit fix-r2-next-hop', () => {
+    // Reproduces the gesture-vs-outcome bug: a learner who adds the right
+    // static without removing the seeded wrong one has not fixed the config.
+    let ls = initLabSession(lab);
+    ls = configure(ls, 'R2', [
+      'enable',
+      'configure terminal',
+      'ip route 192.168.1.0 255.255.255.0 192.168.12.1',
+    ]);
+
+    const r2 = ls.devices.R2;
+    if (r2.kind !== 'router') throw new Error('shape');
+    // Both routes coexist — correct + the stale wrong one.
+    expect(
+      r2.staticRoutes.some((r) => r.nextHop === '192.168.12.1'),
+    ).toBe(true);
+    expect(
+      r2.staticRoutes.some((r) => r.nextHop === '192.168.12.99'),
+    ).toBe(true);
+
+    const g = grade(lab, ls);
+    expect(g.objectives.find((o) => o.id === 'fix-r2-next-hop')?.met).toBe(false);
+  });
+
+  it('removing the wrong route WITHOUT adding the correct one does NOT credit fix-r2-next-hop', () => {
+    let ls = initLabSession(lab);
+    ls = configure(ls, 'R2', [
+      'enable',
+      'configure terminal',
+      'no ip route 192.168.1.0 255.255.255.0 192.168.12.99',
+    ]);
+
+    const r2 = ls.devices.R2;
+    if (r2.kind !== 'router') throw new Error('shape');
+    expect(r2.staticRoutes).toHaveLength(0);
+
+    const g = grade(lab, ls);
+    expect(g.objectives.find((o) => o.id === 'fix-r2-next-hop')?.met).toBe(false);
+  });
+
   it('a FAILED ping (still pointing at .99) does not satisfy the reach objective', () => {
     let ls = initLabSession(lab);
     ls = configure(ls, 'PC-A', ['ping 192.168.2.10']);
