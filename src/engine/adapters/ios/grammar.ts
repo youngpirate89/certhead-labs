@@ -390,6 +390,23 @@ const configIfMode: CommandNode = {
               help: 'Interval before declaring a silent neighbor down (seconds)',
               argument: arg('seconds', done('Apply dead interval')),
             },
+            authentication: {
+              help: 'Enable OSPF authentication on this interface',
+              children: {
+                'message-digest': done('Use MD5 (message-digest) authentication'),
+              },
+            },
+            'message-digest-key': {
+              help: 'Configure an OSPF MD5 authentication key',
+              argument: arg('key-id', {
+                children: {
+                  md5: {
+                    help: 'Use MD5 hashing for the key',
+                    argument: arg('key', done('Apply the MD5 key')),
+                  },
+                },
+              }),
+            },
           },
         },
       },
@@ -428,6 +445,11 @@ const configIfMode: CommandNode = {
               children: {
                 'hello-interval': done('Reset hello interval to default'),
                 'dead-interval': done('Reset dead interval to default'),
+                authentication: done('Disable OSPF authentication on this interface'),
+                'message-digest-key': {
+                  help: 'Remove an OSPF MD5 authentication key',
+                  argument: arg('key-id', done('Remove the MD5 key')),
+                },
               },
             },
           },

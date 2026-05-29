@@ -34,6 +34,13 @@ interface IfaceView {
    *  protocol default when unset. Compared end-to-end for adjacency. */
   readonly helloInterval: number;
   readonly deadInterval: number;
+  /** OSPF MD5 authentication state (Lab 20). `authMessageDigest` is whether
+   *  `ip ospf authentication message-digest` is set; `md5KeyId`/`md5Key` are
+   *  the configured key, or undefined when none. Compared end-to-end: both
+   *  ends must agree on auth-enabled, and when enabled share key-id + key. */
+  readonly authMessageDigest: boolean;
+  readonly md5KeyId: number | undefined;
+  readonly md5Key: string | undefined;
 }
 
 /**
@@ -87,6 +94,19 @@ export function recomputeOspf(
     // compare the effective (configured-or-default) values statically.
     if (a.helloInterval !== b.helloInterval) continue;
     if (a.deadInterval !== b.deadInterval) continue;
+    // MD5 (message-digest) authentication must agree end-to-end (Lab 20). IOS
+    // drops authenticated hellos that fail the digest check, so a mismatch
+    // never forms the adjacency. Both ends must agree on whether auth is
+    // enabled; when both have it, the key-id AND key string must match. This
+    // covers all three failure modes — auth on one side only, wrong key
+    // string, wrong key-id. [CONFIRMED-BY-SOURCE: RFC 2328 App. D
+    // (Authentication); Cisco IOS "Configuring OSPF" — neighbors must share
+    // the same key-id and key for MD5/cryptographic authentication.]
+    if (a.authMessageDigest !== b.authMessageDigest) continue;
+    if (a.authMessageDigest && b.authMessageDigest) {
+      if (a.md5KeyId !== b.md5KeyId) continue;
+      if (a.md5Key !== b.md5Key) continue;
+    }
 
     const aRid = aSession.device.ospf.routerId ?? a.ip;
     const bRid = bSession.device.ospf.routerId ?? b.ip;
@@ -186,6 +206,9 @@ function resolveEnd(
     adminUp: i.adminUp,
     helloInterval: i.ospfHelloInterval ?? OSPF_DEFAULT_HELLO_INTERVAL,
     deadInterval: i.ospfDeadInterval ?? OSPF_DEFAULT_DEAD_INTERVAL,
+    authMessageDigest: i.ospfAuthMessageDigest === true,
+    md5KeyId: i.ospfMd5KeyId,
+    md5Key: i.ospfMd5Key,
   };
 }
 

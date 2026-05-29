@@ -426,6 +426,12 @@ function dispatch(
       if (command[1] === 'ospf') {
         if (command[2] === 'hello-interval') return setOspfTimer(s, 'hello', args.seconds, ec);
         if (command[2] === 'dead-interval') return setOspfTimer(s, 'dead', args.seconds, ec);
+        if (command[2] === 'authentication' && command[3] === 'message-digest') {
+          return setOspfAuthMessageDigest(s);
+        }
+        if (command[2] === 'message-digest-key') {
+          return setOspfMd5Key(s, args['key-id'], args.key, ec);
+        }
       }
       return { session: s, output: err('% Incomplete command.') };
 
@@ -799,6 +805,8 @@ function negate(
       if (command[2] === 'ospf') {
         if (command[3] === 'hello-interval') return clearOspfTimer(s, 'hello');
         if (command[3] === 'dead-interval') return clearOspfTimer(s, 'dead');
+        if (command[3] === 'authentication') return clearOspfAuthMessageDigest(s);
+        if (command[3] === 'message-digest-key') return clearOspfMd5Key(s);
       }
       // `no ip address`:
       //   - in config-subif → clear the active subinterface's IP+mask
@@ -1395,6 +1403,56 @@ function clearOspfTimer(s: Session, which: 'hello' | 'dead'): ApplyResult {
   const iface = s.device.interfaces[s.currentInterface];
   if (which === 'hello') iface.ospfHelloInterval = undefined;
   else iface.ospfDeadInterval = undefined;
+  return { session: s, output: [] };
+}
+
+// ---------- OSPF interface authentication: ip ospf authentication
+//            message-digest + ip ospf message-digest-key <id> md5 <key>
+//            (config-if) — Lab 20 ----------
+
+/** Enable MD5 (message-digest) authentication on the active interface
+ *  (`ip ospf authentication message-digest`). Grammar exposes this only in
+ *  config-if; guard defensively like the timer handlers. */
+function setOspfAuthMessageDigest(s: Session): ApplyResult {
+  if (!s.currentInterface) return { session: s, output: [] };
+  s.device.interfaces[s.currentInterface].ospfAuthMessageDigest = true;
+  return { session: s, output: [] };
+}
+
+/** Disable MD5 authentication on the active interface
+ *  (`no ip ospf authentication`) — clears the message-digest flag. The key
+ *  itself is left intact, matching IOS (the `message-digest-key` line and the
+ *  `authentication` line are independent). */
+function clearOspfAuthMessageDigest(s: Session): ApplyResult {
+  if (!s.currentInterface) return { session: s, output: [] };
+  s.device.interfaces[s.currentInterface].ospfAuthMessageDigest = undefined;
+  return { session: s, output: [] };
+}
+
+/** Set the active interface's OSPF MD5 key (`ip ospf message-digest-key
+ *  <key-id> md5 <key>`). key-id is 1..255 (the IOS range); the key string is
+ *  taken verbatim. One key per interface is modeled — a second
+ *  message-digest-key replaces the first. */
+function setOspfMd5Key(s: Session, rawKeyId: string, key: string, ec: ErrCtx): ApplyResult {
+  const keyId = Number(rawKeyId);
+  if (!Number.isInteger(keyId) || keyId < 1 || keyId > 255) {
+    return { session: s, output: badInput(ec, 'key-id') };
+  }
+  if (!s.currentInterface) return { session: s, output: [] };
+  const iface = s.device.interfaces[s.currentInterface];
+  iface.ospfMd5KeyId = keyId;
+  iface.ospfMd5Key = key;
+  return { session: s, output: [] };
+}
+
+/** Remove the active interface's OSPF MD5 key (`no ip ospf message-digest-key
+ *  <key-id>`). IOS keys the removal by key-id; with a single modeled key we
+ *  clear it unconditionally (the grammar still requires the key-id token). */
+function clearOspfMd5Key(s: Session): ApplyResult {
+  if (!s.currentInterface) return { session: s, output: [] };
+  const iface = s.device.interfaces[s.currentInterface];
+  iface.ospfMd5KeyId = undefined;
+  iface.ospfMd5Key = undefined;
   return { session: s, output: [] };
 }
 
@@ -2056,6 +2114,14 @@ function showIpOspfInterface(s: Session, ifaceToken?: string): string[] {
     lines.push(
       `  Timer intervals configured, Hello ${hello}, Dead ${dead}, Wait ${dead}, Retransmit 5`,
     );
+    // Auth state — the second diagnostic surface for Lab 20. IOS prints the
+    // message-digest banner plus the youngest key id when MD5 auth is enabled.
+    if (i.ospfAuthMessageDigest) {
+      lines.push('  Message digest authentication enabled');
+      if (i.ospfMd5KeyId !== undefined) {
+        lines.push(`    Youngest key id is ${i.ospfMd5KeyId}`);
+      }
+    }
   }
   // OSPF configured but no interface is covered by a network statement.
   if (lines.length === 0) return ['% OSPF instance not configured.'];
@@ -2282,6 +2348,10 @@ function showRunningConfigInterface(s: Session, ifaceToken: string): ApplyResult
   else if (i.natRole === 'outside') lines.push(' ip nat outside');
   if (i.ospfHelloInterval !== undefined) lines.push(` ip ospf hello-interval ${i.ospfHelloInterval}`);
   if (i.ospfDeadInterval !== undefined) lines.push(` ip ospf dead-interval ${i.ospfDeadInterval}`);
+  if (i.ospfMd5KeyId !== undefined && i.ospfMd5Key !== undefined) {
+    lines.push(` ip ospf message-digest-key ${i.ospfMd5KeyId} md5 ${i.ospfMd5Key}`);
+  }
+  if (i.ospfAuthMessageDigest) lines.push(' ip ospf authentication message-digest');
   if (!i.adminUp) lines.push(' shutdown');
   lines.push('!');
   return { session: s, output: out(...lines) };
@@ -2319,6 +2389,10 @@ function showRunningConfig(s: Session): string[] {
     else if (i.natRole === 'outside') lines.push(' ip nat outside');
     if (i.ospfHelloInterval !== undefined) lines.push(` ip ospf hello-interval ${i.ospfHelloInterval}`);
     if (i.ospfDeadInterval !== undefined) lines.push(` ip ospf dead-interval ${i.ospfDeadInterval}`);
+    if (i.ospfMd5KeyId !== undefined && i.ospfMd5Key !== undefined) {
+      lines.push(` ip ospf message-digest-key ${i.ospfMd5KeyId} md5 ${i.ospfMd5Key}`);
+    }
+    if (i.ospfAuthMessageDigest) lines.push(' ip ospf authentication message-digest');
     if (!i.adminUp) lines.push(' shutdown');
     lines.push('!');
     const subs = subsByParent.get(i.id);

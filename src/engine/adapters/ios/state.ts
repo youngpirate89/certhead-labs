@@ -203,6 +203,21 @@ export interface InterfaceState {
    *  static config values, not a simulated timer. */
   ospfHelloInterval?: number;
   ospfDeadInterval?: number;
+  /** OSPF interface authentication (Lab 20). `ip ospf authentication
+   *  message-digest` sets `ospfAuthMessageDigest = true`; `ip ospf
+   *  message-digest-key <key-id> md5 <key>` sets `ospfMd5KeyId` + `ospfMd5Key`.
+   *  recomputeOspf compares both ends: an adjacency forms only when BOTH ends
+   *  agree on whether message-digest auth is enabled AND, when it is, share the
+   *  same key-id and key string. Any mismatch (auth on one side only, wrong key
+   *  string, or wrong key-id) suppresses neighbor formation, matching IOS,
+   *  where authenticated hellos that fail the digest check are dropped (RFC 2328
+   *  App. D; Cisco IOS "Configuring OSPF"). Undefined = no auth (the default;
+   *  plain/null authentication, type 0). One key per interface is modeled — the
+   *  CCNA single-key case; IOS key rollover with multiple key-ids is out of
+   *  scope. */
+  ospfAuthMessageDigest?: boolean;
+  ospfMd5KeyId?: number;
+  ospfMd5Key?: string;
 }
 
 /** OSPF interface timer defaults (seconds), applied when an interface carries
