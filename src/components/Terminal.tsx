@@ -41,6 +41,7 @@ interface TerminalProps {
 export function Terminal({ term }: TerminalProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const settingsButtonRef = useRef<HTMLButtonElement>(null);
   const [theme, setTheme] = useState<TerminalTheme>(() => loadTheme());
   const [showThemePanel, setShowThemePanel] = useState(false);
 
@@ -110,6 +111,7 @@ export function Terminal({ term }: TerminalProps) {
         onClick={(e) => e.stopPropagation()}
       >
         <button
+          ref={settingsButtonRef}
           type="button"
           aria-label="Terminal theme settings"
           aria-expanded={showThemePanel}
@@ -148,6 +150,7 @@ export function Terminal({ term }: TerminalProps) {
           theme={theme}
           onChange={handleThemeChange}
           onClose={() => setShowThemePanel(false)}
+          toggleRef={settingsButtonRef}
         />
       )}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3">

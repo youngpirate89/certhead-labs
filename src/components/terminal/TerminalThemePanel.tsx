@@ -10,22 +10,46 @@ interface TerminalThemePanelProps {
   theme: TerminalTheme;
   onChange: (theme: TerminalTheme) => void;
   onClose: () => void;
+  /** The gear/Settings toggle that opens this panel. Clicks on it are excluded
+   *  from the outside-click close so the toggle can own its own open/close — if
+   *  this handler also fired on the toggle, the panel would close-then-reopen
+   *  and never dismiss. */
+  toggleRef?: React.RefObject<HTMLElement | null>;
 }
 
-export default function TerminalThemePanel({ theme, onChange, onClose }: TerminalThemePanelProps) {
+export default function TerminalThemePanel({
+  theme,
+  onChange,
+  onClose,
+  toggleRef,
+}: TerminalThemePanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    function handleMouseDown(e: MouseEvent) {
-      const panel = panelRef.current;
-      if (!panel) return;
-      if (e.target instanceof Node && !panel.contains(e.target)) {
+    // Capture phase: the topology canvas (React Flow) stops propagation on its
+    // own pointer handlers, so a bubble-phase document listener never sees a
+    // click that lands on the canvas. Listening in the capture phase guarantees
+    // the outside-click reaches us first, wherever the click lands.
+    function handlePointerDown(e: MouseEvent) {
+      const target = e.target;
+      if (!(target instanceof Node)) return;
+      if (panelRef.current?.contains(target)) return;
+      if (toggleRef?.current?.contains(target)) return;
+      onClose();
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
         onClose();
       }
     }
-    document.addEventListener('mousedown', handleMouseDown);
-    return () => document.removeEventListener('mousedown', handleMouseDown);
-  }, [onClose]);
+    document.addEventListener('mousedown', handlePointerDown, true);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown, true);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onClose, toggleRef]);
 
   const baseTextStyle: React.CSSProperties = {
     color: '#94a3b8',
@@ -45,8 +69,12 @@ export default function TerminalThemePanel({ theme, onChange, onClose }: Termina
       role="dialog"
       aria-label="Terminal theme settings"
       style={{
+        // Sits BELOW the Settings pill (which lives in the ~30px header row),
+        // not over it — overlapping the toggle was the original trap: the panel
+        // covered its own gear, so a re-click landed on the panel, not the
+        // button, and there was no way to dismiss.
         position: 'absolute',
-        top: '8px',
+        top: '40px',
         right: '8px',
         zIndex: 50,
         width: '220px',
@@ -57,8 +85,47 @@ export default function TerminalThemePanel({ theme, onChange, onClose }: Termina
         ...baseTextStyle,
       }}
     >
-      {/* Font size */}
-      <div>
+      <button
+        type="button"
+        aria-label="Close settings"
+        onClick={onClose}
+        style={{
+          position: 'absolute',
+          top: '6px',
+          right: '6px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '20px',
+          height: '20px',
+          padding: 0,
+          border: 'none',
+          borderRadius: '4px',
+          background: 'transparent',
+          color: '#94a3b8',
+          cursor: 'pointer',
+          lineHeight: 1,
+        }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.background = 'rgba(148,163,184,0.12)';
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+        }}
+      >
+        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+          <path
+            d="M1 1l8 8M9 1l-8 8"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          />
+        </svg>
+      </button>
+
+      {/* Font size — top margin clears the close (×) button's strip so the
+          font-size value can't slide under it. */}
+      <div style={{ marginTop: '16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
           <label htmlFor="cl-term-font-size">Font size</label>
           <span>{theme.fontSize}px</span>
