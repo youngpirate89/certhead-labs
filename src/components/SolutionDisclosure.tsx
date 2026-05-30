@@ -44,21 +44,22 @@ export function SolutionDisclosure({ steps }: Props) {
               <div className="mb-0.5 font-mono text-[10px] font-medium uppercase tracking-wider text-terminal-dim">
                 {step.device}
               </div>
-              <div className="overflow-x-auto rounded bg-terminal-bg px-2 py-1.5 font-mono text-[11px] leading-relaxed text-terminal-prompt">
+              <div className="rounded bg-terminal-bg px-2 py-1.5 font-mono text-[11px] leading-relaxed text-terminal-prompt">
                 {step.commands.map((cmd, j) => (
                   <div
                     key={j}
-                    // One command renders as exactly one visual line — always.
-                    // `whitespace-pre` preserves leading-space indents (mode
-                    // hierarchy, e.g. ` deny icmp ...` inside an ACL stanza)
-                    // and never wraps, so a long command's trailing argument
-                    // (a next-hop or /30 mask) can't drop to a second line and
-                    // masquerade as its own command. `w-max` sizes the line to
-                    // its content, letting the block scroll horizontally (the
-                    // `overflow-x-auto` above) when a command is wider than the
-                    // rail rather than wrapping. Selecting a line still copies
-                    // it as one correct command.
-                    className="w-max whitespace-pre"
+                    // `whitespace-pre-wrap` preserves the leading-space indents
+                    // that signal mode hierarchy (e.g. ` deny icmp ...` inside an
+                    // ACL stanza) AND wraps long commands instead of clipping
+                    // them behind a per-line horizontal scrollbar — a truncated
+                    // solution (`...md5 CISCO1` hiding the key value, or
+                    // `...GigabitEt` clipping the interface) defeats the panel's
+                    // whole purpose. `break-words` lets an over-long token wrap
+                    // rather than overflow the rail. Because no newline is ever
+                    // inserted into the text, the command stays one logical line
+                    // in the DOM, so selecting it copies the full command
+                    // (key value and all) as a single correct line.
+                    className="whitespace-pre-wrap break-words"
                   >
                     {cmd}
                   </div>
