@@ -163,6 +163,26 @@ describe('pcAdapter — commands', () => {
     expect(text).toMatch(/Connecting to 192\.168\.1\.1/);
   });
 
+  it('renders JSON device inventory from the scoped automation API endpoint', () => {
+    const s = { ...pcAdapter.buildDevice(SPEC_PRECONFIGURED), nicUp: true };
+    const result = pcAdapter.applyCommand(s, 'curl http://api.certhead.local/devices');
+    const text = result.output.map((o) => o.text).join('\n');
+
+    expect(text).toMatch(/"devices"/);
+    expect(text).toMatch(/"id": "PC-A"/);
+    expect(result.session.lastApiInventory).toBeGreaterThan(0);
+  });
+
+  it('renders JSON device detail from the scoped automation API endpoint', () => {
+    const s = { ...pcAdapter.buildDevice(SPEC_PRECONFIGURED), nicUp: true };
+    const result = pcAdapter.applyCommand(s, 'Invoke-RestMethod -Uri http://api.certhead.local/devices/PC-A');
+    const text = result.output.map((o) => o.text).join('\n');
+
+    expect(text).toMatch(/"id": "PC-A"/);
+    expect(text).toMatch(/"interfaces"/);
+    expect(result.session.lastApiDeviceDetail.get('PC-A')).toBeGreaterThan(0);
+  });
+
   it('does not mutate the input session', () => {
     const s = pcAdapter.buildDevice(SPEC);
     const before = structuredClone(s);

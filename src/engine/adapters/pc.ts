@@ -132,6 +132,12 @@ export interface PcSession {
    *  `lastShowDhcpBinding` stamp. Cleared by `record:false` so seeded runs
    *  cannot pre-satisfy a verify gate. */
   lastIpconfig: number;
+  /** Stamped when the learner queries the read-only automation inventory API. */
+  lastApiInventory: number;
+  /** Stamped per device when the learner queries `/devices/<id>`. */
+  readonly lastApiDeviceDetail: Map<string, number>;
+  /** Stamped per device when the learner queries `/devices/<id>/interfaces`. */
+  readonly lastApiInterfaces: Map<string, number>;
   /** Scoped WLC-like command state for CCNA wireless WLAN-to-VLAN labs.
    *  Present only when the lab models a Wireless LAN Controller using the
    *  existing PC-kind adapter shell; normal workstations leave it undefined. */
@@ -174,6 +180,14 @@ const pcGrammar: CommandNode = {
     ssh: {
       help: 'Connect to a network device over SSH',
       argument: { name: 'target', node: { terminal: true, help: 'Connect' } },
+    },
+    curl: {
+      help: 'Query the scoped read-only automation API',
+      argument: { name: 'url', node: { terminal: true, help: 'GET URL' } },
+    },
+    'invoke-restmethod': {
+      help: 'Query the scoped read-only automation API',
+      argument: { name: '-Uri', node: { argument: { name: 'url', node: { terminal: true, help: 'GET URL' } } } },
     },
     config: { help: 'Wireless controller configuration commands', terminal: true },
     show: { help: 'Wireless controller show commands', terminal: true },
@@ -218,6 +232,8 @@ const COMMANDS: readonly PcCommand[] = [
   { name: 'ping',     kind: 'working', handler: handlePing },
   { name: 'tracert',  aliases: ['traceroute'], kind: 'working', handler: handleTracert },
   { name: 'ssh',      kind: 'working', handler: handleSsh },
+  { name: 'curl',     kind: 'working', handler: handleAutomationApi },
+  { name: 'invoke-restmethod', aliases: ['irm'], kind: 'working', handler: handleAutomationApi },
   { name: 'config',   kind: 'working', handler: handleWlcConfig },
   { name: 'show',     kind: 'working', handler: handleWlcShow },
   { name: 'ip',       kind: 'working', handler: handleIp },
@@ -323,6 +339,9 @@ export const pcAdapter: DeviceAdapter<PcSession> = {
       lastPing: null,
       lastSsh: null,
       lastIpconfig: 0,
+      lastApiInventory: 0,
+      lastApiDeviceDetail: new Map(),
+      lastApiInterfaces: new Map(),
       wirelessController: isWirelessControllerPlatform(spec.platform)
         ? { interfaces: new Map(), wlans: new Map(), lastShowWlanSummary: 0, lastShowWlanDetail: new Map() }
         : undefined,
@@ -460,6 +479,130 @@ function handleGateway(
   if (!isValidIpv4(ip)) return { session: s, output: errLine(`% Invalid IP address: ${ip}`) };
   s.gateway = ip;
   return { session: s, output: [] };
+}
+
+function handleAutomationApi(
+  s: PcSession,
+  args: readonly string[],
+  ctx: AdapterContext | undefined,
+  opts: ApplyOptions | undefined,
+): ApplyResult<PcSession> {
+  const url = parseAutomationUrl(args);
+  if (!url) {
+    return {
+      session: s,
+      output: errLine('Usage: curl http://api.certhead.local/devices or Invoke-RestMethod -Uri http://api.certhead.local/devices/<device-id>'),
+    };
+  }
+  if (!s.nicUp) {
+    return { session: s, output: [{ kind: 'error', text: 'curl: (6) Could not resolve host: api.certhead.local' }] };
+  }
+
+  const parts = url.pathname.split('/').filter(Boolean);
+  if (url.hostname.toLowerCase() !== 'api.certhead.local' || parts[0] !== 'devices') {
+    return { session: s, output: [{ kind: 'error', text: `404 Not Found: ${url.toString()}` }] };
+  }
+
+  const devices = ctx?.lab ? Object.values(ctx.lab.devices) : [s];
+  if (parts.length === 1) {
+    if (opts?.record !== false) s.lastApiInventory = nextEngineSeq();
+    return {
+      session: s,
+      output: jsonLines({
+        devices: devices.map((device) => ({
+          id: deviceId(device),
+          kind: device.kind,
+          platform: devicePlatform(device),
+          interfaceCount: deviceInterfaces(device).length,
+        })),
+      }),
+    };
+  }
+
+  const targetId = decodeURIComponent(parts[1]);
+  const target = devices.find((device) => deviceId(device).toLowerCase() === targetId.toLowerCase());
+  if (!target) return { session: s, output: [{ kind: 'error', text: `404 Not Found: device ${targetId}` }] };
+
+  if (parts.length === 2) {
+    if (opts?.record !== false) s.lastApiDeviceDetail.set(deviceId(target), nextEngineSeq());
+    return { session: s, output: jsonLines(deviceFact(target)) };
+  }
+  if (parts.length === 3 && parts[2] === 'interfaces') {
+    if (opts?.record !== false) s.lastApiInterfaces.set(deviceId(target), nextEngineSeq());
+    return { session: s, output: jsonLines({ deviceId: deviceId(target), interfaces: deviceInterfaces(target) }) };
+  }
+  return { session: s, output: [{ kind: 'error', text: `404 Not Found: ${url.pathname}` }] };
+}
+
+function parseAutomationUrl(args: readonly string[]): URL | null {
+  let candidate: string | undefined;
+  const uriIdx = args.findIndex((arg) => arg.toLowerCase() === '-uri');
+  if (uriIdx !== -1) candidate = args[uriIdx + 1];
+  candidate ??= args.find((arg) => /^https?:\/\//i.test(arg));
+  if (!candidate) return null;
+  try {
+    return new URL(candidate);
+  } catch {
+    return null;
+  }
+}
+
+function jsonLines(value: unknown): CommandOutput[] {
+  return JSON.stringify(value, null, 2).split('\n').map((text) => ({ kind: 'output' as const, text }));
+}
+
+function deviceId(device: DeviceSession): string {
+  return device.kind === 'pc' ? device.id : device.device.id;
+}
+
+function devicePlatform(device: DeviceSession): string {
+  return device.kind === 'pc' ? device.platform : device.device.platform;
+}
+
+function deviceFact(device: DeviceSession): Record<string, unknown> {
+  return {
+    id: deviceId(device),
+    kind: device.kind,
+    platform: devicePlatform(device),
+    interfaces: deviceInterfaces(device),
+  };
+}
+
+function deviceInterfaces(device: DeviceSession): Record<string, unknown>[] {
+  if (device.kind === 'pc') {
+    return [
+      {
+        name: device.nic,
+        status: device.nicUp ? (device.ip ? 'up' : 'no-ip') : 'admin-down',
+        ipv4: device.ip,
+        mask: device.mask,
+        gateway: device.gateway,
+      },
+    ];
+  }
+  if (device.kind === 'switch') {
+    return Object.values(device.device.switchports).map((port) => ({
+      name: port.id,
+      mode: port.mode,
+      accessVlan: port.accessVlan,
+      status: port.protocolUp ? 'up' : 'down',
+    }));
+  }
+  return [
+    ...Object.values(device.device.interfaces).map((iface) => ({
+      name: iface.id,
+      status: iface.adminUp ? (iface.ip ? 'up' : 'no-ip') : 'admin-down',
+      ipv4: iface.ip,
+      mask: iface.mask,
+    })),
+    ...Object.values(device.device.subInterfaces).map((iface) => ({
+      name: iface.id,
+      status: iface.protocolUp ? 'up' : 'down',
+      ipv4: iface.ip,
+      mask: iface.mask,
+      vlan: iface.dot1qVlan,
+    })),
+  ];
 }
 
 function isWirelessControllerPlatform(platform: string): boolean {
