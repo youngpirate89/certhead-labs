@@ -39,6 +39,7 @@ import type {
 import {
   isSubInterfaceId,
   isValidIpv4,
+  isValidIpv6Prefix,
   isValidMask,
   nextEngineSeq,
   routingTable,
@@ -60,6 +61,30 @@ import {
 } from '@/engine/reachability';
 import type { DeviceSession, LabSession } from '@/engine/lab-session';
 
+export interface WirelessDynamicInterface {
+  readonly name: string;
+  readonly vlanId: number;
+  readonly configuredAt: number;
+}
+
+export interface WirelessLan {
+  readonly id: number;
+  readonly profile: string;
+  readonly ssid: string;
+  readonly interfaceName: string | null;
+  readonly enabled: boolean;
+  readonly configuredAt: number;
+  readonly mappedAt: number;
+  readonly enabledAt: number;
+}
+
+export interface WirelessControllerState {
+  readonly interfaces: Map<string, WirelessDynamicInterface>;
+  readonly wlans: Map<number, WirelessLan>;
+  lastShowWlanSummary: number;
+  readonly lastShowWlanDetail: Map<number, number>;
+}
+
 export interface PcSession {
   readonly kind: 'pc';
   readonly id: string;
@@ -73,6 +98,10 @@ export interface PcSession {
   ip: string | null;
   mask: string | null;
   gateway: string | null;
+  /** IPv6 unicast address/prefix configured on the PC, e.g. 2001:db8::10/64. */
+  ipv6: string | null;
+  /** IPv6 default gateway for the PC, normally the router interface address. */
+  gateway6: string | null;
   /** True when the PC is a DHCP client — its `ip`/`mask`/`gateway` come from
    *  the connected router's matching DHCP binding, not the lab's static spec.
    *  Lab-session DHCP refresh pass writes those fields whenever a binding
@@ -82,7 +111,7 @@ export interface PcSession {
    *  topology canvas's icon pick via DeviceTopologyView.deviceClass. Today
    *  only 'server' has a distinct icon; 'workstation' is the default and is
    *  equivalent to leaving the field unset. */
-  readonly deviceClass?: 'workstation' | 'server';
+  readonly deviceClass?: 'workstation' | 'server' | 'access-point' | 'wireless-client';
   /** True when the PC's NIC is cabled to an up neighbor interface. Refreshed
    *  by the LabSession layer whenever device state changes. */
   nicUp: boolean;
@@ -95,12 +124,18 @@ export interface PcSession {
    *  state alone auto-completes the instant routes are correct, which
    *  defeats the troubleshooting pedagogy. */
   lastPing: { target: string; ok: boolean } | null;
+  /** Outcome of the most recent SSH command from this PC. */
+  lastSsh: { target: string; user: string; ok: boolean } | null;
   /** Stamped each time the learner runs `ipconfig` on this PC. Verify-style
    *  objectives (Lab 14) compare this against 0 to require the show command
    *  to actually have been run — mirrors `lastPing` for ping and the router
    *  `lastShowDhcpBinding` stamp. Cleared by `record:false` so seeded runs
    *  cannot pre-satisfy a verify gate. */
   lastIpconfig: number;
+  /** Scoped WLC-like command state for CCNA wireless WLAN-to-VLAN labs.
+   *  Present only when the lab models a Wireless LAN Controller using the
+   *  existing PC-kind adapter shell; normal workstations leave it undefined. */
+  wirelessController?: WirelessControllerState;
 }
 
 /**
@@ -120,6 +155,14 @@ const pcGrammar: CommandNode = {
       help: 'Set default gateway',
       argument: { name: 'ip', node: { terminal: true, help: 'Apply' } },
     },
+    ipv6: {
+      help: 'Set IPv6 address/prefix',
+      argument: { name: 'prefix', node: { terminal: true, help: 'Apply' } },
+    },
+    gateway6: {
+      help: 'Set IPv6 default gateway',
+      argument: { name: 'ip', node: { terminal: true, help: 'Apply' } },
+    },
     ping: {
       help: 'Ping an IPv4 destination',
       argument: { name: 'target', node: { terminal: true, help: 'Send ICMP request' } },
@@ -128,6 +171,12 @@ const pcGrammar: CommandNode = {
       help: 'Trace the route to an IPv4 destination',
       argument: { name: 'target', node: { terminal: true, help: 'Trace hops' } },
     },
+    ssh: {
+      help: 'Connect to a network device over SSH',
+      argument: { name: 'target', node: { terminal: true, help: 'Connect' } },
+    },
+    config: { help: 'Wireless controller configuration commands', terminal: true },
+    show: { help: 'Wireless controller show commands', terminal: true },
     traceroute: {
       help: 'Alias of tracert',
       argument: { name: 'target', node: { terminal: true, help: 'Trace hops' } },
@@ -165,11 +214,17 @@ type PcCommand =
 
 const COMMANDS: readonly PcCommand[] = [
   // ---- WORKING tier ----
-  { name: 'ipconfig', kind: 'working', handler: handleIpconfig },
+  { name: 'ipconfig', aliases: ['get-netipconfiguration'], kind: 'working', handler: handleIpconfig },
   { name: 'ping',     kind: 'working', handler: handlePing },
   { name: 'tracert',  aliases: ['traceroute'], kind: 'working', handler: handleTracert },
+  { name: 'ssh',      kind: 'working', handler: handleSsh },
+  { name: 'config',   kind: 'working', handler: handleWlcConfig },
+  { name: 'show',     kind: 'working', handler: handleWlcShow },
   { name: 'ip',       kind: 'working', handler: handleIp },
   { name: 'gateway',  kind: 'working', handler: handleGateway },
+  { name: 'new-netipaddress', kind: 'working', handler: handleNewNetIpAddress },
+  { name: 'ipv6',     kind: 'working', handler: handleIpv6 },
+  { name: 'gateway6', kind: 'working', handler: handleGateway6 },
   { name: 'clear',    kind: 'working', handler: handleClear },
 
   // ---- KNOWN-BUT-REDIRECTED tier (register here, don't implement) ----
@@ -197,13 +252,7 @@ const COMMANDS: readonly PcCommand[] = [
     name: 'telnet',
     kind: 'redirect',
     message:
-      "telnet isn't part of this lab — open a router's console from the topology canvas (click the device) instead of from the PC.",
-  },
-  {
-    name: 'ssh',
-    kind: 'redirect',
-    message:
-      "ssh isn't part of this lab — open a router's console from the topology canvas (click the device) instead of from the PC.",
+      "telnet isn't part of this lab — use `ssh <user>@<ip>` when a device-hardening lab asks you to test remote management.",
   },
   {
     name: 'ftp',
@@ -264,13 +313,19 @@ export const pcAdapter: DeviceAdapter<PcSession> = {
       ip: dhcpMode ? null : spec.pc?.ip ?? null,
       mask: dhcpMode ? null : spec.pc?.mask ?? null,
       gateway: dhcpMode ? null : spec.pc?.gateway ?? null,
+      ipv6: null,
+      gateway6: null,
       dhcpMode,
       deviceClass: spec.deviceClass,
       nicUp: false,
       history: [],
       resolvedHistory: [],
       lastPing: null,
+      lastSsh: null,
       lastIpconfig: 0,
+      wirelessController: isWirelessControllerPlatform(spec.platform)
+        ? { interfaces: new Map(), wlans: new Map(), lastShowWlanSummary: 0, lastShowWlanDetail: new Map() }
+        : undefined,
     };
   },
 
@@ -407,9 +462,298 @@ function handleGateway(
   return { session: s, output: [] };
 }
 
+function isWirelessControllerPlatform(platform: string): boolean {
+  return /wireless\s+lan\s+controller|\bwlc\b/i.test(platform);
+}
+
+function requireWirelessController(s: PcSession): WirelessControllerState | null {
+  return s.wirelessController ?? null;
+}
+
+function handleWlcConfig(
+  s: PcSession,
+  args: readonly string[],
+): ApplyResult<PcSession> {
+  const controller = requireWirelessController(s);
+  if (!controller) return { session: s, output: errLine('% This is a wireless controller command. Select the WLC device to use it.') };
+  if (args.length < 1) return { session: s, output: errLine('% Incomplete command.') };
+
+  const [section, action, ...rest] = args;
+  const sectionKey = section.toLowerCase();
+  const actionKey = action?.toLowerCase();
+
+  if (sectionKey === 'interface' && actionKey === 'create') {
+    const [name, vlanRaw] = rest;
+    const vlanId = Number(vlanRaw);
+    if (!name || !Number.isInteger(vlanId) || vlanId < 1 || vlanId > 4094) {
+      return { session: s, output: errLine('Usage: config interface create <name> <vlan-id>') };
+    }
+    controller.interfaces.set(name, { name, vlanId, configuredAt: nextEngineSeq() });
+    return { session: s, output: [{ kind: 'output', text: `Interface ${name} created and mapped to VLAN ${vlanId}.` }] };
+  }
+
+  if (sectionKey === 'wlan' && actionKey === 'create') {
+    const [idRaw, profile, ssid] = rest;
+    const id = Number(idRaw);
+    if (!Number.isInteger(id) || id < 1 || id > 512 || !profile || !ssid) {
+      return { session: s, output: errLine('Usage: config wlan create <wlan-id> <profile-name> <ssid>') };
+    }
+    controller.wlans.set(id, {
+      id,
+      profile,
+      ssid,
+      interfaceName: null,
+      enabled: false,
+      configuredAt: nextEngineSeq(),
+      mappedAt: 0,
+      enabledAt: 0,
+    });
+    return { session: s, output: [{ kind: 'output', text: `WLAN ${id} (${ssid}) created.` }] };
+  }
+
+  if (sectionKey === 'wlan' && actionKey === 'interface') {
+    const [idRaw, interfaceName] = rest;
+    const id = Number(idRaw);
+    const wlan = controller.wlans.get(id);
+    if (!Number.isInteger(id) || !interfaceName) {
+      return { session: s, output: errLine('Usage: config wlan interface <wlan-id> <interface-name>') };
+    }
+    if (!wlan) return { session: s, output: errLine(`% WLAN ${id} does not exist.`) };
+    if (!controller.interfaces.has(interfaceName)) {
+      return { session: s, output: errLine(`% Interface ${interfaceName} does not exist.`) };
+    }
+    controller.wlans.set(id, { ...wlan, interfaceName, mappedAt: nextEngineSeq() });
+    return { session: s, output: [{ kind: 'output', text: `WLAN ${id} mapped to interface ${interfaceName}.` }] };
+  }
+
+  if (sectionKey === 'wlan' && actionKey === 'enable') {
+    const [idRaw] = rest;
+    const id = Number(idRaw);
+    const wlan = controller.wlans.get(id);
+    if (!Number.isInteger(id)) return { session: s, output: errLine('Usage: config wlan enable <wlan-id>') };
+    if (!wlan) return { session: s, output: errLine(`% WLAN ${id} does not exist.`) };
+    if (!wlan.interfaceName) return { session: s, output: errLine(`% WLAN ${id} must be mapped to an interface before it can be enabled.`) };
+    controller.wlans.set(id, { ...wlan, enabled: true, enabledAt: nextEngineSeq() });
+    return { session: s, output: [{ kind: 'output', text: `WLAN ${id} enabled.` }] };
+  }
+
+  return { session: s, output: errLine('% Unsupported wireless controller config command.') };
+}
+
+function handleWlcShow(
+  s: PcSession,
+  args: readonly string[],
+  _ctx: AdapterContext | undefined,
+  opts: ApplyOptions | undefined,
+): ApplyResult<PcSession> {
+  const controller = requireWirelessController(s);
+  if (!controller) return { session: s, output: errLine('% This is a wireless controller command. Select the WLC device to use it.') };
+  if (args[0]?.toLowerCase() !== 'wlan') return { session: s, output: errLine('% Unsupported show command.') };
+
+  const selector = args[1]?.toLowerCase();
+  if (selector === 'summary') {
+    if (opts?.record !== false) controller.lastShowWlanSummary = nextEngineSeq();
+    return { session: s, output: renderWlanSummary(controller) };
+  }
+
+  const id = Number(args[1]);
+  if (!Number.isInteger(id)) return { session: s, output: errLine('Usage: show wlan summary or show wlan <wlan-id>') };
+  const wlan = controller.wlans.get(id);
+  if (!wlan) return { session: s, output: errLine(`% WLAN ${id} does not exist.`) };
+  if (opts?.record !== false) controller.lastShowWlanDetail.set(id, nextEngineSeq());
+  return { session: s, output: renderWlanDetail(controller, wlan) };
+}
+
+function renderWlanSummary(controller: WirelessControllerState): CommandOutput[] {
+  const lines: CommandOutput[] = [
+    { kind: 'output', text: 'WLAN ID  Profile     SSID        Status    Interface   VLAN' },
+    { kind: 'output', text: '-------  ----------  ----------  --------  ----------  ----' },
+  ];
+  for (const wlan of [...controller.wlans.values()].sort((a, b) => a.id - b.id)) {
+    const iface = wlan.interfaceName ?? '(none)';
+    const vlan = wlan.interfaceName ? controller.interfaces.get(wlan.interfaceName)?.vlanId.toString() ?? '(none)' : '(none)';
+    lines.push({
+      kind: 'output',
+      text: `${wlan.id.toString().padEnd(7)}  ${wlan.profile.padEnd(10)}  ${wlan.ssid.padEnd(10)}  ${(wlan.enabled ? 'Enabled' : 'Disabled').padEnd(8)}  ${iface.padEnd(10)}  ${vlan}`,
+    });
+  }
+  return lines;
+}
+
+function renderWlanDetail(controller: WirelessControllerState, wlan: WirelessLan): CommandOutput[] {
+  const iface = wlan.interfaceName ?? '(none)';
+  const vlan = wlan.interfaceName ? controller.interfaces.get(wlan.interfaceName)?.vlanId.toString() ?? '(none)' : '(none)';
+  return [
+    { kind: 'output', text: `WLAN Identifier        : ${wlan.id}` },
+    { kind: 'output', text: `Profile Name           : ${wlan.profile}` },
+    { kind: 'output', text: `SSID                   : ${wlan.ssid}` },
+    { kind: 'output', text: `Status                 : ${wlan.enabled ? 'Enabled' : 'Disabled'}` },
+    { kind: 'output', text: `Interface              : ${iface}` },
+    { kind: 'output', text: `VLAN                   : ${vlan}` },
+  ];
+}
+
+function handleSsh(
+  s: PcSession,
+  args: readonly string[],
+  ctx: AdapterContext | undefined,
+  opts: ApplyOptions | undefined,
+): ApplyResult<PcSession> {
+  const parsed = parseSshTarget(args);
+  if (!parsed) {
+    return {
+      session: s,
+      output: errLine('usage: ssh <user>@<ip> or ssh <ip> -l <user>'),
+    };
+  }
+  if (!s.nicUp) {
+    if (opts?.record !== false) s.lastSsh = { target: parsed.host, user: parsed.user, ok: false };
+    return {
+      session: s,
+      output: [{ kind: 'error', text: `ssh: connect to host ${parsed.host} port 22: Network is unreachable` }],
+    };
+  }
+  if (!ctx?.lab) {
+    if (opts?.record !== false) s.lastSsh = { target: parsed.host, user: parsed.user, ok: false };
+    return {
+      session: s,
+      output: [
+        { kind: 'output', text: `Connecting to ${parsed.host} as ${parsed.user}...` },
+        { kind: 'system', text: '[sim] SSH requires a lab context for router login policy validation.' },
+        { kind: 'error', text: `ssh: connect to host ${parsed.host} port 22: Connection refused` },
+      ],
+    };
+  }
+
+  const targetRouter = findRouterByInterfaceIp(ctx.lab, parsed.host);
+  const reachable = canReach(ctx.lab, s.id, parsed.host, undefined, 'tcp');
+  const ok = Boolean(targetRouter && reachable.ok && isRouterSshReady(targetRouter, parsed.user));
+  if (opts?.record !== false) s.lastSsh = { target: parsed.host, user: parsed.user, ok };
+
+  if (ok && targetRouter) {
+    return {
+      session: s,
+      output: [
+        { kind: 'output', text: `Connecting to ${parsed.host} as ${parsed.user}...` },
+        { kind: 'output', text: 'Password authentication accepted.' },
+        { kind: 'output', text: `${targetRouter.device.hostname}#` },
+      ],
+    };
+  }
+
+  const reason = !targetRouter
+    ? '[sim] No router interface owns that management IP.'
+    : !reachable.ok
+      ? `[sim] ${failureDetail(reachable.failedAt, parsed.host)}`
+      : '[sim] SSH is not ready: configure a local user, domain name, RSA key, `login local`, and `transport input ssh`.';
+  return {
+    session: s,
+    output: [
+      { kind: 'output', text: `Connecting to ${parsed.host} as ${parsed.user}...` },
+      { kind: 'system', text: reason },
+      { kind: 'error', text: `ssh: connect to host ${parsed.host} port 22: Connection refused` },
+    ],
+  };
+}
+
+
+function findRouterByInterfaceIp(lab: LabSession, ip: string): RouterSession | null {
+  for (const dev of Object.values(lab.devices)) {
+    if (dev.kind !== 'router') continue;
+    if (Object.values(dev.device.interfaces).some((iface) => iface.ip === ip)) return dev;
+  }
+  return null;
+}
+
+function isRouterSshReady(router: RouterSession, username: string): boolean {
+  const sec = router.device.security;
+  return Boolean(
+    sec.domainName &&
+      sec.enableSecret &&
+      sec.users.has(username) &&
+      sec.cryptoKeyModulus !== null &&
+      sec.vtyLoginLocal &&
+      sec.vtyTransportInput === 'ssh',
+  );
+}
+
+function parseSshTarget(args: readonly string[]): { user: string; host: string } | null {
+  if (args.length === 0) return null;
+  const first = args[0];
+  if (first.includes('@')) {
+    const [user, host] = first.split('@');
+    if (user && isValidIpv4(host)) return { user, host };
+    return null;
+  }
+  const lIndex = args.findIndex((arg) => arg.toLowerCase() === '-l');
+  if (isValidIpv4(first) && lIndex !== -1 && args[lIndex + 1]) {
+    return { host: first, user: args[lIndex + 1] };
+  }
+  return null;
+}
+
 function handleClear(s: PcSession): ApplyResult<PcSession> {
   // Empty output — the terminal frontend handles screen-clear independently
   // when it sees no lines to append; same behavior as the prior switch case.
+  return { session: s, output: [] };
+}
+
+function powershellArg(args: readonly string[], name: string): string | null {
+  const idx = args.findIndex((arg) => arg.toLowerCase() === name.toLowerCase());
+  if (idx === -1 || idx + 1 >= args.length) return null;
+  return args[idx + 1];
+}
+
+function handleNewNetIpAddress(
+  s: PcSession,
+  args: readonly string[],
+): ApplyResult<PcSession> {
+  const iface = powershellArg(args, '-InterfaceAlias');
+  const ip = powershellArg(args, '-IPAddress');
+  const prefixLength = powershellArg(args, '-PrefixLength');
+  const defaultGateway = powershellArg(args, '-DefaultGateway');
+
+  if (!iface || !ip || !prefixLength || !defaultGateway) {
+    return {
+      session: s,
+      output: errLine('Usage: New-NetIPAddress -InterfaceAlias Eth0 -IPAddress <ipv6> -PrefixLength <n> -DefaultGateway <ipv6>'),
+    };
+  }
+  if (iface !== s.nic) {
+    return { session: s, output: errLine(`Interface alias '${iface}' does not exist. Use ${s.nic}.`) };
+  }
+  const prefix = `${ip.toLowerCase()}/${prefixLength}`;
+  if (!isValidIpv6Prefix(prefix)) return { session: s, output: errLine(`% Invalid IPv6 address/prefix: ${ip}/${prefixLength}`) };
+  const gateway = defaultGateway.toLowerCase();
+  if (!gateway.includes(':') || !/^[0-9a-f:]+$/i.test(gateway)) {
+    return { session: s, output: errLine(`% Invalid IPv6 default gateway: ${defaultGateway}`) };
+  }
+  s.ipv6 = prefix;
+  s.gateway6 = gateway;
+  return { session: s, output: [] };
+}
+
+function handleIpv6(
+  s: PcSession,
+  args: readonly string[],
+): ApplyResult<PcSession> {
+  if (args.length < 1) return { session: s, output: errLine('% Incomplete command.') };
+  const prefix = args[0].toLowerCase();
+  if (!isValidIpv6Prefix(prefix)) return { session: s, output: errLine(`% Invalid IPv6 address/prefix: ${args[0]}`) };
+  s.ipv6 = prefix;
+  return { session: s, output: [] };
+}
+
+function handleGateway6(
+  s: PcSession,
+  args: readonly string[],
+): ApplyResult<PcSession> {
+  if (args.length < 1) return { session: s, output: errLine('% Incomplete command.') };
+  const gateway = args[0].toLowerCase();
+  if (!gateway.includes(':') || !/^[0-9a-f:]+$/i.test(gateway)) {
+    return { session: s, output: errLine(`% Invalid IPv6 address: ${args[0]}`) };
+  }
+  s.gateway6 = gateway;
   return { session: s, output: [] };
 }
 
@@ -1102,9 +1446,8 @@ function errLine(text: string): CommandOutput[] {
 
 /** Render Windows-style `ipconfig` output. `all` adds the Host Name +
  *  Description fields we actually model — nothing fabricated. When the PC
- *  is a DHCP client (dhcpMode), the IPv4 line reads `(DHCP request pending)`
- *  while no binding exists and an extra `DHCP Enabled: Yes` line appears in
- *  the `/all` output. */
+ *  is a DHCP client (dhcpMode), an unresolved but connected NIC shows a
+ *  deterministic APIPA 169.254.x.x address with the Windows APIPA mask. */
 function renderIpconfig(s: PcSession, all: boolean): CommandOutput[] {
   const out: CommandOutput[] = [];
   if (all) {
@@ -1122,15 +1465,27 @@ function renderIpconfig(s: PcSession, all: boolean): CommandOutput[] {
       out.push({ kind: 'output', text: `   DHCP Enabled. . . . . . . . . . . : Yes` });
     }
   }
-  const ipLabel = s.dhcpMode && !s.ip ? '(DHCP request pending)' : s.ip ?? '(none)';
+  const apipa = s.dhcpMode && s.nicUp && !s.ip ? apipaAddressFor(s.id) : null;
+  const ipLabel = apipa ?? s.ip ?? '(none)';
+  const maskLabel = apipa ? '255.255.0.0' : s.mask ?? '(none)';
   out.push({ kind: 'output', text: `   IPv4 Address. . . . . . . . . . . : ${ipLabel}` });
-  out.push({ kind: 'output', text: `   Subnet Mask . . . . . . . . . . . : ${s.mask ?? '(none)'}` });
+  out.push({ kind: 'output', text: `   Subnet Mask . . . . . . . . . . . : ${maskLabel}` });
   out.push({ kind: 'output', text: `   Default Gateway . . . . . . . . . : ${s.gateway ?? '(none)'}` });
+  out.push({ kind: 'output', text: `   IPv6 Address. . . . . . . . . . . : ${s.ipv6 ?? '(none)'}` });
+  out.push({ kind: 'output', text: `   IPv6 Default Gateway . . . . . . : ${s.gateway6 ?? '(none)'}` });
   out.push({
     kind: s.nicUp ? 'system' : 'error',
     text: `   Media State . . . . . . . . . . . : ${s.nicUp ? 'connected' : 'Media disconnected'}`,
   });
   return out;
+}
+
+function apipaAddressFor(id: string): string {
+  let hash = 0;
+  for (const char of id) hash = (hash + char.charCodeAt(0)) % 65024;
+  const third = Math.floor(hash / 254);
+  const fourth = (hash % 254) + 1;
+  return `169.254.${third}.${fourth}`;
 }
 
 /**

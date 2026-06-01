@@ -27,6 +27,7 @@ import type {
 } from './adapters/ios/state';
 import type { SwitchSession } from './adapters/ios/switch-state';
 import { recomputeOspf } from './adapters/ios/ospf';
+import { recomputeEtherchannel } from './adapters/ios/etherchannel';
 import {
   findPoolForIp,
   recomputeBindings,
@@ -118,9 +119,29 @@ export function initLabSession(lab: Lab): LabSession {
  *  run after DHCP). */
 function refreshDerivedState(lab: LabSession): LabSession {
   const linkUp = refreshNicUp(lab);
-  const ospf = refreshOspf(linkUp);
+  const etherchannel = refreshEtherchannel(linkUp);
+  const ospf = refreshOspf(etherchannel);
   const dhcp = refreshDhcp(ospf);
   return refreshNat(dhcp);
+}
+
+function refreshEtherchannel(lab: LabSession): LabSession {
+  const switches = new Map<string, SwitchSession>();
+  for (const [deviceId, session] of Object.entries(lab.devices)) {
+    if (session.kind === 'switch') switches.set(deviceId, session);
+  }
+  if (switches.size === 0) return lab;
+
+  const updated = recomputeEtherchannel(switches, lab.links);
+  let changed = false;
+  const devices: Record<string, DeviceSession> = { ...lab.devices };
+  for (const [deviceId, next] of updated) {
+    if (next !== lab.devices[deviceId]) {
+      devices[deviceId] = next;
+      changed = true;
+    }
+  }
+  return changed ? { ...lab, devices } : lab;
 }
 
 /** Apply a list of seed commands to one device with `record:false`. Router
@@ -280,6 +301,58 @@ export function replaceDevice(lab: LabSession, id: string, next: DeviceSession):
     throw new Error(`replaceDevice: unknown device id '${id}'`);
   }
   return { ...lab, devices: { ...lab.devices, [id]: next } };
+}
+
+export type PcNetworkMode = 'dhcp' | 'static';
+
+export interface PcNetworkConfig {
+  readonly mode: PcNetworkMode;
+  readonly ip?: string | null;
+  readonly mask?: string | null;
+  readonly gateway?: string | null;
+  readonly ipv6?: string | null;
+  readonly gateway6?: string | null;
+}
+
+/** Apply Network Adapter GUI state to one PC session. This is the UI-backed
+ *  path for realistic endpoint configuration; terminal command history is not
+ *  touched because clicking Apply in a GUI is not a typed shell command. */
+export function updatePcNetwork(
+  lab: LabSession,
+  id: string,
+  config: PcNetworkConfig,
+): LabSession {
+  const cur = lab.devices[id];
+  if (!cur) throw new Error(`updatePcNetwork: unknown device id '${id}'`);
+  if (cur.kind !== 'pc') throw new Error(`updatePcNetwork: '${id}' is not a PC`);
+
+  const nextPc: PcSession = config.mode === 'dhcp'
+    ? {
+        ...cur,
+        ip: null,
+        mask: null,
+        gateway: null,
+        dhcpMode: true,
+      }
+    : {
+        ...cur,
+        ip: emptyToNull(config.ip),
+        mask: emptyToNull(config.mask),
+        gateway: emptyToNull(config.gateway),
+        ipv6: emptyToNull(config.ipv6),
+        gateway6: emptyToNull(config.gateway6),
+        dhcpMode: false,
+      };
+
+  return refreshDerivedState({
+    ...lab,
+    devices: { ...lab.devices, [id]: nextPc },
+  });
+}
+
+function emptyToNull(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? '';
+  return trimmed === '' ? null : trimmed;
 }
 
 /** Build a fresh session for one device from its spec — used by reset(). */

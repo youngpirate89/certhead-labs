@@ -3,6 +3,7 @@ import {
   initLabSession,
   applyToActive,
   setActive,
+  updatePcNetwork,
   activeSession,
   activePrompt,
   adapterFor,
@@ -248,6 +249,43 @@ describe('lab-session — pc adapter wired in (3b)', () => {
     // R1 untouched.
     expect(r1.mode).toBe('user');
     expect(r1.history).toEqual([]);
+  });
+
+  it('updatePcNetwork applies static GUI settings to a PC without touching router state', () => {
+    const initial = initLabSession(pcRouterLab());
+    const after = updatePcNetwork(initial, 'PC-A', {
+      mode: 'static',
+      ip: '192.168.1.20',
+      mask: '255.255.255.0',
+      gateway: '192.168.1.1',
+      ipv6: '2001:db8:acad:10::20/64',
+      gateway6: '2001:db8:acad:10::1',
+    });
+
+    const pc = after.devices['PC-A'];
+    const r1 = after.devices.R1;
+    if (pc.kind !== 'pc' || r1.kind !== 'router') throw new Error('shape');
+    expect(pc.dhcpMode).toBe(false);
+    expect(pc.ip).toBe('192.168.1.20');
+    expect(pc.mask).toBe('255.255.255.0');
+    expect(pc.gateway).toBe('192.168.1.1');
+    expect(pc.ipv6).toBe('2001:db8:acad:10::20/64');
+    expect(pc.gateway6).toBe('2001:db8:acad:10::1');
+    expect(r1.history).toEqual([]);
+    expect(initial.devices['PC-A']).not.toBe(pc);
+  });
+
+  it('updatePcNetwork switches a PC to DHCP mode and clears stale static values', () => {
+    const initial = initLabSession(
+      pcRouterLab({ ip: '192.168.1.10', mask: '255.255.255.0', gateway: '192.168.1.1' }),
+    );
+    const after = updatePcNetwork(initial, 'PC-A', { mode: 'dhcp' });
+    const pc = after.devices['PC-A'];
+    if (pc.kind !== 'pc') throw new Error('expected pc kind');
+    expect(pc.dhcpMode).toBe(true);
+    expect(pc.ip).toBeNull();
+    expect(pc.mask).toBeNull();
+    expect(pc.gateway).toBeNull();
   });
 });
 

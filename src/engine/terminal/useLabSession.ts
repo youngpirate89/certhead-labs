@@ -9,7 +9,9 @@ import {
   setActive,
   closeDevice,
   closeAllDevices,
+  updatePcNetwork,
   promptFor,
+  type PcNetworkConfig,
   type LabSession,
   type DeviceSession,
 } from '@/engine/lab-session';
@@ -33,6 +35,9 @@ export interface UseLabSession extends UseTerminal {
   /** Open/focus a device's CLI. Adds to openDeviceIds if not present and
    *  sets it active. */
   setActiveDevice: (id: string) => void;
+  deviceKind: (id: string) => DeviceSession['kind'] | undefined;
+  pcNetwork: (id: string) => PcNetworkConfig | undefined;
+  updatePcNetwork: (id: string, config: PcNetworkConfig) => void;
   /** Close a single tab in the shared terminal panel. If closing the active
    *  id, the neighbor on the left becomes active. Closing the last open
    *  tab empties openDeviceIds and the panel hides until a topology click
@@ -195,6 +200,25 @@ export function useLabSession(lab: Lab): UseLabSession {
     setLabSession((cur) => setActive(cur, id));
   }, []);
 
+  const deviceKind = useCallback((id: string) => labRef.current.devices[id]?.kind, []);
+
+  const pcNetwork = useCallback((id: string): PcNetworkConfig | undefined => {
+    const s = labRef.current.devices[id];
+    if (!s || s.kind !== 'pc') return undefined;
+    return {
+      mode: s.dhcpMode ? 'dhcp' : 'static',
+      ip: s.ip,
+      mask: s.mask,
+      gateway: s.gateway,
+      ipv6: s.ipv6,
+      gateway6: s.gateway6,
+    };
+  }, []);
+
+  const updatePcNetworkCallback = useCallback((id: string, config: PcNetworkConfig) => {
+    setLabSession((cur) => updatePcNetwork(cur, id, config));
+  }, []);
+
   const closeDeviceCallback = useCallback((id: string) => {
     setLabSession((cur) => closeDevice(cur, id));
   }, []);
@@ -229,6 +253,9 @@ export function useLabSession(lab: Lab): UseLabSession {
     activeDeviceId: labSession.activeDeviceId,
     openDeviceIds: labSession.openDeviceIds,
     setActiveDevice,
+    deviceKind,
+    pcNetwork,
+    updatePcNetwork: updatePcNetworkCallback,
     closeDevice: closeDeviceCallback,
     closeAllDevices: closeAllDevicesCallback,
     reset,

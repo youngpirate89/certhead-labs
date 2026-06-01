@@ -5,6 +5,8 @@ import {
   type DhcpPool,
   type Mode,
   type NatStatement,
+  type OspfNeighborRole,
+  type SyslogTrapLevel,
   type Session,
   type SubInterface,
   nextEngineSeq,
@@ -12,12 +14,14 @@ import {
   fullInterfaceName,
   isSubInterfaceId,
   isValidIpv4,
+  isValidIpv6Prefix,
   isValidMask,
   isValidRouteMask,
   parentInterfaceId,
   prompt as promptFor,
   routingTable,
   deriveRouterId,
+  ospfNetworkType,
   OSPF_DEFAULT_HELLO_INTERVAL,
   OSPF_DEFAULT_DEAD_INTERVAL,
 } from './state';
@@ -56,7 +60,8 @@ function isConfigFamily(mode: Mode): boolean {
     mode === 'config-subif' ||
     mode === 'config-router' ||
     mode === 'config-dhcp' ||
-    mode === 'config-ext-nacl'
+    mode === 'config-ext-nacl' ||
+    mode === 'config-line'
   );
 }
 
@@ -320,6 +325,7 @@ function dispatch(
 
   switch (head) {
     case 'enable':
+      if (command[1] === 'secret') return setEnableSecret(s, args.secret);
       if (s.mode === 'user') s.mode = 'priv';
       return { session: s, output: [] };
 
@@ -349,6 +355,9 @@ function dispatch(
       } else if (s.mode === 'config-ext-nacl') {
         s.mode = 'config';
         s.activeAcl = null;
+      } else if (s.mode === 'config-line') {
+        s.mode = 'config';
+        s.activeLine = null;
       } else if (s.mode === 'config') {
         s.mode = 'priv';
       } else if (s.mode === 'priv') {
@@ -362,6 +371,7 @@ function dispatch(
       s.activeSubIfId = null;
       s.activeDhcpPool = null;
       s.activeAcl = null;
+      s.activeLine = null;
       return { session: s, output: [] };
 
     case 'router':
@@ -372,6 +382,34 @@ function dispatch(
     case 'hostname':
       s.device.hostname = args.name;
       return { session: s, output: [] };
+
+    case 'username':
+      return setLocalUser(s, args.username, args.secret);
+
+    case 'ntp':
+      if (command[1] === 'server') return addNtpServer(s, args.server, ec);
+      return { session: s, output: err('% Unknown command.') };
+
+    case 'logging':
+      if (command[1] === 'host') return addSyslogHost(s, args.host, ec);
+      if (command[1] === 'trap') return setSyslogTrapLevel(s, args.level, ec);
+      return { session: s, output: err('% Unknown command.') };
+
+    case 'service':
+      if (command[1] === 'timestamps' && command[2] === 'log' && command[3] === 'datetime' && command[4] === 'msec') {
+        return setServiceTimestampsLogDatetimeMsec(s);
+      }
+      return { session: s, output: err('% Unknown command.') };
+
+    case 'crypto':
+      if (command[1] === 'key' && command[2] === 'generate' && command[3] === 'rsa') {
+        return generateRsaKey(s, args.modulus, ec);
+      }
+      return { session: s, output: err('% Unknown command.') };
+
+    case 'line':
+      if (command[1] === 'vty') return enterLineVty(s, args.start, args.end, ec);
+      return { session: s, output: err('% Unknown command.') };
 
     case 'interface':
       return enterInterface(s, args.iface, ec);
@@ -391,11 +429,17 @@ function dispatch(
     case 'no':
       return negate(s, command, args, ec);
 
+    case 'ipv6':
+      if (command[1] === 'address') return setIpv6Address(s, args.prefix, ec);
+      if (command[1] === 'route') return addIpv6StaticRoute(s, args.prefix, args.nextHop, ec);
+      return { session: s, output: err('% Incomplete command.') };
+
     case 'ip':
       // command[1] differentiates ip address (config-if) from ip route (config)
       // from ip access-group (config-if). All three share the `ip` keyword.
       if (command[1] === 'address') return setIpAddress(s, args.ip, args.mask, ec);
       if (command[1] === 'route') return addStaticRoute(s, args.prefix, args.mask, args.target, args.ad, ec);
+      if (command[1] === 'domain-name') return setDomainName(s, args.domain);
       if (command[1] === 'access-group') {
         return setAccessGroup(s, args.number, command[3] as 'in' | 'out', ec);
       }
@@ -452,6 +496,11 @@ function dispatch(
       // The argument is a free-form iface token — normalise + validate.
       return setPassiveInterface(s, args.iface, true, ec);
 
+    case 'default-information':
+      // `default-information originate [always]` in config-router (Lab 21).
+      // command[1] === 'originate'; command[2] === 'always' when present.
+      return setDefaultInformation(s, command[2] === 'always', true);
+
     case 'default-router':
       return setDhcpDefaultRouter(s, args.ip, ec);
 
@@ -465,6 +514,14 @@ function dispatch(
       // command = ['access-list', '<num>', 'permit'|'deny', ...source-form]
       return addAclEntry(s, args.number, command[2] as 'permit' | 'deny', command, args, ec);
 
+    case 'login':
+      if (command[1] === 'local') return setVtyLoginLocal(s);
+      return { session: s, output: err('% Unknown command.') };
+
+    case 'transport':
+      if (command[1] === 'input') return setVtyTransportInput(s, command[2] as 'ssh' | 'telnet' | 'all' | 'none');
+      return { session: s, output: err('% Unknown command.') };
+
     case 'show':
       return show(s, command, args);
 
@@ -477,6 +534,129 @@ function dispatch(
     default:
       return { session: s, output: err('% Unknown command.') };
   }
+}
+
+
+// ---------- device hardening / management-plane support ----------
+
+function setDomainName(s: Session, domain: string): ApplyResult {
+  s.device.security.domainName = domain;
+  return { session: s, output: [] };
+}
+
+function setLocalUser(s: Session, username: string, secret: string): ApplyResult {
+  s.device.security.users.set(username, { username, secret });
+  return { session: s, output: [] };
+}
+
+function setEnableSecret(s: Session, secret: string): ApplyResult {
+  s.device.security.enableSecret = secret;
+  return { session: s, output: [] };
+}
+
+function generateRsaKey(s: Session, modulusText: string | undefined, ec: ErrCtx): ApplyResult {
+  const modulus = Number.parseInt(modulusText ?? '', 10);
+  if (!Number.isInteger(modulus) || modulus < 512) {
+    return { session: s, output: badInput(ec, 'modulus') };
+  }
+  s.device.security.cryptoKeyModulus = modulus;
+  return {
+    session: s,
+    output: out(`% The key modulus size is ${modulus} bits`, '% Generating RSA keys ... [OK]'),
+  };
+}
+
+function enterLineVty(s: Session, startText: string | undefined, endText: string | undefined, ec: ErrCtx): ApplyResult {
+  const start = Number.parseInt(startText ?? '', 10);
+  const end = Number.parseInt(endText ?? '', 10);
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start !== 0 || end !== 4) {
+    return { session: s, output: badInput(ec, 'start') };
+  }
+  s.mode = 'config-line';
+  s.activeLine = 'vty';
+  return { session: s, output: [] };
+}
+
+function setVtyLoginLocal(s: Session): ApplyResult {
+  if (s.mode !== 'config-line' || s.activeLine !== 'vty') return { session: s, output: err('% Invalid line context.') };
+  s.device.security.vtyLoginLocal = true;
+  return { session: s, output: [] };
+}
+
+function setVtyTransportInput(s: Session, value: 'ssh' | 'telnet' | 'all' | 'none'): ApplyResult {
+  if (s.mode !== 'config-line' || s.activeLine !== 'vty') return { session: s, output: err('% Invalid line context.') };
+  s.device.security.vtyTransportInput = value;
+  return { session: s, output: [] };
+}
+
+export function isSshReady(s: Session, username: string): boolean {
+  const sec = s.device.security;
+  return Boolean(
+    sec.domainName &&
+      sec.enableSecret &&
+      sec.users.has(username) &&
+      sec.cryptoKeyModulus !== null &&
+      sec.vtyLoginLocal &&
+      sec.vtyTransportInput === 'ssh',
+  );
+}
+
+function hasSshHardening(s: Session): boolean {
+  const sec = s.device.security;
+  return Boolean(
+    sec.domainName ||
+      sec.enableSecret ||
+      sec.users.size > 0 ||
+      sec.cryptoKeyModulus !== null ||
+      sec.vtyLoginLocal ||
+      sec.vtyTransportInput !== 'all',
+  );
+}
+
+// ---------- management services support ----------
+
+const SYSLOG_TRAP_LEVELS = new Set<SyslogTrapLevel>([
+  'emergencies',
+  'alerts',
+  'critical',
+  'errors',
+  'warnings',
+  'notifications',
+  'informational',
+  'debugging',
+]);
+
+function addNtpServer(s: Session, server: string | undefined, ec: ErrCtx): ApplyResult {
+  if (!server || !isValidIpv4(server)) return { session: s, output: badInput(ec, 'server') };
+  s.device.ntp.servers.set(server, { server, configuredAt: nextEngineSeq() });
+  return { session: s, output: [] };
+}
+
+function addSyslogHost(s: Session, host: string | undefined, ec: ErrCtx): ApplyResult {
+  if (!host || !isValidIpv4(host)) return { session: s, output: badInput(ec, 'host') };
+  s.device.syslog.hosts.set(host, { host, configuredAt: nextEngineSeq() });
+  return { session: s, output: [] };
+}
+
+function setSyslogTrapLevel(s: Session, levelText: string | undefined, ec: ErrCtx): ApplyResult {
+  const level = levelText as SyslogTrapLevel | undefined;
+  if (!level || !SYSLOG_TRAP_LEVELS.has(level)) return { session: s, output: badInput(ec, 'level') };
+  s.device.syslog.trapLevel = level;
+  return { session: s, output: [] };
+}
+
+function setServiceTimestampsLogDatetimeMsec(s: Session): ApplyResult {
+  s.device.syslog.serviceTimestampsLogDatetimeMsec = true;
+  return { session: s, output: [] };
+}
+
+function hasManagementServices(s: Session): boolean {
+  return Boolean(
+    s.device.ntp.servers.size > 0 ||
+      s.device.syslog.hosts.size > 0 ||
+      s.device.syslog.trapLevel !== null ||
+      s.device.syslog.serviceTimestampsLogDatetimeMsec,
+  );
 }
 
 // ---------- ping (privileged EXEC) ----------
@@ -726,6 +906,61 @@ function setIpAddress(s: Session, ip: string, mask: string, ec: ErrCtx): ApplyRe
   return { session: s, output: [] };
 }
 
+function setIpv6Address(s: Session, prefix: string, ec: ErrCtx): ApplyResult {
+  if (!isValidIpv6Prefix(prefix)) return { session: s, output: badInput(ec, 'prefix') };
+  if (s.currentInterface) {
+    const list = s.device.interfaces[s.currentInterface].ipv6Addresses;
+    if (!list.includes(prefix.toLowerCase())) list.push(prefix.toLowerCase());
+  }
+  return { session: s, output: [] };
+}
+
+function clearIpv6Addresses(s: Session): ApplyResult {
+  if (s.currentInterface) s.device.interfaces[s.currentInterface].ipv6Addresses = [];
+  return { session: s, output: [] };
+}
+
+function isValidIpv6Address(value: string): boolean {
+  return value.includes(':') && /^[0-9a-f:]+$/i.test(value);
+}
+
+function addIpv6StaticRoute(
+  s: Session,
+  prefix: string,
+  nextHop: string,
+  ec: ErrCtx,
+): ApplyResult {
+  if (!isValidIpv6Prefix(prefix)) return { session: s, output: badInput(ec, 'prefix') };
+  if (!isValidIpv6Address(nextHop)) return { session: s, output: badInput(ec, 'nextHop') };
+  const route = {
+    prefix: prefix.toLowerCase(),
+    nextHop: nextHop.toLowerCase(),
+    configuredAt: nextEngineSeq(),
+  };
+  const dupeIdx = s.ipv6StaticRoutes.findIndex(
+    (r) => r.prefix === route.prefix && r.nextHop === route.nextHop,
+  );
+  if (dupeIdx < 0) s.ipv6StaticRoutes.push(route);
+  else s.ipv6StaticRoutes[dupeIdx] = route;
+  return { session: s, output: [] };
+}
+
+function removeIpv6StaticRoute(
+  s: Session,
+  prefix: string,
+  nextHop: string,
+  ec: ErrCtx,
+): ApplyResult {
+  if (!isValidIpv6Prefix(prefix)) return { session: s, output: badInput(ec, 'prefix') };
+  if (!isValidIpv6Address(nextHop)) return { session: s, output: badInput(ec, 'nextHop') };
+  const before = s.ipv6StaticRoutes.length;
+  s.ipv6StaticRoutes = s.ipv6StaticRoutes.filter(
+    (r) => !(r.prefix === prefix.toLowerCase() && r.nextHop === nextHop.toLowerCase()),
+  );
+  if (s.ipv6StaticRoutes.length === before) return { session: s, output: err('% Not found.') };
+  return { session: s, output: [] };
+}
+
 function setAdmin(s: Session, up: boolean): ApplyResult {
   if (s.mode === 'config-subif' && s.activeSubIfId) {
     // A dot1Q subinterface has no independent admin state — its line state
@@ -770,6 +1005,10 @@ function negate(
   switch (command[1]) {
     case 'shutdown':
       return setAdmin(s, true);
+    case 'ipv6':
+      if (command[2] === 'address') return clearIpv6Addresses(s);
+      if (command[2] === 'route') return removeIpv6StaticRoute(s, args.prefix, args.nextHop, ec);
+      return { session: s, output: err('% Incomplete command.') };
     case 'hostname':
       s.device.hostname = 'Router';
       return { session: s, output: [] };
@@ -838,6 +1077,10 @@ function negate(
     case 'passive-interface':
       // Mirror the positive form — only valid in config-router.
       return setPassiveInterface(s, args.iface, false, ec);
+    case 'default-information':
+      // `no default-information originate` — stop originating the default.
+      // `always` is part of the positive form only; `no` clears both flags.
+      return setDefaultInformation(s, false, false);
     case 'default-router':
       return clearDhcpDefaultRouter(s);
     case 'dns-server':
@@ -960,6 +1203,8 @@ function enterRouterOspf(s: Session, pidArg: string, ec: ErrCtx): ApplyResult {
     s.device.ospf.networks = [];
     s.device.ospf.neighbors = new Map();
     s.device.ospf.passive = new Set();
+    s.device.ospf.defaultInfoOriginate = false;
+    s.device.ospf.defaultInfoAlways = false;
   }
   return { session: s, output: [] };
 }
@@ -1035,6 +1280,18 @@ function setPassiveInterface(
   }
   if (mark) s.device.ospf.passive.add(id);
   else s.device.ospf.passive.delete(id);
+  return { session: s, output: [] };
+}
+
+/** `[no] default-information originate [always]` in config-router (Lab 21).
+ *  Sets the OSPF process to redistribute a default route. `enable` is true for
+ *  the positive form, false for `no`. `always` only ever accompanies the
+ *  positive form; the negate path clears both flags. No mode guard needed —
+ *  the grammar exposes this only in config-router, so a wrong-mode use fails at
+ *  the parser before reaching here (same posture as setPassiveInterface). */
+function setDefaultInformation(s: Session, always: boolean, enable: boolean): ApplyResult {
+  s.device.ospf.defaultInfoOriginate = enable;
+  s.device.ospf.defaultInfoAlways = enable && always;
   return { session: s, output: [] };
 }
 
@@ -1772,6 +2029,16 @@ function show(
     if (s.device.acls.size > 0) s.lastShowAccessLists = nextEngineSeq();
     return { session: s, output: out(...showAccessLists(s)) };
   }
+  if (what === 'ipv6') {
+    if (command[2] === 'interface' && command[3] === 'brief') {
+      return { session: s, output: out(...showIpv6InterfaceBrief(s)) };
+    }
+    if (command[2] === 'route') {
+      if (s.ipv6StaticRoutes.length > 0) s.lastShowIpv6Route = nextEngineSeq();
+      return { session: s, output: out(...showIpv6Route(s)) };
+    }
+    return { session: s, output: err('% Incomplete command.') };
+  }
   if (what === 'ip') {
     // `show ip interface brief` vs `show ip interface <iface>` vs route vs ospf.
     if (command[2] === 'route') return { session: s, output: out(...showIpRoute(s)) };
@@ -1835,11 +2102,26 @@ function show(
     if (args.iface) return showInterfacesOne(s, args.iface);
     return { session: s, output: out(...showInterfaces(s)) };
   }
+  if (what === 'ntp') {
+    if (command[2] === 'status') {
+      if (s.device.ntp.servers.size > 0) s.lastShowNtpStatus = nextEngineSeq();
+      return { session: s, output: out(...showNtpStatus(s)) };
+    }
+    if (command[2] === 'associations') {
+      if (s.device.ntp.servers.size > 0) s.lastShowNtpAssociations = nextEngineSeq();
+      return { session: s, output: out(...showNtpAssociations(s)) };
+    }
+  }
+  if (what === 'logging') {
+    if (hasManagementServices(s)) s.lastShowLogging = nextEngineSeq();
+    return { session: s, output: out(...showLogging(s)) };
+  }
   if (what === 'version') return { session: s, output: out(...showVersion(s)) };
   if (what === 'running-config') {
     if (command[2] === 'interface' && args.iface) {
       return showRunningConfigInterface(s, args.iface);
     }
+    if (hasSshHardening(s) || hasManagementServices(s)) s.lastShowRunningConfig = nextEngineSeq();
     return { session: s, output: out(...showRunningConfig(s)) };
   }
   return { session: s, output: err('% Incomplete command.') };
@@ -1951,11 +2233,58 @@ function showIpInterfaceOne(s: Session, ifaceToken: string): ApplyResult {
   return { session: s, output: out(...lines) };
 }
 
-function showIpRoute(s: Session): string[] {
-  const lines: string[] = [
-    'Codes: C - connected, S - static, O - OSPF',
-    '',
+function showNtpStatus(s: Session): string[] {
+  const first = s.device.ntp.servers.values().next().value as { server: string } | undefined;
+  if (!first) return ['Clock is unsynchronized, no NTP servers configured'];
+  return [
+    `Clock is synchronized, stratum 2, reference is ${first.server}`,
+    'nominal freq is 250.0000 Hz, actual freq is 250.0000 Hz',
+    'precision is 2**24',
+    'reference time is 00:00:00.000 UTC Mon Jan 1 2001',
   ];
+}
+
+function showNtpAssociations(s: Session): string[] {
+  const lines = [
+    '  address         ref clock       st   when   poll reach  delay  offset   disp',
+  ];
+  if (s.device.ntp.servers.size === 0) return [...lines, '  No NTP associations configured.'];
+  for (const server of s.device.ntp.servers.values()) {
+    lines.push(`*~${server.server.padEnd(15)} .GPS.           1     12     64   377  1.000   0.000  1.000`);
+  }
+  return lines;
+}
+
+function showLogging(s: Session): string[] {
+  const lines = [
+    'Syslog logging: enabled',
+    `Console logging: disabled`,
+    `Monitor logging: disabled`,
+    `Trap logging: level ${s.device.syslog.trapLevel ?? 'informational'}`,
+    `Log Buffer (4096 bytes):`,
+  ];
+  if (s.device.syslog.serviceTimestampsLogDatetimeMsec) {
+    lines.push('Timestamp logging messages: datetime msec');
+  }
+  if (s.device.syslog.hosts.size === 0) {
+    lines.push('No remote logging hosts configured.');
+  } else {
+    for (const host of s.device.syslog.hosts.values()) lines.push(`Logging to ${host.host}`);
+  }
+  return lines;
+}
+
+function showIpv6Route(s: Session): string[] {
+  const lines = ['IPv6 Routing Table - static routes'];
+  const connected = Object.values(s.device.interfaces).flatMap((iface) =>
+    iface.ipv6Addresses.map((prefix) => `C   ${prefix} is directly connected, ${fullInterfaceName(iface.id)}`),
+  );
+  const statics = s.ipv6StaticRoutes.map((r) => `S   ${r.prefix} [1/0] via ${r.nextHop}`);
+  if (connected.length === 0 && statics.length === 0) return [...lines, 'No IPv6 routes installed.'];
+  return [...lines, ...connected, ...statics];
+}
+
+function showIpRoute(s: Session): string[] {
   // RIB view: per (prefix, mask) display only the lowest-AD entry. Losers
   // stay in routingTable() so LPM can promote them once a better route is
   // withdrawn — the floating-static teaching point of Lab 16. Stable on
@@ -1971,6 +2300,27 @@ function showIpRoute(s: Session): string[] {
   });
   const winners = new Set(winnerIdxByKey.values());
   const table = full.filter((_, idx) => winners.has(idx));
+
+  // OSPF external default (Lab 21): when an `O*E2` default is installed, IOS
+  // adds the E2 legend to the Codes block and prints a "Gateway of last
+  // resort" header. Scoped to the OSPF-originated default so static-default
+  // labs (15/16) keep their existing, simpler header verbatim.
+  const extDefault = table.find(
+    (r) =>
+      r.source === 'ospf' &&
+      r.ospfExternal === true &&
+      r.prefix === '0.0.0.0' &&
+      r.mask === '0.0.0.0',
+  );
+  const lines: string[] = ['Codes: C - connected, S - static, O - OSPF'];
+  if (extDefault) {
+    lines.push('       E2 - OSPF external type 2, * - candidate default');
+  }
+  lines.push('');
+  if (extDefault?.nextHop) {
+    lines.push(`Gateway of last resort is ${extDefault.nextHop} to network 0.0.0.0`);
+    lines.push('');
+  }
   if (table.length === 0) {
     lines.push('No routes installed.');
     return lines;
@@ -1980,7 +2330,16 @@ function showIpRoute(s: Session): string[] {
   for (const r of table) {
     const cidr = maskLength(r.mask);
     const code = routeCode(r.source);
-    if (r.source === 'connected') {
+    if (r.source === 'ospf' && r.ospfExternal && r.nextHop && r.egressIface) {
+      // External Type-2 default from `default-information originate`. The code
+      // column is `O*E2` (4 chars + 1 space) so the prefix still aligns at the
+      // same column as the single-letter codes' `${code}    ` (1 + 4).
+      const ifaceName = fullInterfaceName(r.egressIface);
+      const metric = r.metric ?? 1;
+      lines.push(
+        `O*E2 ${r.prefix}/${cidr} [${r.adminDistance}/${metric}] via ${r.nextHop}, ${ifaceName}`,
+      );
+    } else if (r.source === 'connected') {
       const ifaceName = r.egressIface
         ? fullInterfaceName(r.egressIface)
         : 'unknown';
@@ -2013,10 +2372,10 @@ function routeCode(source: 'connected' | 'static' | 'ospf'): string {
 /** Render `show ip ospf neighbor` — IOS-style table.
  *
  *  Columns: Neighbor ID, Pri, State, Dead Time, Address, Interface. We do not
- *  model timers, so Dead Time is the static placeholder `00:00:38`. For p2p
- *  links the DR/BDR election is skipped, so the State column omits the
- *  `/ROLE` suffix (the spec example shows `FULL/  -` — a literal `-` to mean
- *  "no DR election"; we keep that exact rendering). */
+ *  model timers, so Dead Time is the static placeholder `00:00:38`. On a
+ *  broadcast (Ethernet) segment the State column carries the elected role —
+ *  `FULL/DR`, `FULL/BDR`, `FULL/DROTHER`. On a point-to-point link no election
+ *  runs, so it renders the IOS placeholder `FULL/  -` (literal `-`). */
 function showIpOspfNeighbor(s: Session): string[] {
   // IOS prints the header row even when the neighbor table is empty — an
   // empty table reads as "header, no data rows" rather than a friendly
@@ -2031,10 +2390,13 @@ function showIpOspfNeighbor(s: Session): string[] {
     'Interface';
   const lines = [header];
   for (const [neighborId, n] of s.device.ospf.neighbors) {
+    // Broadcast: the elected role suffixes the state (FULL/DR). Point-to-point
+    // (role undefined): the IOS `/  -` placeholder.
+    const stateCol = n.role ? `${n.state}/${n.role}` : `${n.state}/  -`;
     lines.push(
       neighborId.padEnd(16) +
         '1'.padEnd(6) +
-        `${n.state}/  -`.padEnd(20) +
+        stateCol.padEnd(20) +
         '00:00:38'.padEnd(12) +
         n.address.padEnd(16) +
         fullInterfaceName(n.interface),
@@ -2057,8 +2419,22 @@ function showIpOspf(s: Session): string[] {
   const lines = [
     `Routing Process "ospf ${o.process}" with ID ${id}`,
     'Supports only single TOS(TOS0) routes',
-    `Number of areas in this router is ${areas}. ${areas} normal 0 stub 0 nssa`,
   ];
+  // Originating a default route makes the router an ASBR — IOS prints this
+  // line and notes the default origination. (Lab 21.) [CONFIRMED-BY-SOURCE:
+  // Cisco IOS `show ip ospf` — a router redistributing/originating a default
+  // is flagged "It is an autonomous system boundary router".]
+  if (o.defaultInfoOriginate) {
+    lines.push('It is an autonomous system boundary router');
+    lines.push(
+      o.defaultInfoAlways
+        ? 'Originate Default Route (always)'
+        : 'Originate Default Route',
+    );
+  }
+  lines.push(
+    `Number of areas in this router is ${areas}. ${areas} normal 0 stub 0 nssa`,
+  );
   if (o.passive.size > 0) {
     lines.push('Passive Interface(s):');
     for (const ifaceId of o.passive) {
@@ -2073,8 +2449,11 @@ function showIpOspf(s: Session): string[] {
  *  Dead N, ...`: comparing it on both ends reveals the timer mismatch. With no
  *  iface argument we list every OSPF-enabled interface (covered by a network
  *  statement) in declaration order; with one, we scope to it. Network Type is
- *  rendered POINT_TO_POINT to stay consistent with the neighbor table's
- *  no-DR/BDR rendering. */
+ *  driven off the interface hardware type — Ethernet (Gi/Fa) reports BROADCAST
+ *  and prints the elected State/DR/BDR block; an up broadcast interface with no
+ *  neighbor elects itself DR with no backup. [CONFIRMED-BY-SOURCE: Cisco
+ *  13689-17 — verbatim broadcast output incl. "No backup designated router on
+ *  this network" when alone.] */
 function showIpOspfInterface(s: Session, ifaceToken?: string): string[] {
   const o = s.device.ospf;
   if (o.process === null) return ['% OSPF instance not configured.'];
@@ -2104,13 +2483,22 @@ function showIpOspfInterface(s: Session, ifaceToken?: string): string[] {
     }
     const hello = i.ospfHelloInterval ?? OSPF_DEFAULT_HELLO_INTERVAL;
     const dead = i.ospfDeadInterval ?? OSPF_DEFAULT_DEAD_INTERVAL;
+    const localRid = o.routerId ?? i.ip ?? '0.0.0.0';
+    const netType = ospfNetworkType(id);
     lines.push(`${i.name} is ${state}, line protocol is ${proto}`);
     if (i.ip && i.mask) {
       lines.push(`  Internet Address ${i.ip}/${maskToCidr(i.mask)}, Area ${net.area}`);
     }
     lines.push(
-      `  Process ID ${o.process}, Router ID ${o.routerId ?? '0.0.0.0'}, Network Type POINT_TO_POINT, Cost: 1`,
+      `  Process ID ${o.process}, Router ID ${localRid}, Network Type ${netType}, Cost: 1`,
     );
+    // Broadcast segments render the elected State + DR/BDR identities. We
+    // reconstruct them from the neighbor table (the role stored there is the
+    // neighbor's role, so the local role is its complement). With no neighbor,
+    // an up broadcast interface elects itself DR and reports no backup.
+    if (netType === 'BROADCAST') {
+      lines.push(...broadcastDrBdrLines(s, id, localRid, i.ip ?? '0.0.0.0', proto === 'up'));
+    }
     lines.push(
       `  Timer intervals configured, Hello ${hello}, Dead ${dead}, Wait ${dead}, Retransmit 5`,
     );
@@ -2126,6 +2514,46 @@ function showIpOspfInterface(s: Session, ifaceToken?: string): string[] {
   // OSPF configured but no interface is covered by a network statement.
   if (lines.length === 0) return ['% OSPF instance not configured.'];
   return lines;
+}
+
+/** The State / Designated Router / Backup Designated Router lines for a
+ *  broadcast OSPF interface, derived from the neighbor table (the role stored
+ *  there is the neighbor's role, so the local role is its complement). A down
+ *  interface has no election; an up interface with no neighbor elects itself
+ *  DR and reports no backup. */
+function broadcastDrBdrLines(
+  s: Session,
+  ifaceId: string,
+  localRid: string,
+  localIp: string,
+  up: boolean,
+): string[] {
+  if (!up) {
+    return ['  Transmit Delay is 1 sec, State DOWN, Priority 1'];
+  }
+  let neighbor: { rid: string; ip: string; role: OspfNeighborRole } | undefined;
+  for (const [rid, n] of s.device.ospf.neighbors) {
+    if (n.interface === ifaceId && n.role) {
+      neighbor = { rid, ip: n.address, role: n.role };
+      break;
+    }
+  }
+  if (!neighbor) {
+    return [
+      '  Transmit Delay is 1 sec, State DR, Priority 1',
+      `  Designated Router (ID) ${localRid}, Interface address ${localIp}`,
+      '  No backup designated router on this network',
+    ];
+  }
+  // Two-router segment: the local role is the complement of the neighbor's.
+  const localRole: OspfNeighborRole = neighbor.role === 'DR' ? 'BDR' : 'DR';
+  const dr = neighbor.role === 'DR' ? neighbor : { rid: localRid, ip: localIp };
+  const bdr = neighbor.role === 'BDR' ? neighbor : { rid: localRid, ip: localIp };
+  return [
+    `  Transmit Delay is 1 sec, State ${localRole}, Priority 1`,
+    `  Designated Router (ID) ${dr.rid}, Interface address ${dr.ip}`,
+    `  Backup Designated router (ID) ${bdr.rid}, Interface address ${bdr.ip}`,
+  ];
 }
 
 function uniqueAreas(s: Session): number[] {
@@ -2188,6 +2616,23 @@ function showIpDhcpConflict(): string[] {
     'IP address        Detection method   Detection time          VRF',
     '% There are no entries in the database.',
   ];
+}
+
+function showIpv6InterfaceBrief(s: Session): string[] {
+  const lines: string[] = [];
+  for (const i of Object.values(s.device.interfaces)) {
+    const state = i.adminUp && i.protocolUp ? 'up/up' : i.adminUp ? 'up/down' : 'administratively down/down';
+    if (i.ipv6Addresses.length === 0) {
+      lines.push(`${i.name.padEnd(23)} [${state}]`);
+      lines.push('    unassigned');
+      continue;
+    }
+    for (const address of i.ipv6Addresses) {
+      lines.push(`${i.name.padEnd(23)} [${state}]`);
+      lines.push(`    ${address}`);
+    }
+  }
+  return lines;
 }
 
 function showIpIntBrief(s: Session): string[] {
@@ -2367,6 +2812,18 @@ function showVersion(s: Session): string[] {
 
 function showRunningConfig(s: Session): string[] {
   const lines = ['Building configuration...', '', '!', `hostname ${s.device.hostname}`, '!'];
+  const sec = s.device.security;
+  if (s.device.syslog.serviceTimestampsLogDatetimeMsec) lines.push('service timestamps log datetime msec', '!');
+  if (sec.enableSecret) lines.push(`enable secret ${sec.enableSecret}`, '!');
+  for (const user of sec.users.values()) lines.push(`username ${user.username} secret ${user.secret}`);
+  if (sec.users.size > 0) lines.push('!');
+  if (sec.domainName) lines.push(`ip domain-name ${sec.domainName}`, '!');
+  if (sec.cryptoKeyModulus !== null) lines.push(`crypto key generate rsa modulus ${sec.cryptoKeyModulus}`, '!');
+  for (const host of s.device.syslog.hosts.values()) lines.push(`logging host ${host.host}`);
+  if (s.device.syslog.trapLevel !== null) lines.push(`logging trap ${s.device.syslog.trapLevel}`);
+  if (s.device.syslog.hosts.size > 0 || s.device.syslog.trapLevel !== null) lines.push('!');
+  for (const server of s.device.ntp.servers.values()) lines.push(`ntp server ${server.server}`);
+  if (s.device.ntp.servers.size > 0) lines.push('!');
   // Group subifs under their parent for the dump — IOS prints each subif as
   // its own `interface Gi0/0.10` stanza, in numeric VLAN-tag order, directly
   // after the parent physical's stanza.
@@ -2467,6 +2924,19 @@ function showRunningConfig(s: Session): string[] {
     for (const ifaceId of s.device.ospf.passive) {
       lines.push(` passive-interface ${fullInterfaceName(ifaceId)}`);
     }
+    if (s.device.ospf.defaultInfoOriginate) {
+      lines.push(
+        s.device.ospf.defaultInfoAlways
+          ? ' default-information originate always'
+          : ' default-information originate',
+      );
+    }
+    lines.push('!');
+  }
+  if (sec.vtyLoginLocal || sec.vtyTransportInput !== 'all') {
+    lines.push('line vty 0 4');
+    if (sec.vtyLoginLocal) lines.push(' login local');
+    if (sec.vtyTransportInput !== 'all') lines.push(` transport input ${sec.vtyTransportInput}`);
     lines.push('!');
   }
   lines.push('end');

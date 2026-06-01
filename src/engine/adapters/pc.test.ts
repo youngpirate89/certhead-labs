@@ -113,6 +113,19 @@ describe('pcAdapter — commands', () => {
     expect(text).toMatch(/Media State.*Media disconnected/);
   });
 
+  it('`ipconfig` shows an APIPA address when DHCP is enabled, link is up, and no lease was received', () => {
+    const s = { ...pcAdapter.buildDevice({ ...SPEC, pc: { dhcp: true } }), nicUp: true };
+    const text = pcAdapter
+      .applyCommand(s, 'ipconfig')
+      .output.map((o) => o.text)
+      .join('\n');
+
+    expect(text).toMatch(/IPv4 Address.*169\.254\./);
+    expect(text).toMatch(/Subnet Mask.*255\.255\.0\.0/);
+    expect(text).toMatch(/Default Gateway.*\(none\)/);
+    expect(text).not.toMatch(/DHCP request pending/);
+  });
+
   it('`ip <ip> <mask>` sets the NIC IP / mask', () => {
     const s = run(pcAdapter.buildDevice(SPEC), ['ip 10.0.0.42 255.255.255.0']);
     expect(s.ip).toBe('10.0.0.42');
@@ -129,6 +142,25 @@ describe('pcAdapter — commands', () => {
     expect(pcAdapter.applyCommand(s, 'ip bogus 255.255.255.0').output[0].kind).toBe('error');
     expect(pcAdapter.applyCommand(s, 'ip 10.0.0.1 255.255.0.255').output[0].kind).toBe('error');
     expect(pcAdapter.applyCommand(s, 'gateway not-an-ip').output[0].kind).toBe('error');
+  });
+
+  it('recognizes realistic SSH syntax as a scoped workstation command, not a redirect', () => {
+    const s = { ...pcAdapter.buildDevice(SPEC_PRECONFIGURED), nicUp: true };
+    const text = pcAdapter
+      .applyCommand(s, 'ssh admin@192.168.1.1')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/Connecting to 192\.168\.1\.1/);
+    expect(text).not.toMatch(/ssh isn't part of this lab/);
+  });
+
+  it('recognizes OpenSSH -l username form from the workstation terminal', () => {
+    const s = { ...pcAdapter.buildDevice(SPEC_PRECONFIGURED), nicUp: true };
+    const text = pcAdapter
+      .applyCommand(s, 'ssh 192.168.1.1 -l admin')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/Connecting to 192\.168\.1\.1/);
   });
 
   it('does not mutate the input session', () => {
@@ -536,7 +568,6 @@ describe('pcAdapter — redirect tier (sensible-but-out-of-scope commands)', () 
     ['arp -a', /arp isn't part of this lab/i],
     ['netstat -an', /netstat isn't part of this lab/i],
     ['telnet 192.168.2.1', /telnet isn't part of this lab/i],
-    ['ssh admin@192.168.2.1', /ssh isn't part of this lab/i],
     ['ftp 192.168.2.10', /ftp isn't part of this lab/i],
     ['getmac', /getmac isn't part of this lab/i],
     ['route print', /route isn't part of this lab/i],

@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useEffect,
   useRef,
   useState,
@@ -6,6 +7,8 @@ import {
 } from 'react';
 import { Terminal } from '@/components/Terminal';
 import type { TerminalView } from '@/engine/terminal/useTerminal';
+import type { DeviceKind } from '@/engine/adapters/types';
+import type { PcNetworkConfig } from '@/engine/lab-session';
 
 /**
  * FloatingTerminalPanel — a single draggable + minimizable terminal window
@@ -47,6 +50,9 @@ export interface FloatingTerminalPanelProps {
   readonly forDevice: (id: string) => TerminalView;
   /** Optional platform label per device (e.g. `router`, `pc`). */
   readonly platformLabel?: (id: string) => string | undefined;
+  readonly deviceKind?: (id: string) => DeviceKind | undefined;
+  readonly pcNetwork?: (id: string) => PcNetworkConfig | undefined;
+  readonly onPcNetworkApply?: (id: string, config: PcNetworkConfig) => void;
   /** Topology click / tab click. Adds the id to openDeviceIds if absent and
    *  marks it active. */
   readonly onSelectDevice: (id: string) => void;
@@ -75,7 +81,7 @@ export interface FloatingTerminalPanelProps {
  *  The user can still resize narrower (MIN_PANEL_WIDTH unchanged); this only
  *  moves the *default* so tabular show output reads cleanly on first open. */
 const DEFAULT_PANEL_WIDTH = 740;
-const DEFAULT_PANEL_HEIGHT = 420;
+const DEFAULT_PANEL_HEIGHT = 520;
 /** Floor sizes — below these the tab strip wraps and the terminal becomes
  *  illegible. Hardcoded rather than measured because a dynamic measurement
  *  loop here would re-fire mid-drag and feel sticky. */
@@ -120,6 +126,9 @@ export function FloatingTerminalPanel({
   activeDeviceId,
   forDevice,
   platformLabel,
+  deviceKind,
+  pcNetwork,
+  onPcNetworkApply,
   onSelectDevice,
   onCloseDevice,
   onCloseAll,
@@ -257,6 +266,8 @@ export function FloatingTerminalPanel({
     ? activeDeviceId
     : openDeviceIds[0];
   const term = forDevice(visibleDeviceId);
+  const visibleDeviceIsPc = deviceKind?.(visibleDeviceId) === 'pc';
+  const visiblePcNetwork = visibleDeviceIsPc ? pcNetwork?.(visibleDeviceId) : undefined;
 
   // Minimized snap-bar: docked bottom-center of the viewport, fixed width,
   // unaffected by pos/size. The full-panel pos/size remain in state so the
@@ -367,7 +378,16 @@ export function FloatingTerminalPanel({
             onCloseDevice={onCloseDevice}
           />
           <div className="min-h-0 flex-1 overflow-hidden">
-            <Terminal term={term} />
+            {visibleDeviceIsPc && visiblePcNetwork && onPcNetworkApply ? (
+              <PcWorkbench
+                deviceId={visibleDeviceId}
+                term={term}
+                network={visiblePcNetwork}
+                onApplyNetwork={onPcNetworkApply}
+              />
+            ) : (
+              <Terminal term={term} />
+            )}
           </div>
 
           {/* Right edge handle — width-only resize. cursor:ew-resize tells the
@@ -429,6 +449,497 @@ export function FloatingTerminalPanel({
         </>
       )}
     </div>
+  );
+}
+
+type PcWorkbenchTab = 'overview' | 'adapter' | 'terminal' | 'ssh';
+type PcAdapterSection = 'ipv4' | 'ipv6';
+
+function PcWorkbench({
+  deviceId,
+  term,
+  network,
+  onApplyNetwork,
+}: {
+  readonly deviceId: string;
+  readonly term: TerminalView;
+  readonly network: PcNetworkConfig;
+  readonly onApplyNetwork: (id: string, config: PcNetworkConfig) => void;
+}) {
+  const [activeTab, setActiveTab] = useState<PcWorkbenchTab>('overview');
+  const [activeAdapterSection, setActiveAdapterSection] = useState<PcAdapterSection>('ipv4');
+  const [draft, setDraft] = useState<PcNetworkConfig>(network);
+  const [appliedNotice, setAppliedNotice] = useState<string | null>(null);
+  const [sshHost, setSshHost] = useState(network.gateway ?? '');
+  const [sshPort, setSshPort] = useState('22');
+  const [sshUsername, setSshUsername] = useState('admin');
+  const [pendingSshCommand, setPendingSshCommand] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(network);
+  }, [network]);
+
+  useEffect(() => {
+    if (network.gateway && !sshHost) setSshHost(network.gateway);
+  }, [network.gateway, sshHost]);
+
+  useEffect(() => {
+    if (!pendingSshCommand) return;
+    if (activeTab !== 'terminal') return;
+    if (term.input !== pendingSshCommand) return;
+    term.submit();
+    setPendingSshCommand(null);
+  }, [activeTab, pendingSshCommand, term]);
+
+  const setField = (field: keyof PcNetworkConfig, value: string | null) => {
+    setDraft((cur) => ({ ...cur, [field]: value }));
+    setAppliedNotice(null);
+  };
+
+  const setIpv4Octet = (field: 'ip' | 'mask' | 'gateway', index: number, value: string) => {
+    const octets = splitIpv4(draft[field]);
+    octets[index] = value.replace(/\D/g, '').slice(0, 3);
+    setField(field, joinIpv4(octets));
+  };
+
+  return (
+    <div className="flex h-full flex-col bg-gradient-to-b from-[#111827] via-[#0d1117] to-[#070a0f] font-sans text-terminal-fg">
+      <div
+        role="tablist"
+        aria-label={`${deviceId} workbench`}
+        className="flex shrink-0 gap-1 border-b border-panel-border bg-panel-header/70 px-3 py-2 shadow-[inset_0_-1px_0_rgba(255,255,255,0.03)]"
+      >
+        <WorkbenchTab label="Desktop" active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} />
+        <WorkbenchTab
+          label="Network Adapter"
+          active={activeTab === 'adapter'}
+          onClick={() => {
+            setActiveAdapterSection('ipv4');
+            setActiveTab('adapter');
+          }}
+        />
+        <WorkbenchTab label="Terminal" active={activeTab === 'terminal'} onClick={() => setActiveTab('terminal')} />
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-hidden">
+        {activeTab === 'overview' && (
+          <div className="h-full overflow-y-auto p-4 text-sm">
+            <div className="grid min-h-full place-items-center rounded-xl border border-panel-border bg-black/20 p-5 shadow-inner">
+              <div className="w-full max-w-2xl">
+                <div className="mb-5 text-center">
+                  <h2 className="text-2xl font-semibold text-terminal-fg">{deviceId} Workstation</h2>
+                  <p className="mt-2 text-sm text-terminal-fg/65">Select a desktop tool</p>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <DesktopToolTile
+                    label="IP Configuration"
+                    icon="IPv4"
+                    detail="Addressing"
+                    onClick={() => {
+                      setActiveAdapterSection('ipv4');
+                      setActiveTab('adapter');
+                    }}
+                  />
+                  <DesktopToolTile
+                    label="IPv6 Configuration"
+                    icon="IPv6"
+                    detail="Addressing"
+                    onClick={() => {
+                      setActiveAdapterSection('ipv6');
+                      setActiveTab('adapter');
+                    }}
+                  />
+                  <DesktopToolTile
+                    label="Command Prompt"
+                    icon=">_"
+                    detail="CLI"
+                    onClick={() => setActiveTab('terminal')}
+                  />
+                  <DesktopToolTile
+                    label="SSH Client"
+                    icon="SSH"
+                    detail="Remote access"
+                    onClick={() => setActiveTab('ssh')}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'adapter' && (
+          <form
+            className="h-full overflow-y-auto p-4 text-sm"
+            onSubmit={(e) => {
+              e.preventDefault();
+              onApplyNetwork(deviceId, normalizePcNetworkDraft(draft));
+              setAppliedNotice(`Settings applied to ${deviceId}`);
+            }}
+          >
+            <div className="space-y-4 rounded-xl border border-panel-border bg-black/20 p-4 shadow-inner">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-terminal-prompt/80">
+                    Network Adapter
+                  </p>
+                  <h2 className="mt-1 text-lg font-semibold text-terminal-fg">TCP/IP Properties</h2>
+                  <p className="mt-1 text-xs leading-5 text-terminal-fg/65">
+                    Choose DHCP or static addressing for this workstation NIC. GUI changes update session state without adding fake CLI history.
+                  </p>
+                </div>
+                {appliedNotice ? (
+                  <p role="status" className="rounded-full border border-terminal-prompt/30 bg-terminal-prompt/10 px-3 py-1 text-xs font-semibold text-terminal-prompt">
+                    {appliedNotice}
+                  </p>
+                ) : null}
+              </div>
+
+              <fieldset className="grid gap-3 md:grid-cols-2">
+                <legend className="sr-only">Addressing mode</legend>
+                <ModeOption
+                  title="Use DHCP"
+                  detail="Request IPv4 settings automatically from the lab network."
+                  checked={draft.mode === 'dhcp'}
+                  name={`${deviceId}-pc-mode`}
+                  onChange={() => {
+                    setAppliedNotice(null);
+                    setDraft((cur) => ({ ...cur, mode: 'dhcp' }));
+                  }}
+                />
+                <ModeOption
+                  title="Use static addressing"
+                  detail="Manually enter IP, mask, and gateway values."
+                  checked={draft.mode === 'static'}
+                  name={`${deviceId}-pc-mode`}
+                  ariaLabel="Use static addressing"
+                  onChange={() => {
+                    setAppliedNotice(null);
+                    setDraft((cur) => ({ ...cur, mode: 'static' }));
+                  }}
+                />
+              </fieldset>
+
+              <p className={`rounded border px-3 py-2 text-xs ${
+                draft.mode === 'dhcp'
+                  ? 'border-amber-300/20 bg-amber-300/10 text-amber-100/90'
+                  : 'border-terminal-prompt/20 bg-terminal-prompt/10 text-terminal-fg/75'
+              }`}
+              >
+                {draft.mode === 'dhcp'
+                  ? 'DHCP is selected. Static fields are preserved in the form but ignored until static mode is applied.'
+                  : 'Static addressing is selected. Enter values exactly as the lab instructions require.'}
+              </p>
+
+              <div className="grid gap-4 xl:grid-cols-1">
+                {activeAdapterSection === 'ipv4' ? (
+                  <section className="rounded-lg border border-panel-border bg-[#08111f]/75 p-3">
+                    <h3 className="text-sm font-semibold text-terminal-fg">IPv4 Configuration</h3>
+                    <p className="mt-1 text-xs text-terminal-fg/55">Address, subnet mask, and default gateway for IPv4 labs.</p>
+                    <div className="mt-3 grid gap-3">
+                      <Ipv4OctetField label="IPv4 address" value={draft.ip} disabled={draft.mode === 'dhcp'} onChange={(index, value) => setIpv4Octet('ip', index, value)} />
+                      <Ipv4OctetField label="Subnet mask" value={draft.mask} disabled={draft.mode === 'dhcp'} onChange={(index, value) => setIpv4Octet('mask', index, value)} />
+                      <Ipv4OctetField label="Default gateway" value={draft.gateway} disabled={draft.mode === 'dhcp'} onChange={(index, value) => setIpv4Octet('gateway', index, value)} />
+                    </div>
+                  </section>
+                ) : (
+                  <section className="rounded-lg border border-terminal-prompt/35 bg-terminal-prompt/10 p-3">
+                    <h3 className="text-sm font-semibold text-terminal-fg">IPv6 Configuration</h3>
+                    <p className="mt-1 text-xs text-terminal-fg/60">Global IPv6 address/prefix and IPv6 default gateway.</p>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      <TextField label="IPv6 address / prefix" value={draft.ipv6 ?? ''} disabled={draft.mode === 'dhcp'} onChange={(v) => setField('ipv6', v)} />
+                      <TextField label="IPv6 default gateway" value={draft.gateway6 ?? ''} disabled={draft.mode === 'dhcp'} onChange={(v) => setField('gateway6', v)} />
+                    </div>
+                  </section>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between gap-3 border-t border-panel-border pt-4">
+                <p className="text-xs text-terminal-fg/55">Apply saves these workstation adapter settings for the active lab attempt.</p>
+                <button
+                  type="submit"
+                  aria-label="Apply network adapter settings"
+                  className="rounded-md bg-terminal-prompt px-4 py-2 font-semibold text-[#06231d] shadow-lg shadow-terminal-prompt/10 transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-terminal-prompt/70"
+                >
+                  Apply
+                </button>
+              </div>
+            </div>
+          </form>
+        )}
+
+
+        {activeTab === 'ssh' && (
+          <form
+            className="h-full overflow-y-auto p-4 text-sm"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const host = sshHost.trim();
+              const user = sshUsername.trim();
+              const port = sshPort.trim() || '22';
+              if (!host || !user) return;
+              const command = port === '22' ? `ssh ${user}@${host}` : `ssh ${user}@${host} -p ${port}`;
+              term.setInput(command);
+              setPendingSshCommand(command);
+              setActiveTab('terminal');
+            }}
+          >
+            <div className="mx-auto max-w-xl overflow-hidden rounded-xl border border-[#7aa2ff]/35 bg-[#d7d7d7] text-[#101010] shadow-2xl">
+              <div className="flex items-center justify-between bg-[#f1f1f1] px-3 py-2 text-xs font-semibold text-[#202020]">
+                <span>SSH Client</span>
+                <span className="text-[10px] font-normal text-[#606060]">Remote SSH access</span>
+              </div>
+              <div className="space-y-4 p-4">
+                <div>
+                  <h2 className="text-base font-semibold text-[#101010]">Session</h2>
+                  <p className="mt-1 text-xs leading-5 text-[#444]">
+                    Start a scoped SSH connection from this workstation. This prepares a real OpenSSH command in the Command Prompt and runs it against the lab engine.
+                  </p>
+                </div>
+
+                <div className="rounded border border-[#b8b8b8] bg-[#eeeeee] p-3">
+                  <p className="mb-3 text-xs font-semibold text-[#303030]">Specify the destination you want to connect to</p>
+                  <div className="grid items-start gap-3 md:grid-cols-[minmax(0,1fr)_104px]">
+                    <label className="grid min-w-0 gap-1 text-xs font-semibold text-[#303030]">
+                      <span>Host Name or IP address</span>
+                      <input
+                        aria-label="Host Name or IP address"
+                        value={sshHost}
+                        onChange={(e) => setSshHost(e.target.value)}
+                        className="h-9 w-full rounded border border-[#999] bg-white px-2 py-1.5 font-mono text-sm text-black outline-none focus:border-[#2454c6]"
+                      />
+                    </label>
+                    <label className="grid min-w-0 gap-1 text-xs font-semibold text-[#303030]">
+                      <span>Port</span>
+                      <input
+                        aria-label="Port"
+                        value={sshPort}
+                        onChange={(e) => setSshPort(e.target.value.replace(/\D/g, '').slice(0, 5))}
+                        className="h-9 w-full rounded border border-[#999] bg-white px-2 py-1.5 font-mono text-sm text-black outline-none focus:border-[#2454c6]"
+                      />
+                    </label>
+                  </div>
+                  <label className="mt-3 grid gap-1 text-xs font-semibold text-[#303030]">
+                    <span>Username</span>
+                    <input
+                      aria-label="Username"
+                      value={sshUsername}
+                      onChange={(e) => setSshUsername(e.target.value)}
+                      className="rounded border border-[#999] bg-white px-2 py-1.5 font-mono text-sm text-black outline-none focus:border-[#2454c6]"
+                    />
+                  </label>
+                </div>
+
+                <fieldset className="rounded border border-[#b8b8b8] bg-[#eeeeee] p-3">
+                  <legend className="px-1 text-xs font-semibold text-[#303030]">Connection type</legend>
+                  <label className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-[#303030]">
+                    <input type="radio" checked readOnly className="accent-[#2454c6]" />
+                    SSH
+                  </label>
+                </fieldset>
+
+                <div className="flex justify-end gap-2 border-t border-[#b8b8b8] pt-3">
+                  <button
+                    type="button"
+                    className="rounded border border-[#8c8c8c] bg-[#f6f6f6] px-4 py-1.5 text-xs font-semibold text-[#222] hover:bg-white"
+                    onClick={() => setActiveTab('overview')}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    aria-label="Open SSH session"
+                    className="rounded border border-[#1f4fbf] bg-[#2454c6] px-4 py-1.5 text-xs font-semibold text-white hover:bg-[#2f63dc]"
+                  >
+                    Open
+                  </button>
+                </div>
+              </div>
+            </div>
+          </form>
+        )}
+
+        {activeTab === 'terminal' && (
+          <div className="h-full border-t border-panel-border/60 bg-[#05070a]">
+            <Terminal term={term} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DesktopToolTile({
+  label,
+  icon,
+  detail,
+  onClick,
+}: {
+  readonly label: string;
+  readonly icon: string;
+  readonly detail: string;
+  readonly onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={onClick}
+      className="group flex min-h-[108px] flex-col items-center justify-between rounded-lg border border-cyan-300/25 bg-cyan-300/10 p-3 text-center transition hover:-translate-y-0.5 hover:border-terminal-prompt/60 hover:bg-terminal-prompt/15 focus:outline-none focus:ring-2 focus:ring-terminal-prompt/70"
+    >
+      <span className="grid h-12 w-14 place-items-center rounded-md border border-white/15 bg-gradient-to-br from-[#5ecae2]/35 to-[#10233a] font-mono text-sm font-bold text-terminal-fg shadow-inner">
+        {icon}
+      </span>
+      <span className="mt-2 text-xs font-semibold leading-tight text-terminal-fg">{label}</span>
+      <span className="text-[10px] uppercase tracking-[0.12em] text-terminal-fg/45 group-hover:text-terminal-fg/65">
+        {detail}
+      </span>
+    </button>
+  );
+}
+
+function ModeOption({
+  title,
+  detail,
+  checked,
+  name,
+  ariaLabel,
+  onChange,
+}: {
+  readonly title: string;
+  readonly detail: string;
+  readonly checked: boolean;
+  readonly name: string;
+  readonly ariaLabel?: string;
+  readonly onChange: () => void;
+}) {
+  return (
+    <label
+      className={`flex cursor-pointer gap-3 rounded-lg border p-3 transition ${
+        checked
+          ? 'border-terminal-prompt/45 bg-terminal-prompt/10'
+          : 'border-panel-border bg-black/20 hover:bg-white/5'
+      }`}
+    >
+      <input
+        type="radio"
+        name={name}
+        aria-label={ariaLabel}
+        checked={checked}
+        onChange={onChange}
+        className="mt-1 accent-terminal-prompt"
+      />
+      <span>
+        <span className="block text-sm font-semibold text-terminal-fg">{title}</span>
+        <span className="mt-1 block text-xs leading-5 text-terminal-fg/60">{detail}</span>
+      </span>
+    </label>
+  );
+}
+
+function normalizePcNetworkDraft(draft: PcNetworkConfig): PcNetworkConfig {
+  if (draft.mode === 'dhcp') return { mode: 'dhcp' };
+  return {
+    mode: 'static',
+    ip: draft.ip?.trim() || null,
+    mask: draft.mask?.trim() || null,
+    gateway: draft.gateway?.trim() || null,
+    ipv6: draft.ipv6?.trim() || null,
+    gateway6: draft.gateway6?.trim() || null,
+  };
+}
+
+function WorkbenchTab({
+  label,
+  active,
+  onClick,
+}: {
+  readonly label: string;
+  readonly active: boolean;
+  readonly onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={`rounded px-3 py-1.5 text-xs font-semibold ${
+        active ? 'bg-terminal-prompt text-[#06231d]' : 'bg-white/5 text-terminal-fg/75 hover:bg-white/10'
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function splitIpv4(value: string | null | undefined): string[] {
+  const parts = (value ?? '').split('.');
+  return [parts[0] ?? '', parts[1] ?? '', parts[2] ?? '', parts[3] ?? ''];
+}
+
+function joinIpv4(octets: readonly string[]): string | null {
+  return octets.some((octet) => octet !== '') ? octets.join('.') : null;
+}
+
+function Ipv4OctetField({
+  label,
+  value,
+  disabled,
+  onChange,
+}: {
+  readonly label: string;
+  readonly value: string | null | undefined;
+  readonly disabled?: boolean;
+  readonly onChange: (index: number, value: string) => void;
+}) {
+  const octets = splitIpv4(value);
+  return (
+    <fieldset className="grid gap-1 text-xs font-semibold uppercase tracking-[0.08em] text-terminal-dim">
+      <legend>{label}</legend>
+      <div className="grid grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr] items-center gap-1">
+        {octets.map((octet, index) => (
+          <Fragment key={`${label}-${index}`}>
+            <input
+              aria-label={`${label} octet ${index + 1}`}
+              value={octet}
+              disabled={disabled}
+              inputMode="numeric"
+              maxLength={3}
+              placeholder="000"
+              onChange={(e) => onChange(index, e.target.value)}
+              className="min-w-0 rounded border border-panel-border bg-black/30 px-2 py-2 text-center font-mono text-sm normal-case tracking-normal text-terminal-fg outline-none focus:border-terminal-prompt disabled:opacity-50"
+            />
+            {index < 3 ? <span className="text-center font-mono text-terminal-fg/55">.</span> : null}
+          </Fragment>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
+function TextField({
+  label,
+  value,
+  disabled,
+  onChange,
+}: {
+  readonly label: string;
+  readonly value: string;
+  readonly disabled?: boolean;
+  readonly onChange: (value: string) => void;
+}) {
+  return (
+    <label className="grid gap-1 text-xs font-semibold uppercase tracking-[0.08em] text-terminal-dim">
+      <span>{label}</span>
+      <input
+        aria-label={label}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        className="rounded border border-panel-border bg-black/30 px-3 py-2 font-mono text-sm normal-case tracking-normal text-terminal-fg outline-none focus:border-terminal-prompt disabled:opacity-50"
+      />
+    </label>
   );
 }
 

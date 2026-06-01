@@ -12,15 +12,22 @@
 import { tokenize, resolve, complete } from '@/engine/parser';
 import { switchGrammarFor } from './switch-grammar';
 import {
+  type LacpMode,
+  type PortChannel,
   type SwitchMode,
   type SwitchSession,
   type Switchport,
   type Vlan,
+  ROOT_PRIMARY_PRIORITY,
   defaultVlanName,
   formatVlanList,
   fullSwitchportName,
   isReservedVlan,
+  isValidChannelGroup,
   isValidVlanId,
+  makePortChannel,
+  makeSpanningTreeVlan,
+  normalisePortChannelId,
   normaliseSwitchportId,
   parseVlanList,
   switchPrompt,
@@ -258,6 +265,7 @@ function dispatch(
       return { session: s, output: [] };
 
     case 'interface':
+      if (command[1] === 'port-channel') return enterPortChannel(s, args.id, ec);
       return enterInterface(s, args.iface, ec);
 
     case 'vlan':
@@ -268,6 +276,12 @@ function dispatch(
 
     case 'switchport':
       return handleSwitchport(s, command, args, ec);
+
+    case 'channel-group':
+      return setChannelGroup(s, args.id, command[3] as LacpMode, ec);
+
+    case 'spanning-tree':
+      return setSpanningTree(s, command, args, ec);
 
     case 'ip':
       // `ip address <ip> <mask>` on a switchport — explicitly rejected on L2.
@@ -291,7 +305,7 @@ function dispatch(
       return negate(s, command, args, ec);
 
     case 'show':
-      return show(s, command, args, opts);
+      return show(s, command, args, ec, opts);
 
     case 'write':
       return { session: s, output: out('Building configuration...', '[OK]') };
@@ -304,6 +318,8 @@ function dispatch(
 function enterInterface(s: SwitchSession, token: string, ec: ErrCtx): ApplyResult {
   const id = normaliseSwitchportId(token);
   if (!id) {
+    const po = normalisePortChannelId(token);
+    if (po !== null) return enterPortChannel(s, String(po), ec);
     return { session: s, output: badInput(ec, 'iface') };
   }
   if (!s.device.switchports[id]) {
@@ -313,6 +329,101 @@ function enterInterface(s: SwitchSession, token: string, ec: ErrCtx): ApplyResul
   s.currentInterface = id;
   s.currentVlan = null;
   return { session: s, output: [] };
+}
+
+function enterPortChannel(s: SwitchSession, idArg: string, ec: ErrCtx): ApplyResult {
+  const id = Number.parseInt(idArg, 10);
+  if (String(id) !== idArg || !isValidChannelGroup(id)) {
+    return { session: s, output: badInput(ec, 'id') };
+  }
+  if (!s.device.portChannels.has(id)) {
+    s.device.portChannels.set(id, makePortChannel(id));
+  }
+  s.mode = 'config-if';
+  s.currentInterface = `Po${id}`;
+  s.currentVlan = null;
+  return { session: s, output: [] };
+}
+
+function currentSwitchportTarget(s: SwitchSession): Switchport | PortChannel | null {
+  if (s.currentInterface === null) return null;
+  const po = normalisePortChannelId(s.currentInterface);
+  if (po !== null) return s.device.portChannels.get(po) ?? null;
+  return s.device.switchports[s.currentInterface] ?? null;
+}
+
+function currentPhysicalSwitchport(s: SwitchSession): Switchport | null {
+  if (s.currentInterface === null) return null;
+  return s.device.switchports[s.currentInterface] ?? null;
+}
+
+function ensurePortChannel(s: SwitchSession, id: number): PortChannel {
+  let po = s.device.portChannels.get(id);
+  if (!po) {
+    po = makePortChannel(id);
+    s.device.portChannels.set(id, po);
+  }
+  return po;
+}
+
+/** `channel-group <id> mode active|passive|on` on a physical switchport.
+ *  Assigns the port to an EtherChannel group and records the LACP mode. The
+ *  logical Port-channel interface is auto-created on first reference (real IOS
+ *  does the same). Whether the group actually bundles is a DERIVED, cross-
+ *  device decision computed by recomputeEtherchannel in the refresh pass — this
+ *  handler only records intent. Rejected on a Port-channel interface (the group
+ *  is a property of member ports, not of the aggregator). */
+function setChannelGroup(
+  s: SwitchSession,
+  idArg: string,
+  mode: LacpMode,
+  ec: ErrCtx,
+): ApplyResult {
+  const port = currentPhysicalSwitchport(s);
+  if (!port) {
+    return {
+      session: s,
+      output: err('% Channel-group can only be configured on a physical interface.'),
+    };
+  }
+  const id = Number.parseInt(idArg, 10);
+  if (String(id) !== idArg || !isValidChannelGroup(id)) {
+    return { session: s, output: badInput(ec, 'id') };
+  }
+  ensurePortChannel(s, id);
+  port.channelGroup = id;
+  port.lacpMode = mode;
+  return { session: s, output: [] };
+}
+
+
+function setSpanningTree(
+  s: SwitchSession,
+  command: string[],
+  args: Record<string, string>,
+  ec: ErrCtx,
+): ApplyResult {
+  const vlanId = Number.parseInt(args.id, 10);
+  if (!isValidVlanId(vlanId) || String(vlanId) !== args.id || isReservedVlan(vlanId)) {
+    return { session: s, output: badInput(ec, 'id') };
+  }
+  if (!s.device.vlans.has(vlanId)) {
+    s.device.vlans.set(vlanId, { id: vlanId, name: defaultVlanName(vlanId), active: true });
+  }
+  if (command[3] === 'priority') {
+    const priority = Number.parseInt(args.priority, 10);
+    if (String(priority) !== args.priority || priority < 0 || priority > 61440 || priority % 4096 !== 0) {
+      return { session: s, output: badInput(ec, 'priority') };
+    }
+    s.device.spanningTree.set(vlanId, { vlanId, priority, rootRole: null });
+    return { session: s, output: [] };
+  }
+  if (command[3] === 'root') {
+    const role = command[4] === 'primary' ? 'primary' : 'secondary';
+    s.device.spanningTree.set(vlanId, makeSpanningTreeVlan(vlanId, role));
+    return { session: s, output: [] };
+  }
+  return { session: s, output: err('% Incomplete command.') };
 }
 
 function enterVlan(s: SwitchSession, idArg: string, ec: ErrCtx): ApplyResult {
@@ -361,7 +472,9 @@ function handleSwitchport(
     // dispatch is defensive too.
     return { session: s, output: [] };
   }
-  const port = s.device.switchports[s.currentInterface];
+  // Target is either a physical switchport or a logical Port-channel — both
+  // carry the same mode/access/trunk config fields, so the handler is shared.
+  const port = currentSwitchportTarget(s);
   if (!port) return { session: s, output: [] };
 
   if (command[1] === 'mode') {
@@ -430,7 +543,7 @@ function handleSwitchport(
  *  next mode flip surfaces the staged values without re-typing them. */
 function handleSwitchportTrunk(
   s: SwitchSession,
-  port: Switchport,
+  port: Switchport | PortChannel,
   command: string[],
   args: Record<string, string>,
   ec: ErrCtx,
@@ -535,6 +648,18 @@ function negate(
   switch (command[1]) {
     case 'shutdown':
       return setSwitchportAdmin(s, true);
+    case 'channel-group': {
+      // `no channel-group [<id>]` — remove the port from its EtherChannel
+      // group. Clears the membership + LACP mode; the derived `bundled` flag
+      // is reset here too and reconfirmed by the next refresh pass.
+      const port = currentPhysicalSwitchport(s);
+      if (port) {
+        port.channelGroup = null;
+        port.lacpMode = null;
+        port.bundled = false;
+      }
+      return { session: s, output: [] };
+    }
     case 'hostname':
       s.device.hostname = 'Switch';
       return { session: s, output: [] };
@@ -611,6 +736,7 @@ function show(
   s: SwitchSession,
   command: string[],
   args: Record<string, string>,
+  ec: ErrCtx,
   opts: ApplyOptions | undefined,
 ): ApplyResult {
   const what = command[1];
@@ -642,7 +768,34 @@ function show(
     return { session: s, output: out(...showInterfacesAll(s)) };
   }
   if (what === 'version') return { session: s, output: out(...showVersion(s)) };
+  if (what === 'spanning-tree' && command[2] === 'vlan' && args.id) {
+    const vlanId = Number.parseInt(args.id, 10);
+    if (!isValidVlanId(vlanId) || String(vlanId) !== args.id || isReservedVlan(vlanId)) {
+      return { session: s, output: badInput(ec, 'id') };
+    }
+    if (opts?.record !== false) {
+      s.lastShowSpanningTreeVlans = { vlanIds: [vlanId] };
+    }
+    return { session: s, output: out(...showSpanningTreeVlan(s, vlanId)) };
+  }
+  if (what === 'etherchannel' && command[2] === 'summary') {
+    // Stamp which channel-groups were bundled the instant the learner ran the
+    // command — verify objectives read this snapshot (mirrors lastPing /
+    // lastShowInterfacesTrunk) so a verify run BEFORE the bundle forms can't
+    // auto-complete the objective once it comes up later. Gated on
+    // opts?.record so seed runs don't pre-satisfy it.
+    if (opts?.record !== false) {
+      const bundledGroups = [...s.device.portChannels.values()]
+        .filter((po) => po.bundled)
+        .map((po) => po.id);
+      s.lastShowEtherchannelSummary = { bundledGroups };
+    }
+    return { session: s, output: out(...showEtherchannelSummary(s)) };
+  }
   if (what === 'running-config') {
+    if (command[2] === 'interface' && command[3] === 'port-channel' && args.id) {
+      return { session: s, output: showRunningPortChannel(s, args.id) };
+    }
     if (command[2] === 'interface' && args.iface) {
       return { session: s, output: showRunningInterface(s, args.iface) };
     }
@@ -851,6 +1004,47 @@ function showInterfacesAll(s: SwitchSession): string[] {
   });
 }
 
+
+function showSpanningTreeVlan(s: SwitchSession, vlanId: number): string[] {
+  const stp = s.device.spanningTree.get(vlanId) ?? makeSpanningTreeVlan(vlanId);
+  const bridgeId = bridgeIdFor(s.device.id);
+  const rootPriority =
+    stp.rootRole === 'secondary' ? ROOT_PRIMARY_PRIORITY : stp.priority;
+  const rootAddress = stp.rootRole === 'secondary' ? '0011.2233.0001' : bridgeId;
+  const rootLine = stp.rootRole === 'primary' ? ['            This bridge is the root'] : [];
+  const forwardingPorts = Object.values(s.device.switchports).filter(
+    (p) => p.adminUp && p.protocolUp && (p.mode === 'trunk' || p.accessVlan === vlanId),
+  );
+  const lines: string[] = [
+    `VLAN${vlanId.toString().padStart(4, '0')}`,
+    '  Spanning tree enabled protocol ieee',
+    `  Root ID    Priority    ${rootPriority + vlanId}`,
+    `             Address     ${rootAddress}`,
+    ...rootLine,
+    `  Bridge ID  Priority    ${stp.priority + vlanId}  (priority ${stp.priority} sys-id-ext ${vlanId})`,
+    `             Address     ${bridgeId}`,
+    '             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec',
+    '',
+    'Interface           Role Sts Cost      Prio.Nbr Type',
+    '------------------- ---- --- --------- -------- --------------------------------',
+  ];
+  if (forwardingPorts.length === 0) {
+    lines.push('No interfaces are forwarding for this VLAN.');
+    return lines;
+  }
+  for (const port of forwardingPorts) {
+    const role = stp.rootRole === 'secondary' && port === forwardingPorts[0] ? 'Root' : 'Desg';
+    lines.push(`${port.id.padEnd(19)} ${role.padEnd(4)} FWD 19        128.1    P2p`);
+  }
+  return lines;
+}
+
+function bridgeIdFor(deviceId: string): string {
+  const digits = deviceId.replace(/\D/g, '') || '1';
+  const n = Number.parseInt(digits, 10) % 10000;
+  return `0011.2233.${n.toString().padStart(4, '0')}`;
+}
+
 function showVersion(s: SwitchSession): string[] {
   return [
     `Cisco IOS Software, ${s.device.platform} Software`,
@@ -937,6 +1131,93 @@ function showRunningInterface(s: SwitchSession, ifaceToken: string): CommandOutp
     lines.push(` switchport trunk native vlan ${port.nativeVlan}`);
   }
   if (!port.adminUp) lines.push(' shutdown');
+  lines.push('!');
+  lines.push('end');
+  return out(...lines);
+}
+
+/** IOS `show etherchannel summary` — the verify surface for an EtherChannel
+ *  lab. Renders the standard flags legend, the channel-group/aggregator
+ *  counts, and one row per Port-channel:
+ *
+ *    Group  Port-channel  Protocol    Ports
+ *    1      Po1(SU)       LACP        Fa0/1(P)   Fa0/2(P)
+ *
+ *  Port-channel suffix: S (Layer2) always; U (in use) when bundled, else D
+ *  (down). Member suffix: P (bundled), D (admin-down), or I (stand-alone — in
+ *  the group but not bundled, e.g. an incompatible-mode peer). Protocol is
+ *  LACP when any member runs active/passive, or `-` for static `on` mode. */
+function showEtherchannelSummary(s: SwitchSession): string[] {
+  const lines: string[] = [
+    'Flags:  D - down        P - bundled in port-channel',
+    '        I - stand-alone s - suspended',
+    '        H - Hot-standby (LACP only)',
+    '        R - Layer3      S - Layer2',
+    '        U - in use      f - failed to allocate aggregator',
+    '',
+    '        M - not in use, minimum links not met',
+    '        u - unsuitable for bundling',
+    '        w - waiting to be aggregated',
+    '        d - default port',
+    '',
+  ];
+
+  const groups = [...s.device.portChannels.values()].sort((a, b) => a.id - b.id);
+  const inUse = groups.filter((po) => po.bundled).length;
+  lines.push(`Number of channel-groups in use: ${inUse}`);
+  lines.push(`Number of aggregators:           ${groups.length}`);
+  lines.push('');
+  lines.push(
+    'Group  Port-channel  Protocol    Ports',
+    '------+-------------+-----------+' + '-'.repeat(47),
+  );
+
+  for (const po of groups) {
+    const members = Object.values(s.device.switchports).filter(
+      (p) => p.channelGroup === po.id,
+    );
+    const protocol = members.some(
+      (p) => p.lacpMode === 'active' || p.lacpMode === 'passive',
+    )
+      ? 'LACP'
+      : '-';
+    const poLabel = `Po${po.id}(S${po.bundled ? 'U' : 'D'})`;
+    const portCells = members.map((p) => {
+      const flag = !p.adminUp ? 'D' : p.bundled ? 'P' : 'I';
+      return `${p.id}(${flag})`;
+    });
+    lines.push(
+      `${String(po.id).padEnd(7)}${poLabel.padEnd(14)}${protocol.padEnd(12)}${portCells.join('   ')}`,
+    );
+  }
+
+  return lines;
+}
+
+/** IOS `show running-config interface Port-channel <id>` — single Port-channel
+ *  stanza. Like the per-physical-interface form, this is explicit-everything so
+ *  a learner can confirm the aggregator's trunk/access config mid-troubleshoot. */
+function showRunningPortChannel(s: SwitchSession, idArg: string): CommandOutput[] {
+  const id = Number.parseInt(idArg, 10);
+  const po = Number.isInteger(id) ? s.device.portChannels.get(id) : undefined;
+  if (!po) {
+    return err(`% Invalid interface Port-channel${idArg}`);
+  }
+  const lines: string[] = ['Building configuration...', '!', `interface ${po.name}`];
+  if (po.mode === 'access') {
+    lines.push(' switchport mode access');
+    lines.push(` switchport access vlan ${po.accessVlan}`);
+  } else if (po.mode === 'trunk') {
+    lines.push(' switchport mode trunk');
+    const allowed =
+      po.trunkAllowedVlans === 'all'
+        ? '1-4094'
+        : po.trunkAllowedVlans.length === 0
+          ? 'none'
+          : formatVlanList(po.trunkAllowedVlans);
+    lines.push(` switchport trunk allowed vlan ${allowed}`);
+    lines.push(` switchport trunk native vlan ${po.nativeVlan}`);
+  }
   lines.push('!');
   lines.push('end');
   return out(...lines);

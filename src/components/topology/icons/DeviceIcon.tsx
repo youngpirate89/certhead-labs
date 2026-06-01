@@ -2,6 +2,7 @@ import RouterIcon from "./RouterIcon";
 import SwitchIcon from "./SwitchIcon";
 import WorkstationIcon from "./WorkstationIcon";
 import ServerIcon from "./ServerIcon";
+import WanCloudIcon from "./WanCloudIcon";
 
 interface DeviceIconProps {
   type: string;
@@ -27,9 +28,15 @@ export default function DeviceIcon({ type, size = 40, color = "currentColor" }: 
     case "pc":
     case "host":
       return <WorkstationIcon size={size} color={color} />;
+    case "access-point":
+      return <RouterIcon size={size} color={color} />;
+    case "wireless-client":
+      return <WorkstationIcon size={size} color={color} />;
+    case "wan-cloud":
+      return <WanCloudIcon size={size} color={color} />;
     default:
       return <RouterIcon size={size} color={color} />;
   }
 }
 
-export { RouterIcon, SwitchIcon, WorkstationIcon, ServerIcon };
+export { RouterIcon, SwitchIcon, WorkstationIcon, ServerIcon, WanCloudIcon };

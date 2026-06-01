@@ -37,6 +37,8 @@ export interface Vlan {
  *  match the spec literally but is wasteful and indistinguishable from a
  *  learner who explicitly typed the full list — the sentinel keeps the
  *  distinction. */
+export type LacpMode = 'active' | 'passive' | 'on';
+
 export interface Switchport {
   /** Canonical interface id, e.g. 'Fa0/1'. */
   readonly id: string;
@@ -53,6 +55,28 @@ export interface Switchport {
   adminUp: boolean;
   /** Refreshed by the LabSession layer — true when the cabled peer is up. */
   protocolUp: boolean;
+  /** Port-channel group this physical switchport belongs to, if any. */
+  channelGroup: number | null;
+  /** EtherChannel mode configured by `channel-group <id> mode ...`. */
+  lacpMode: LacpMode | null;
+  /** Derived state: true when the member is bundled into its Port-channel. */
+  bundled: boolean;
+}
+
+export interface PortChannel {
+  readonly id: number;
+  readonly name: string;
+  mode: 'access' | 'trunk' | 'dynamic';
+  accessVlan: number;
+  trunkAllowedVlans: number[] | 'all';
+  nativeVlan: number;
+  bundled: boolean;
+}
+
+export interface SpanningTreeVlan {
+  readonly vlanId: number;
+  priority: number;
+  rootRole: 'primary' | 'secondary' | null;
 }
 
 export interface SwitchDeviceState {
@@ -64,6 +88,10 @@ export interface SwitchDeviceState {
   vlans: Map<number, Vlan>;
   /** Switchports keyed by canonical interface id. */
   switchports: Record<string, Switchport>;
+  /** Logical Port-channel interfaces keyed by channel-group id. */
+  portChannels: Map<number, PortChannel>;
+  /** Scoped per-VLAN STP settings modeled for CCNA root bridge labs. */
+  spanningTree: Map<number, SpanningTreeVlan>;
 }
 
 export interface SwitchSession {
@@ -84,6 +112,11 @@ export interface SwitchSession {
    *  history + current state, otherwise a verify run BEFORE the trunk was
    *  configured auto-completes the objective the instant trunks come up later. */
   lastShowInterfacesTrunk: { trunkPortIds: readonly string[] } | null;
+  /** Snapshot recorded by `show etherchannel summary` at command-eval time.
+   *  Objectives use this to require verify-after-config behavior. */
+  lastShowEtherchannelSummary: { bundledGroups: readonly number[] } | null;
+  /** Snapshot recorded by `show spanning-tree vlan <id>` at command-eval time. */
+  lastShowSpanningTreeVlans: { vlanIds: readonly number[] } | null;
 }
 
 /** Reserved VLAN range — token ring/FDDI in real IOS. Creation is rejected
@@ -134,6 +167,53 @@ export function normaliseSwitchportId(token: string): string | null {
   return `${kind}${slot}`;
 }
 
+export function normalisePortChannelId(token: string): number | null {
+  const m = /^(?:port-channel|po)(\d+)$/i.exec(token);
+  if (!m) return null;
+  const id = Number.parseInt(m[1], 10);
+  return isValidChannelGroup(id) ? id : null;
+}
+
+export function portChannelName(id: number): string {
+  return `Port-channel${id}`;
+}
+
+export const MIN_CHANNEL_GROUP = 1;
+export const MAX_CHANNEL_GROUP = 128;
+
+export function isValidChannelGroup(id: number): boolean {
+  return Number.isInteger(id) && id >= MIN_CHANNEL_GROUP && id <= MAX_CHANNEL_GROUP;
+}
+
+export function makePortChannel(id: number): PortChannel {
+  return {
+    id,
+    name: portChannelName(id),
+    mode: 'dynamic',
+    accessVlan: 1,
+    trunkAllowedVlans: 'all',
+    nativeVlan: 1,
+    bundled: false,
+  };
+}
+
+export const DEFAULT_STP_PRIORITY = 32768;
+export const ROOT_PRIMARY_PRIORITY = 24576;
+export const ROOT_SECONDARY_PRIORITY = 28672;
+
+export function makeSpanningTreeVlan(
+  vlanId: number,
+  rootRole: 'primary' | 'secondary' | null = null,
+): SpanningTreeVlan {
+  const priority =
+    rootRole === 'primary'
+      ? ROOT_PRIMARY_PRIORITY
+      : rootRole === 'secondary'
+        ? ROOT_SECONDARY_PRIORITY
+        : DEFAULT_STP_PRIORITY;
+  return { vlanId, priority, rootRole };
+}
+
 /** Build a starting switch device from a topology spec. Every switchport
  *  defaults to access mode in VLAN 1, admin-up — matches real IOS where
  *  switchports come up out of the box and forward in VLAN 1. The default
@@ -162,6 +242,9 @@ export function buildSwitchDevice(spec: {
       // Default true; LabSession refresh pass overrides when uncabled or
       // when the cabled peer is admin-down.
       protocolUp: true,
+      channelGroup: null,
+      lacpMode: null,
+      bundled: false,
     };
   }
   const vlans = new Map<number, Vlan>();
@@ -172,6 +255,8 @@ export function buildSwitchDevice(spec: {
     platform: spec.platform,
     vlans,
     switchports,
+    portChannels: new Map(),
+    spanningTree: new Map(),
   };
 }
 
@@ -187,6 +272,8 @@ export function createSwitchSession(device: SwitchDeviceState): SwitchSession {
     history: [],
     resolvedHistory: [],
     lastShowInterfacesTrunk: null,
+    lastShowEtherchannelSummary: null,
+    lastShowSpanningTreeVlans: null,
   };
 }
 

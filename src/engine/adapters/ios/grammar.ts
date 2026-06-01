@@ -17,6 +17,12 @@ const showSubtree: CommandNode = {
   help: 'Display running system information',
   children: {
     'access-lists': done('All configured access lists'),
+    ipv6: {
+      children: {
+        interface: { children: { brief: done('Brief IPv6 interface summary') } },
+        route: done('IPv6 routing table'),
+      },
+    },
     ip: {
       children: {
         interface: {
@@ -81,6 +87,14 @@ const showSubtree: CommandNode = {
         },
       },
     },
+    ntp: {
+      help: 'Network Time Protocol status',
+      children: {
+        status: done('NTP clock status'),
+        associations: done('NTP association table'),
+      },
+    },
+    logging: done('System logging status'),
   },
 };
 
@@ -227,9 +241,27 @@ const ipAccessListSubtree: CommandNode = {
   },
 };
 
+const ipv6RouteSubtree: CommandNode = {
+  help: 'Establish an IPv6 static route',
+  argument: arg('prefix', {
+    argument: arg('nextHop', done('Add an IPv6 static route')),
+  }),
+};
+
+const ipv6ConfigSubtree: CommandNode = {
+  help: 'IPv6 configuration commands',
+  children: {
+    route: ipv6RouteSubtree,
+  },
+};
+
 const ipConfigSubtree: CommandNode = {
   help: 'IP configuration commands',
   children: {
+    'domain-name': {
+      help: 'Set the DNS domain name used for RSA key generation',
+      argument: arg('domain', done('Apply domain name')),
+    },
     route: ipRouteSubtree,
     dhcp: {
       help: 'DHCP server configuration',
@@ -243,6 +275,101 @@ const ipConfigSubtree: CommandNode = {
   },
 };
 
+
+const usernameSubtree: CommandNode = {
+  help: 'Configure a local user account',
+  argument: arg('username', {
+    children: {
+      secret: {
+        help: 'Set the encrypted local user secret',
+        argument: arg('secret', done('Apply local user secret')),
+      },
+    },
+  }),
+};
+
+const ntpConfigSubtree: CommandNode = {
+  help: 'Configure Network Time Protocol',
+  children: {
+    server: {
+      help: 'Configure an NTP server',
+      argument: arg('server', done('Apply NTP server')),
+    },
+  },
+};
+
+const loggingConfigSubtree: CommandNode = {
+  help: 'Configure system logging',
+  children: {
+    host: {
+      help: 'Configure remote syslog host',
+      argument: arg('host', done('Apply syslog host')),
+    },
+    trap: {
+      help: 'Set syslog trap severity level',
+      argument: arg('level', done('Apply trap severity')),
+    },
+  },
+};
+
+const serviceConfigSubtree: CommandNode = {
+  help: 'Modify use of network based services',
+  children: {
+    timestamps: {
+      help: 'Timestamp debug/log messages',
+      children: {
+        log: {
+          help: 'Timestamp log messages',
+          children: {
+            datetime: {
+              help: 'Use date and time',
+              children: {
+                msec: done('Include milliseconds'),
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
+const cryptoKeySubtree: CommandNode = {
+  help: 'Generate cryptographic keys',
+  children: {
+    key: {
+      children: {
+        generate: {
+          children: {
+            rsa: {
+              terminal: true,
+              help: 'Generate RSA keys',
+              children: {
+                modulus: {
+                  help: 'Set RSA key size',
+                  argument: arg('modulus', done('Generate RSA key with modulus')),
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
+const lineSubtree: CommandNode = {
+  help: 'Configure terminal lines',
+  children: {
+    vty: {
+      help: 'Virtual terminal lines',
+      argument: arg('start', {
+        argument: arg('end', done('Enter VTY line configuration')),
+      }),
+    },
+  },
+};
+
 const configMode: CommandNode = {
   children: {
     interface: {
@@ -253,6 +380,20 @@ const configMode: CommandNode = {
       help: 'Set the device hostname',
       argument: arg('name', done('Apply hostname')),
     },
+    username: usernameSubtree,
+    ntp: ntpConfigSubtree,
+    logging: loggingConfigSubtree,
+    service: serviceConfigSubtree,
+    enable: {
+      children: {
+        secret: {
+          help: 'Set privileged EXEC secret',
+          argument: arg('secret', done('Apply enable secret')),
+        },
+      },
+    },
+    crypto: cryptoKeySubtree,
+    line: lineSubtree,
     // `ping` is parsed here so the dispatcher can emit a tailored redirect
     // ("ping is available in privileged EXEC mode") instead of the resolver's
     // generic invalid-input error. Both bare `ping` and `ping <target>`
@@ -263,6 +404,7 @@ const configMode: CommandNode = {
       argument: arg('target', done('Not available in configuration mode')),
     },
     ip: ipConfigSubtree,
+    ipv6: ipv6ConfigSubtree,
     'access-list': accessListSubtree,
     router: {
       help: 'Enable a routing process',
@@ -291,6 +433,7 @@ const configMode: CommandNode = {
             'access-list': ipAccessListSubtree,
           },
         },
+        ipv6: ipv6ConfigSubtree,
         'access-list': noAccessListSubtree,
       },
     },
@@ -317,15 +460,32 @@ const passiveInterfaceSubtree: CommandNode = {
   argument: arg('iface', done('Mark this interface passive')),
 };
 
+const defaultInformationSubtree: CommandNode = {
+  help: 'Control distribution of default information into OSPF',
+  children: {
+    originate: {
+      // Terminal on its own (`default-information originate`) but also accepts
+      // the optional `always` keyword to advertise without a default in the RIB.
+      terminal: true,
+      help: 'Distribute a default route into OSPF',
+      children: {
+        always: done('Advertise the default route even without one in the RIB'),
+      },
+    },
+  },
+};
+
 const configRouterMode: CommandNode = {
   children: {
     network: networkSubtree,
     'passive-interface': passiveInterfaceSubtree,
+    'default-information': defaultInformationSubtree,
     no: {
       help: 'Negate a command',
       children: {
         network: networkSubtree,
         'passive-interface': passiveInterfaceSubtree,
+        'default-information': defaultInformationSubtree,
       },
     },
     exit: done('Exit OSPF configuration'),
@@ -352,6 +512,14 @@ const configIfMode: CommandNode = {
       terminal: true,
       help: 'Not available in interface configuration mode',
       argument: arg('target', done('Not available in interface configuration mode')),
+    },
+    ipv6: {
+      children: {
+        address: {
+          help: 'Set the interface IPv6 address and prefix length',
+          argument: arg('prefix', done('Apply IPv6 address/prefix')),
+        },
+      },
     },
     ip: {
       children: {
@@ -420,6 +588,11 @@ const configIfMode: CommandNode = {
       help: 'Negate a command',
       children: {
         shutdown: done('Bring the interface up'),
+        ipv6: {
+          children: {
+            address: done('Remove IPv6 addresses'),
+          },
+        },
         ip: {
           children: {
             address: done('Remove the IP address'),
@@ -623,6 +796,31 @@ const configExtNaclMode: CommandNode = {
   },
 };
 
+
+const configLineMode: CommandNode = {
+  children: {
+    login: {
+      children: {
+        local: done('Use local username database for line login'),
+      },
+    },
+    transport: {
+      children: {
+        input: {
+          children: {
+            ssh: done('Allow SSH inbound on this line'),
+            telnet: done('Allow Telnet inbound on this line'),
+            all: done('Allow all inbound transports on this line'),
+            none: done('Disable inbound transports on this line'),
+          },
+        },
+      },
+    },
+    exit: done('Exit line configuration'),
+    end: done('Return to privileged EXEC'),
+  },
+};
+
 const GRAMMARS: Record<Mode, CommandNode> = {
   user: userMode,
   priv: privMode,
@@ -632,6 +830,7 @@ const GRAMMARS: Record<Mode, CommandNode> = {
   'config-router': configRouterMode,
   'config-dhcp': configDhcpMode,
   'config-ext-nacl': configExtNaclMode,
+  'config-line': configLineMode,
 };
 
 export function grammarFor(mode: Mode): CommandNode {

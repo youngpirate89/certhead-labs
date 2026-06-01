@@ -30,6 +30,14 @@ import { lab17OspfPassiveInterface } from './ccna/lab-17-ospf-passive-interface'
 import { lab18OspfTshootPassive } from './ccna/lab-18-ospf-tshoot-passive';
 import { lab19OspfTshootHelloTimers } from './ccna/lab-19-ospf-tshoot-hello-timers';
 import { lab20OspfTshootAuth } from './ccna/lab-20-ospf-tshoot-auth';
+import { lab21OspfDefaultInformation } from './ccna/lab-21-ospf-default-information';
+import { lab22EtherchannelLacp } from './ccna/lab-22-etherchannel-lacp';
+import { lab23StpRootBridge } from './ccna/lab-23-stp-root-bridge';
+import { lab24Ipv6AddressingDefaultGateway } from './ccna/lab-24-ipv6-addressing-default-gateway';
+import { lab25Ipv6StaticRoute } from './ccna/lab-25-ipv6-static-route';
+import { lab26DeviceHardeningSsh } from './ccna/lab-26-device-hardening-ssh';
+import { lab27NtpSyslogBasics } from './ccna/lab-27-ntp-syslog-basics';
+import { lab28WirelessWlanVlanMapping } from './ccna/lab-28-wireless-wlan-vlan-mapping';
 import { tshootReturnRoute } from './ccna/tshoot-return-route';
 import { tshootWrongNextHop } from './ccna/tshoot-wrong-next-hop';
 import { tshootWanSubnetMismatch } from './ccna/tshoot-wan-subnet-mismatch';
@@ -53,6 +61,14 @@ const CATALOG: readonly Lab[] = [
   lab18OspfTshootPassive,
   lab19OspfTshootHelloTimers,
   lab20OspfTshootAuth,
+  lab21OspfDefaultInformation,
+  lab22EtherchannelLacp,
+  lab23StpRootBridge,
+  lab24Ipv6AddressingDefaultGateway,
+  lab25Ipv6StaticRoute,
+  lab26DeviceHardeningSsh,
+  lab27NtpSyslogBasics,
+  lab28WirelessWlanVlanMapping,
   tshootReturnRoute,
   tshootWrongNextHop,
   tshootWanSubnetMismatch,

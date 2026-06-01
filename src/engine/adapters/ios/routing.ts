@@ -29,6 +29,11 @@ export interface Route {
   /** OSPF cost — only present when source==='ospf'. Render in [AD/metric]
    *  brackets so the show-ip-route line reads `[110/1]`. */
   readonly metric?: number;
+  /** OSPF external marker — set on the default route (0.0.0.0/0) injected by
+   *  `default-information originate`. Drives the `O*E2` route code plus the
+   *  "Gateway of last resort" header in `show ip route`. Only OSPF-sourced
+   *  default routes carry it today. (Lab 21.) */
+  readonly ospfExternal?: boolean;
 }
 
 // ---------- IPv4 bit utilities ----------

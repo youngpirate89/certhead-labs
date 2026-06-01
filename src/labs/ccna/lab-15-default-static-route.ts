@@ -74,6 +74,15 @@ export const lab15DefaultStaticRoute: Lab = {
       { a: { deviceId: 'R1', iface: 'Gi0/1' }, b: { deviceId: 'R2', iface: 'Gi0/0' } },
       { a: { deviceId: 'R2', iface: 'Gi0/1' }, b: { deviceId: 'INET', iface: 'Gi0/0' } },
     ],
+    decorations: [
+      {
+        id: 'ISP-CLOUD',
+        kind: 'wan-cloud',
+        label: 'ISP Cloud',
+        variant: 'isp',
+        position: { x: 500, y: -105 },
+      },
+    ],
   },
   setup: {
     // R1 LAN + WAN interfaces up. NO default route — that's the learner's job.

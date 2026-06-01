@@ -68,6 +68,7 @@ export function PilotMode({ lab }: { lab: Lab }) {
             activeDeviceId={session.activeDeviceId}
             onSelectDevice={handleSelectDevice}
             links={lab.topology.links}
+            decorations={lab.topology.decorations}
             positions={positions}
           />
         }
@@ -94,6 +95,9 @@ export function PilotMode({ lab }: { lab: Lab }) {
           activeDeviceId={session.activeDeviceId}
           forDevice={session.forDevice}
           platformLabel={platformLabel}
+          deviceKind={session.deviceKind}
+          pcNetwork={session.pcNetwork}
+          onPcNetworkApply={session.updatePcNetwork}
           onSelectDevice={session.setActiveDevice}
           onCloseDevice={session.closeDevice}
           onCloseAll={session.closeAllDevices}
