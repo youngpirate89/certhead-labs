@@ -12,3 +12,8 @@ coverage
 
 *.tsbuildinfo
 .claude/
+
+# Playwright / browser-smoke artifacts
+qa-runs/
+test-results/
+playwright-report/
