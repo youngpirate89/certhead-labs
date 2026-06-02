@@ -39,6 +39,7 @@ import { lab26DeviceHardeningSsh } from './ccna/lab-26-device-hardening-ssh';
 import { lab27NtpSyslogBasics } from './ccna/lab-27-ntp-syslog-basics';
 import { lab28WirelessWlanVlanMapping } from './ccna/lab-28-wireless-wlan-vlan-mapping';
 import { lab29AutomationApiBasics } from './ccna/lab-29-automation-api-basics';
+import { lab30VlanDhcpTicket } from './ccna/lab-30-vlan-dhcp-ticket';
 import { tshootReturnRoute } from './ccna/tshoot-return-route';
 import { tshootWrongNextHop } from './ccna/tshoot-wrong-next-hop';
 import { tshootWanSubnetMismatch } from './ccna/tshoot-wan-subnet-mismatch';
@@ -71,6 +72,7 @@ const CATALOG: readonly Lab[] = [
   lab27NtpSyslogBasics,
   lab28WirelessWlanVlanMapping,
   lab29AutomationApiBasics,
+  lab30VlanDhcpTicket,
   tshootReturnRoute,
   tshootWrongNextHop,
   tshootWanSubnetMismatch,

@@ -26,6 +26,7 @@ import type {
   Session as RouterSession,
 } from './adapters/ios/state';
 import type { SwitchSession } from './adapters/ios/switch-state';
+import { trunkAllowsVlan } from './adapters/ios/switch-state';
 import { recomputeOspf } from './adapters/ios/ospf';
 import { recomputeEtherchannel } from './adapters/ios/etherchannel';
 import {
@@ -662,7 +663,11 @@ function resolveDhcpClientPool(
     }
     if (!myIface || !peer) continue;
     const neighbor = lab.devices[peer.deviceId];
-    if (!neighbor || neighbor.kind !== 'router') return null;
+    if (!neighbor) return null;
+    if (neighbor.kind === 'switch') {
+      return resolveDhcpClientPoolThroughSwitch(lab, neighbor, peer.iface);
+    }
+    if (neighbor.kind !== 'router') return null;
     const iface = neighbor.device.interfaces[peer.iface];
     if (!iface || !iface.ip || !iface.mask) return null;
     // Lab 10 same-subnet path: a pool on the cabled router covering the
@@ -689,6 +694,67 @@ function resolveDhcpClientPool(
     }
     return null;
   }
+  return null;
+}
+
+function resolveDhcpClientPoolThroughSwitch(
+  lab: LabSession,
+  startSwitch: SwitchSession,
+  accessIface: string,
+): { routerId: string; poolName: string } | null {
+  const accessPort = startSwitch.device.switchports[accessIface];
+  if (!accessPort || accessPort.mode !== 'access' || !accessPort.protocolUp) return null;
+  const vlan = accessPort.accessVlan;
+  const visited = new Set<string>([startSwitch.device.id]);
+  const queue: string[] = [startSwitch.device.id];
+
+  while (queue.length > 0) {
+    const swId = queue.shift()!;
+    const sw = lab.devices[swId];
+    if (!sw || sw.kind !== 'switch') continue;
+
+    for (const link of lab.links) {
+      let myIface: string;
+      let peerEnd: { deviceId: string; iface: string };
+      if (link.a.deviceId === swId) {
+        myIface = link.a.iface;
+        peerEnd = link.b;
+      } else if (link.b.deviceId === swId) {
+        myIface = link.b.iface;
+        peerEnd = link.a;
+      } else {
+        continue;
+      }
+
+      const myPort = sw.device.switchports[myIface];
+      if (!myPort || !myPort.protocolUp || myPort.mode !== 'trunk') continue;
+      if (!trunkAllowsVlan(myPort.trunkAllowedVlans, vlan)) continue;
+
+      const peer = lab.devices[peerEnd.deviceId];
+      if (!peer) continue;
+      if (peer.kind === 'switch') {
+        if (visited.has(peer.device.id)) continue;
+        const peerPort = peer.device.switchports[peerEnd.iface];
+        if (!peerPort || !peerPort.protocolUp || peerPort.mode !== 'trunk') continue;
+        if (!trunkAllowsVlan(peerPort.trunkAllowedVlans, vlan)) continue;
+        visited.add(peer.device.id);
+        queue.push(peer.device.id);
+        continue;
+      }
+
+      if (peer.kind !== 'router') continue;
+      const parent = peer.device.interfaces[peerEnd.iface];
+      if (!parent || !parent.adminUp || !parent.protocolUp) continue;
+      for (const sub of Object.values(peer.device.subInterfaces)) {
+        if (sub.parentId !== peerEnd.iface) continue;
+        if (sub.dot1qVlan !== vlan) continue;
+        if (!sub.ip || !sub.mask || !sub.protocolUp) continue;
+        const pool = pickPoolForIfaceSubnet(peer.device.dhcpPools, sub.ip, sub.mask);
+        if (pool) return { routerId: peer.device.id, poolName: pool.name };
+      }
+    }
+  }
+
   return null;
 }
 

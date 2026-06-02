@@ -30,6 +30,7 @@ const CATALOG_IDS = [
   'ccna-lab27-ntp-syslog-basics',
   'ccna-lab28-wireless-wlan-vlan-mapping',
   'ccna-lab29-automation-api-basics',
+  'ccna-lab30-vlan-dhcp-ticket',
   'ccna-tshoot-return-route',
   'ccna-tshoot-wrong-next-hop',
   'ccna-tshoot-wan-subnet-mismatch',
