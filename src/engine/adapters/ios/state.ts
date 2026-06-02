@@ -293,6 +293,7 @@ export interface SecurityState {
   cryptoKeyModulus: number | null;
   vtyLoginLocal: boolean;
   vtyTransportInput: 'all' | 'ssh' | 'telnet' | 'none';
+  motdBanner: string | null;
 }
 
 export interface NtpServer {
@@ -699,6 +700,7 @@ export function buildDevice(spec: {
       cryptoKeyModulus: null,
       vtyLoginLocal: false,
       vtyTransportInput: 'all',
+      motdBanner: null,
     },
     ntp: {
       servers: new Map(),

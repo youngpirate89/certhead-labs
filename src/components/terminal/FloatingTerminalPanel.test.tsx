@@ -107,6 +107,27 @@ describe('FloatingTerminalPanel', () => {
     expect(screen.queryByText('2001:db8:acad:1::10/64')).toBeNull();
   });
 
+  it('labels a wireless controller workbench as a controller, not a workstation', () => {
+    renderPanel({
+      activeDeviceId: 'WLC1',
+      openDeviceIds: ['WLC1'],
+      deviceKind: () => 'pc',
+      platformLabel: () => 'Wireless LAN Controller',
+      pcNetwork: () => ({
+        mode: 'static',
+        ip: '10.28.20.50',
+        mask: '255.255.255.0',
+        gateway: '10.28.20.1',
+        ipv6: null,
+        gateway6: null,
+      }),
+      onPcNetworkApply: vi.fn(),
+    });
+
+    expect(screen.getByText('WLC1 Wireless LAN Controller')).toBeInTheDocument();
+    expect(screen.queryByText('WLC1 Workstation')).toBeNull();
+  });
+
   it('opens a professional SSH client from the desktop and prepares a realistic ssh command', () => {
     const term = stubTerm('PC-A$');
     renderPanel({

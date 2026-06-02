@@ -8,6 +8,12 @@ function run(ls: LabSession, deviceId: string, lines: string[]): LabSession {
 }
 
 describe('Lab 27 — NTP and Syslog basics', () => {
+  it('keeps all topology devices inside the default rendered canvas comfort zone', () => {
+    for (const device of lab.topology.devices) {
+      expect(device.position?.y, `${device.id} should not render clipped above the topology canvas`).toBeGreaterThanOrEqual(0);
+    }
+  });
+
   it('starts incomplete with management connectivity seeded but no NTP or Syslog services', () => {
     const ls = initLabSession(lab);
     const r1 = ls.devices.R1;

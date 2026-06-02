@@ -144,6 +144,10 @@ export function applyCommand(
   let activeOffsets: readonly number[] = offsets;
   let doForm = false;
 
+  if (session.mode === 'config' && /^banner\s+motd\s+/i.test(raw.trim())) {
+    return applyMotdBanner(session, raw.trim(), opts);
+  }
+
   if (isConfigFamily(session.mode) && tokens[0] === 'do') {
     if (tokens.length === 1) {
       // Caret just past the `do` token — no remainder to resolve.
@@ -184,6 +188,20 @@ export function applyCommand(
       return dispatch(session, result.command, result.args, raw.trim(), ec, ctx, opts);
     }
   }
+}
+
+function applyMotdBanner(session: Session, raw: string, opts?: ApplyOptions): ApplyResult {
+  const caretC = raw.match(/^banner\s+motd\s+\^C(.*)\^C$/i);
+  const oneChar = raw.match(/^banner\s+motd\s+([^\s])(.*)\1$/i);
+  const message = caretC?.[1] ?? oneChar?.[2];
+  if (message === undefined) return { session, output: err('% Incomplete command.') };
+  const s: Session = structuredClone(session);
+  if (opts?.record !== false) {
+    s.history.push(raw);
+    s.resolvedHistory.push('banner motd');
+  }
+  s.device.security.motdBanner = message;
+  return { session: s, output: [] };
 }
 
 /**
@@ -609,7 +627,8 @@ function hasSshHardening(s: Session): boolean {
       sec.users.size > 0 ||
       sec.cryptoKeyModulus !== null ||
       sec.vtyLoginLocal ||
-      sec.vtyTransportInput !== 'all',
+      sec.vtyTransportInput !== 'all' ||
+      sec.motdBanner !== null,
   );
 }
 
@@ -2042,6 +2061,7 @@ function show(
   if (what === 'ip') {
     // `show ip interface brief` vs `show ip interface <iface>` vs route vs ospf.
     if (command[2] === 'route') return { session: s, output: out(...showIpRoute(s)) };
+    if (command[2] === 'ssh') return { session: s, output: out(...showIpSsh(s)) };
     if (command[2] === 'ospf') {
       if (command[3] === 'neighbor') {
         return { session: s, output: out(...showIpOspfNeighbor(s)) };
@@ -2241,6 +2261,27 @@ function showNtpStatus(s: Session): string[] {
     'nominal freq is 250.0000 Hz, actual freq is 250.0000 Hz',
     'precision is 2**24',
     'reference time is 00:00:00.000 UTC Mon Jan 1 2001',
+  ];
+}
+
+function showIpSsh(s: Session): string[] {
+  const sec = s.device.security;
+  const enabled = Boolean(sec.domainName && sec.cryptoKeyModulus !== null && sec.vtyTransportInput === 'ssh');
+  if (!enabled) {
+    return [
+      'SSH Disabled - version 2.0',
+      '% Please create RSA keys to enable SSH (configure a domain name first).',
+    ];
+  }
+
+  return [
+    'SSH Enabled - version 2.0',
+    'Authentication timeout: 120 secs; Authentication retries: 3',
+    'Minimum expected Diffie Hellman key size : 1024 bits',
+    'IOS Keys in SECSH format(ssh-rsa, base64 encoded):',
+    `ssh-rsa ${sec.cryptoKeyModulus}-bit RSA key for ${s.device.hostname}.${sec.domainName}`,
+    'Authentication methods:publickey,keyboard-interactive,password',
+    'Authentication Publickey Algorithms:x509v3-ssh-rsa,ssh-rsa',
   ];
 }
 
@@ -2818,6 +2859,7 @@ function showRunningConfig(s: Session): string[] {
   for (const user of sec.users.values()) lines.push(`username ${user.username} secret ${user.secret}`);
   if (sec.users.size > 0) lines.push('!');
   if (sec.domainName) lines.push(`ip domain-name ${sec.domainName}`, '!');
+  if (sec.motdBanner) lines.push(`banner motd ^C${sec.motdBanner}^C`, '!');
   if (sec.cryptoKeyModulus !== null) lines.push(`crypto key generate rsa modulus ${sec.cryptoKeyModulus}`, '!');
   for (const host of s.device.syslog.hosts.values()) lines.push(`logging host ${host.host}`);
   if (s.device.syslog.trapLevel !== null) lines.push(`logging trap ${s.device.syslog.trapLevel}`);

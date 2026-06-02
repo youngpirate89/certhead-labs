@@ -383,6 +383,7 @@ export function FloatingTerminalPanel({
                 deviceId={visibleDeviceId}
                 term={term}
                 network={visiblePcNetwork}
+                platformLabel={platformLabel?.(visibleDeviceId)}
                 onApplyNetwork={onPcNetworkApply}
               />
             ) : (
@@ -459,13 +460,17 @@ function PcWorkbench({
   deviceId,
   term,
   network,
+  platformLabel,
   onApplyNetwork,
 }: {
   readonly deviceId: string;
   readonly term: TerminalView;
   readonly network: PcNetworkConfig;
+  readonly platformLabel?: string;
   readonly onApplyNetwork: (id: string, config: PcNetworkConfig) => void;
 }) {
+  const workbenchTitle = `${deviceId} ${platformLabel ?? 'Workstation'}`;
+  const isWirelessController = platformLabel?.toLowerCase() === 'wireless lan controller';
   const [activeTab, setActiveTab] = useState<PcWorkbenchTab>('overview');
   const [activeAdapterSection, setActiveAdapterSection] = useState<PcAdapterSection>('ipv4');
   const [draft, setDraft] = useState<PcNetworkConfig>(network);
@@ -527,41 +532,47 @@ function PcWorkbench({
             <div className="grid min-h-full place-items-center rounded-xl border border-panel-border bg-black/20 p-5 shadow-inner">
               <div className="w-full max-w-2xl">
                 <div className="mb-5 text-center">
-                  <h2 className="text-2xl font-semibold text-terminal-fg">{deviceId} Workstation</h2>
+                  <h2 className="text-2xl font-semibold text-terminal-fg">{workbenchTitle}</h2>
                   <p className="mt-2 text-sm text-terminal-fg/65">Select a desktop tool</p>
                 </div>
 
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  {isWirelessController ? null : (
+                    <>
+                      <DesktopToolTile
+                        label="IP Configuration"
+                        icon="IPv4"
+                        detail="Addressing"
+                        onClick={() => {
+                          setActiveAdapterSection('ipv4');
+                          setActiveTab('adapter');
+                        }}
+                      />
+                      <DesktopToolTile
+                        label="IPv6 Configuration"
+                        icon="IPv6"
+                        detail="Addressing"
+                        onClick={() => {
+                          setActiveAdapterSection('ipv6');
+                          setActiveTab('adapter');
+                        }}
+                      />
+                    </>
+                  )}
                   <DesktopToolTile
-                    label="IP Configuration"
-                    icon="IPv4"
-                    detail="Addressing"
-                    onClick={() => {
-                      setActiveAdapterSection('ipv4');
-                      setActiveTab('adapter');
-                    }}
-                  />
-                  <DesktopToolTile
-                    label="IPv6 Configuration"
-                    icon="IPv6"
-                    detail="Addressing"
-                    onClick={() => {
-                      setActiveAdapterSection('ipv6');
-                      setActiveTab('adapter');
-                    }}
-                  />
-                  <DesktopToolTile
-                    label="Command Prompt"
+                    label={isWirelessController ? 'Controller CLI' : 'Command Prompt'}
                     icon=">_"
-                    detail="CLI"
+                    detail={isWirelessController ? 'WLC commands' : 'CLI'}
                     onClick={() => setActiveTab('terminal')}
                   />
-                  <DesktopToolTile
-                    label="SSH Client"
-                    icon="SSH"
-                    detail="Remote access"
-                    onClick={() => setActiveTab('ssh')}
-                  />
+                  {isWirelessController ? null : (
+                    <DesktopToolTile
+                      label="SSH Client"
+                      icon="SSH"
+                      detail="Remote access"
+                      onClick={() => setActiveTab('ssh')}
+                    />
+                  )}
                 </div>
               </div>
             </div>

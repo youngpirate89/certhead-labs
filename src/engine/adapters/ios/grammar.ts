@@ -32,6 +32,7 @@ const showSubtree: CommandNode = {
           argument: arg('iface', done('Per-interface IP details')),
         },
         route: done('IP routing table'),
+        ssh: done('SSH server status'),
         ospf: {
           terminal: true,
           help: 'OSPF process summary',

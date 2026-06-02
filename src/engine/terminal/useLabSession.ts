@@ -65,7 +65,14 @@ function routerBootBanner(platform: string): OutputLine[] {
 }
 
 /** PCs get a one-line shell-style header — no IOS boot. */
-function pcBootBanner(hostname: string): OutputLine[] {
+function pcBootBanner(hostname: string, platform: string): OutputLine[] {
+  if (/wireless lan controller/i.test(platform)) {
+    return [
+      { kind: 'system', text: `${hostname} — wireless LAN controller. Try \`show wlan summary\` or \`config wlan ...\`.` },
+      { kind: 'system', text: '' },
+    ];
+  }
+
   return [
     { kind: 'system', text: `${hostname} — workstation. Try \`ipconfig\` or \`ping <ip>\`.` },
     { kind: 'system', text: '' },
@@ -78,7 +85,7 @@ function bannerForDevice(d: LabDevice): OutputLine[] {
     case 'switch':
       return routerBootBanner(d.platform);
     case 'pc':
-      return pcBootBanner(d.id);
+      return pcBootBanner(d.id, d.platform);
   }
 }
 

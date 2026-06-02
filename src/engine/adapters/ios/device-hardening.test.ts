@@ -66,6 +66,28 @@ describe('IOS device hardening command surface', () => {
     expect(r1.device.security.vtyTransportInput).toBe('ssh');
   });
 
+  it('renders IOS-like show ip ssh status before and after SSH is configured', () => {
+    const initial = applyToDevice(initLabSession(lab), 'R1', 'show ip ssh');
+    expect(initial.output.map((o) => o.text).join('\n')).toMatch(/SSH Disabled/i);
+
+    const ready = applyToDevice(configuredRouter(), 'R1', 'show ip ssh');
+    const text = ready.output.map((o) => o.text).join('\n');
+    expect(text).toMatch(/SSH Enabled - version 2\.0/i);
+    expect(text).toMatch(/Authentication methods:publickey,keyboard-interactive,password/i);
+    expect(text).toMatch(/Authentication Publickey Algorithms:/i);
+  });
+
+  it('stores and renders a MOTD warning banner for hardening realism', () => {
+    let ls = initLabSession(lab);
+    ls = run(ls, 'R1', ['enable', 'configure terminal', 'banner motd ^CUnauthorized access prohibited^C']);
+    const r1 = ls.devices.R1;
+    if (r1?.kind !== 'router') throw new Error('R1 is not a router');
+    expect(r1.device.security.motdBanner).toBe('Unauthorized access prohibited');
+
+    const result = applyToDevice(ls, 'R1', 'do show running-config');
+    expect(result.output.map((o) => o.text).join('\n')).toMatch(/banner motd \^CUnauthorized access prohibited\^C/);
+  });
+
   it('renders device hardening lines in show running-config', () => {
     const ls = configuredRouter();
     const result = applyToDevice(ls, 'R1', 'show running-config');

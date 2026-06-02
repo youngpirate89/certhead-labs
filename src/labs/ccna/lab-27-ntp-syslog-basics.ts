@@ -39,7 +39,7 @@ export const lab27NtpSyslogBasics: Lab = {
         kind: 'router',
         platform: 'ISR4321',
         interfaces: ['Gi0/0'],
-        position: { x: 650, y: -130 },
+        position: { x: 650, y: 0 },
       },
       {
         id: 'MGMT-SRV',

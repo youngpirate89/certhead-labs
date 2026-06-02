@@ -27,6 +27,24 @@ function twoRouterLab(): Lab {
   };
 }
 
+function wirelessControllerLab(): Lab {
+  return {
+    id: 'test-wlc-terminal-banner',
+    title: 'WLC terminal banner fixture',
+    exam: 'TEST',
+    difficulty: 1,
+    estimatedMinutes: 1,
+    isFree: false,
+    scenario: 'fixture',
+    topology: {
+      devices: [{ id: 'WLC1', kind: 'pc', platform: 'Wireless LAN Controller', interfaces: ['Mgmt0'] }],
+      links: [],
+    },
+    objectives: [],
+    hints: [],
+  };
+}
+
 /** Run a command end-to-end through the active device. */
 function send(result: ReturnType<typeof renderHook<ReturnType<typeof useLabSession>, { lab: Lab }>>, raw: string) {
   act(() => result.result.current.setInput(raw));
@@ -34,6 +52,17 @@ function send(result: ReturnType<typeof renderHook<ReturnType<typeof useLabSessi
 }
 
 describe('useLabSession — per-device terminal binding', () => {
+  it('uses a controller-oriented boot hint for wireless LAN controllers', () => {
+    const { result } = renderHook(({ lab }) => useLabSession(lab), {
+      initialProps: { lab: wirelessControllerLab() },
+    });
+
+    const banner = result.current.lines.map((l) => l.text).join('\n');
+    expect(banner).toMatch(/WLC1 — wireless LAN controller/i);
+    expect(banner).toMatch(/show wlan summary/);
+    expect(banner).not.toMatch(/workstation\. Try `ipconfig`/);
+  });
+
   it('mounts with the first device active and its banner in the terminal', () => {
     const { result } = renderHook(({ lab }) => useLabSession(lab), {
       initialProps: { lab: twoRouterLab() },
