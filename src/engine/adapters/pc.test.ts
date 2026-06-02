@@ -183,6 +183,16 @@ describe('pcAdapter — commands', () => {
     expect(result.session.lastApiDeviceDetail.get('PC-A')).toBeGreaterThan(0);
   });
 
+  it('renders JSON for one selected interface and stamps that API selection', () => {
+    const s = { ...pcAdapter.buildDevice(SPEC_PRECONFIGURED), nicUp: true };
+    const result = pcAdapter.applyCommand(s, 'curl http://api.certhead.local/devices/PC-A/interfaces/Eth0');
+    const text = result.output.map((o) => o.text).join('\n');
+
+    expect(text).toMatch(/"deviceId": "PC-A"/);
+    expect(text).toMatch(/"name": "Eth0"/);
+    expect(result.session.lastApiInterfaceDetail.get('PC-A:Eth0')).toBeGreaterThan(0);
+  });
+
   it('does not mutate the input session', () => {
     const s = pcAdapter.buildDevice(SPEC);
     const before = structuredClone(s);

@@ -18,19 +18,20 @@ describe('Lab 29 — Automation/API basics', () => {
     expect(grade(lab, ls).allMet).toBe(false);
   });
 
-  it('grades complete after the learner queries inventory, R1 detail, SW1 detail, and verifies R1 interfaces', () => {
+  it('grades complete after the learner queries inventory, R1 detail, SW1 detail, R1 interfaces, and selects Gi0/0 as management', () => {
     let ls = initLabSession(lab);
     ls = run(ls, 'Admin-PC', [
       'curl http://api.certhead.local/devices',
       'curl http://api.certhead.local/devices/R1',
       'curl http://api.certhead.local/devices/SW1',
       'curl http://api.certhead.local/devices/R1/interfaces',
+      'curl http://api.certhead.local/devices/R1/interfaces/Gi0%2F0',
     ]);
 
     expect(grade(lab, ls).allMet).toBe(true);
   });
 
-  it('does not satisfy R1 interface verification from an inventory-only query', () => {
+  it('does not satisfy R1 management-interface selection from inventory and device detail only', () => {
     let ls = initLabSession(lab);
     ls = run(ls, 'Admin-PC', [
       'curl http://api.certhead.local/devices',
@@ -39,7 +40,22 @@ describe('Lab 29 — Automation/API basics', () => {
     ]);
 
     const result = grade(lab, ls);
-    expect(result.objectives.find((o) => o.id === 'verify-r1-interfaces')?.met).toBe(false);
+    expect(result.objectives.find((o) => o.id === 'select-r1-management-interface')?.met).toBe(false);
+    expect(result.allMet).toBe(false);
+  });
+
+  it('does not satisfy R1 management-interface selection until Gi0/0 is queried after the interface list', () => {
+    let ls = initLabSession(lab);
+    ls = run(ls, 'Admin-PC', [
+      'curl http://api.certhead.local/devices',
+      'curl http://api.certhead.local/devices/R1',
+      'curl http://api.certhead.local/devices/SW1',
+      'curl http://api.certhead.local/devices/R1/interfaces/Gi0%2F0',
+      'curl http://api.certhead.local/devices/R1/interfaces',
+    ]);
+
+    const result = grade(lab, ls);
+    expect(result.objectives.find((o) => o.id === 'select-r1-management-interface')?.met).toBe(false);
     expect(result.allMet).toBe(false);
   });
 });

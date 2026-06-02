@@ -138,6 +138,9 @@ export interface PcSession {
   readonly lastApiDeviceDetail: Map<string, number>;
   /** Stamped per device when the learner queries `/devices/<id>/interfaces`. */
   readonly lastApiInterfaces: Map<string, number>;
+  /** Stamped per device/interface when the learner queries
+   *  `/devices/<id>/interfaces/<interface-id>` after reading the list. */
+  readonly lastApiInterfaceDetail: Map<string, number>;
   /** Scoped WLC-like command state for CCNA wireless WLAN-to-VLAN labs.
    *  Present only when the lab models a Wireless LAN Controller using the
    *  existing PC-kind adapter shell; normal workstations leave it undefined. */
@@ -342,6 +345,7 @@ export const pcAdapter: DeviceAdapter<PcSession> = {
       lastApiInventory: 0,
       lastApiDeviceDetail: new Map(),
       lastApiInterfaces: new Map(),
+      lastApiInterfaceDetail: new Map(),
       wirelessController: isWirelessControllerPlatform(spec.platform)
         ? { interfaces: new Map(), wlans: new Map(), lastShowWlanSummary: 0, lastShowWlanDetail: new Map() }
         : undefined,
@@ -530,6 +534,19 @@ function handleAutomationApi(
   if (parts.length === 3 && parts[2] === 'interfaces') {
     if (opts?.record !== false) s.lastApiInterfaces.set(deviceId(target), nextEngineSeq());
     return { session: s, output: jsonLines({ deviceId: deviceId(target), interfaces: deviceInterfaces(target) }) };
+  }
+  if (parts.length === 4 && parts[2] === 'interfaces') {
+    const requestedInterface = decodeURIComponent(parts[3]);
+    const iface = deviceInterfaces(target).find(
+      (candidate) => String(candidate.name).toLowerCase() === requestedInterface.toLowerCase(),
+    );
+    if (!iface) {
+      return { session: s, output: [{ kind: 'error', text: `404 Not Found: interface ${requestedInterface}` }] };
+    }
+    if (opts?.record !== false) {
+      s.lastApiInterfaceDetail.set(`${deviceId(target)}:${String(iface.name)}`, nextEngineSeq());
+    }
+    return { session: s, output: jsonLines({ deviceId: deviceId(target), interface: iface }) };
   }
   return { session: s, output: [{ kind: 'error', text: `404 Not Found: ${url.pathname}` }] };
 }

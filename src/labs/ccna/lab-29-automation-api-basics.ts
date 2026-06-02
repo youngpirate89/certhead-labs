@@ -11,13 +11,13 @@ import type { Lab } from '@/engine/types';
  */
 export const lab29AutomationApiBasics: Lab = {
   id: 'ccna-lab29-automation-api-basics',
-  title: 'Automation Basics: Read Device Facts from JSON',
+  title: 'Automation Ticket: Validate Branch Device Facts',
   exam: 'CCNA 200-301',
   difficulty: 2,
   estimatedMinutes: 10,
   isFree: false,
   scenario:
-    'The network team is starting to use read-only automation checks before making changes. From Admin-PC, query the internal device-facts API and inspect the JSON output for the router and switch in this small branch topology.\n\nYour goal is not to configure the network. Use the API output to identify the inventory, device roles, and R1 interface facts, then verify the interface endpoint directly.',
+    'A branch change is scheduled, but the engineer needs a quick read-only validation before touching the network. From Admin-PC, use the internal device-facts API to confirm which devices are in scope and which R1 interface is the active management-facing link toward the switch.\n\nYour goal is not to configure the network. Use the JSON output to verify inventory, inspect R1 and SW1 facts, list R1 interfaces, then query the specific R1 interface that proves Gi0/0 is the active management path.',
   topology: {
     devices: [
       {
@@ -107,7 +107,7 @@ export const lab29AutomationApiBasics: Lab = {
     },
     {
       id: 'verify-r1-interfaces',
-      text: 'Admin-PC: query R1 interfaces and verify Gi0/0 is the active management interface',
+      text: 'Admin-PC: query the R1 interface list and compare Gi0/0 versus Gi0/1',
       check: (_state, _history, session) => {
         const pc = session.devices['Admin-PC'];
         if (pc?.kind !== 'pc') return false;
@@ -116,27 +116,39 @@ export const lab29AutomationApiBasics: Lab = {
         return interfaceStamp > detailStamp;
       },
     },
+    {
+      id: 'select-r1-management-interface',
+      text: 'Admin-PC: query R1 Gi0/0 directly to confirm it is the active management interface',
+      check: (_state, _history, session) => {
+        const pc = session.devices['Admin-PC'];
+        if (pc?.kind !== 'pc') return false;
+        const interfaceListStamp = pc.lastApiInterfaces.get('R1') ?? 0;
+        const gi00Stamp = pc.lastApiInterfaceDetail.get('R1:Gi0/0') ?? 0;
+        return gi00Stamp > interfaceListStamp;
+      },
+    },
   ],
   hints: [
     {
       afterSeconds: 90,
-      text: 'Start from Admin-PC and query the inventory endpoint: `curl http://api.certhead.local/devices`. The JSON response lists device IDs you can query in more detail.',
+      text: 'Start from Admin-PC and query the inventory endpoint: `curl http://api.certhead.local/devices`. Use the JSON to decide which branch devices need deeper validation.',
     },
     {
       afterSeconds: 240,
-      text: 'Use read-only GET requests: `curl http://api.certhead.local/devices/R1`, `curl http://api.certhead.local/devices/SW1`, and `curl http://api.certhead.local/devices/R1/interfaces`. PowerShell syntax also works with `Invoke-RestMethod -Uri <url>`.',
+      text: 'Use read-only GET requests to inspect R1 and SW1, then list R1 interfaces. After comparing the interface JSON, query the selected interface directly with `curl http://api.certhead.local/devices/R1/interfaces/Gi0%2F0`. PowerShell syntax also works with `Invoke-RestMethod -Uri <url>`.',
     },
   ],
   solution: {
     steps: [
       {
         device: 'Admin-PC',
-        note: 'Query the read-only API inventory and inspect device/interface JSON facts:',
+        note: 'Query the read-only API facts and use the interface JSON to identify R1 Gi0/0 as the active management path:',
         commands: [
           'curl http://api.certhead.local/devices',
           'curl http://api.certhead.local/devices/R1',
           'curl http://api.certhead.local/devices/SW1',
           'curl http://api.certhead.local/devices/R1/interfaces',
+          'curl http://api.certhead.local/devices/R1/interfaces/Gi0%2F0',
         ],
       },
     ],
