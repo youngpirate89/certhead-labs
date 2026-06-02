@@ -9,6 +9,7 @@ const CATALOG_IDS = [
   'ccna-l01-interface-ip',
   'ccna-lab02-network-discovery',
   'ccna-lab03-ipv4-subnetting-routed-interfaces',
+  'ccna-lab04-static-route-fundamentals',
   'ccna-lab05-ospf-single-area',
   'ccna-lab06-standard-acl',
   'ccna-lab07-vlan-access-ports',
