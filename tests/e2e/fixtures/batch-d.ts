@@ -1,7 +1,7 @@
 export type LabCommandStep = {
   device: string;
   commands: string[];
-  workbench?: 'Command Prompt' | 'Terminal';
+  workbench?: 'Command Prompt' | 'Controller CLI' | 'Terminal';
 };
 
 export type LabSmokeCase = {

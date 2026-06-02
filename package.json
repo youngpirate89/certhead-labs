@@ -13,7 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "qa:labs": "playwright test tests/e2e/lab-walkthrough.spec.ts --project=chromium"
+    "qa:labs": "node tests/e2e/run-lab-smoke.mjs"
   },
   "dependencies": {
     "@xyflow/react": "12.10.2",

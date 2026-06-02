@@ -82,8 +82,8 @@ async function runStep(page: Page, step: LabCommandStep): Promise<void> {
   await closeAllTerminals(page);
   await page.getByRole('button', { name: `Console for ${step.device}` }).click();
 
-  if (step.workbench === 'Command Prompt') {
-    await page.getByRole('button', { name: 'Command Prompt' }).click();
+  if (step.workbench === 'Command Prompt' || step.workbench === 'Controller CLI') {
+    await page.getByRole('button', { name: step.workbench }).click();
   } else if (step.workbench === 'Terminal') {
     await page.getByRole('tab', { name: 'Terminal' }).click();
   }

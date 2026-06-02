@@ -3,7 +3,7 @@ import { applyToActive, initLabSession, type LabSession } from '@/engine/lab-ses
 import { grade } from '@/engine/grading';
 import { lab22EtherchannelLacp as lab } from './lab-22-etherchannel-lacp';
 
-function runOn(ls: LabSession, id: string, lines: string[]): LabSession {
+function runOn(ls: LabSession, id: string, lines: readonly string[]): LabSession {
   let cur: LabSession = { ...ls, activeDeviceId: id };
   for (const line of lines) cur = applyToActive(cur, line).session;
   return cur;
@@ -125,6 +125,17 @@ describe('lab-22-etherchannel-lacp — happy path', () => {
       ['portchannel-trunk', true],
       ['etherchannel-verified', true],
     ]);
+  });
+
+  it('published solution commands complete all objectives', () => {
+    const solution = lab.solution;
+    if (!solution) throw new Error('lab solution is required');
+    let ls = initLabSession(lab);
+    for (const step of solution.steps) {
+      ls = runOn(ls, step.device, step.commands);
+    }
+
+    expect(grade(lab, ls).allMet).toBe(true);
   });
 
   it('configured bundle without Port-channel trunk config does not complete the trunk objective', () => {
