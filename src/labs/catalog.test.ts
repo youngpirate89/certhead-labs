@@ -7,6 +7,7 @@ import { lab01InterfaceIp } from './ccna/lab-01-interface-ip';
 // catalog membership contract.
 const CATALOG_IDS = [
   'ccna-l01-interface-ip',
+  'ccna-lab02-network-discovery',
   'ccna-lab05-ospf-single-area',
   'ccna-lab06-standard-acl',
   'ccna-lab07-vlan-access-ports',
