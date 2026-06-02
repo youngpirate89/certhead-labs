@@ -17,7 +17,7 @@ export const lab28WirelessWlanVlanMapping: Lab = {
   estimatedMinutes: 12,
   isFree: false,
   scenario:
-    'The office wireless controller has management connectivity, but the corporate SSID has not been created or mapped to the wired user VLAN. Configure WLC1 so the CORP-WIFI WLAN places wireless clients into VLAN 20 through the CORP-USERS dynamic interface.\n\nAfter applying the wireless configuration, verify the WLAN summary and detailed WLAN mapping from WLC1.',
+    'The office wireless controller has management connectivity, but the corporate SSID has not been created or mapped to the wired user VLAN. Configure WLC1 so the CORP-WIFI WLAN places wireless clients into VLAN 20 through the CORP-USERS dynamic interface.\n\nAfter applying the wireless configuration, verify the WLAN summary, detailed WLAN mapping, and the lightweight client summary from WLC1 so the client outcome is tied back to VLAN 20.',
   topology: {
     devices: [
       {
@@ -147,6 +147,17 @@ export const lab28WirelessWlanVlanMapping: Lab = {
         return Boolean(wlan?.enabled && detailStamp > wlan.enabledAt);
       },
     },
+    {
+      id: 'verify-client-service',
+      text: 'WLC1: run show client summary after WLAN 1 is enabled to verify wireless-client VLAN 20 service',
+      check: (_state, _history, session) => {
+        const wlc = session.devices.WLC1;
+        if (wlc?.kind !== 'pc') return false;
+        const wlan = wlc.wirelessController?.wlans.get(1);
+        const clientStamp = wlc.wirelessController?.lastShowClientSummary ?? 0;
+        return Boolean(wlan?.enabled && clientStamp > wlan.enabledAt);
+      },
+    },
   ],
   hints: [
     {
@@ -155,7 +166,7 @@ export const lab28WirelessWlanVlanMapping: Lab = {
     },
     {
       afterSeconds: 240,
-      text: 'Use WLC1 commands: `config interface create CORP-USERS 20`, `config wlan create 1 CORP-WIFI CORP-WIFI`, `config wlan interface 1 CORP-USERS`, `config wlan enable 1`, then verify with `show wlan summary` and `show wlan 1`.',
+      text: 'Use WLC1 commands: `config interface create CORP-USERS 20`, `config wlan create 1 CORP-WIFI CORP-WIFI`, `config wlan interface 1 CORP-USERS`, `config wlan enable 1`, then verify with `show wlan summary`, `show wlan 1`, and `show client summary`.',
     },
   ],
   solution: {
@@ -170,6 +181,7 @@ export const lab28WirelessWlanVlanMapping: Lab = {
           'config wlan enable 1',
           'show wlan summary',
           'show wlan 1',
+          'show client summary',
         ],
       },
     ],

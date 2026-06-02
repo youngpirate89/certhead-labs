@@ -27,6 +27,7 @@ describe('Lab 28 — Wireless WLAN-to-VLAN mapping', () => {
       'config wlan enable 1',
       'show wlan summary',
       'show wlan 1',
+      'show client summary',
     ]);
 
     expect(grade(lab, ls).allMet).toBe(true);
@@ -45,6 +46,23 @@ describe('Lab 28 — Wireless WLAN-to-VLAN mapping', () => {
     const result = grade(lab, ls);
     expect(result.objectives.find((o) => o.id === 'verify-wlan-summary')?.met).toBe(false);
     expect(result.objectives.find((o) => o.id === 'verify-wlan-detail')?.met).toBe(false);
+    expect(result.allMet).toBe(false);
+  });
+
+  it('does not satisfy wireless-client outcome verification from show client summary run before the WLAN is enabled', () => {
+    let ls = initLabSession(lab);
+    ls = run(ls, 'WLC1', ['show client summary']);
+    ls = run(ls, 'WLC1', [
+      'config interface create CORP-USERS 20',
+      'config wlan create 1 CORP-WIFI CORP-WIFI',
+      'config wlan interface 1 CORP-USERS',
+      'config wlan enable 1',
+      'show wlan summary',
+      'show wlan 1',
+    ]);
+
+    const result = grade(lab, ls);
+    expect(result.objectives.find((o) => o.id === 'verify-client-service')?.met).toBe(false);
     expect(result.allMet).toBe(false);
   });
 });

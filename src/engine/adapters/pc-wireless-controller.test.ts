@@ -65,6 +65,34 @@ describe('pcAdapter — scoped wireless controller commands', () => {
     expect(detail).toMatch(/VLAN\s+: 20/);
   });
 
+  it('renders a lightweight client summary tied to the enabled WLAN and VLAN mapping', () => {
+    const s = run(fresh(), [
+      'config interface create CORP-USERS 20',
+      'config wlan create 1 CORP-WIFI CORP-WIFI',
+      'config wlan interface 1 CORP-USERS',
+      'config wlan enable 1',
+    ]);
+
+    const result = pcAdapter.applyCommand(s, 'show client summary');
+    const text = result.output.map((o) => o.text).join('\n');
+
+    expect(text).toMatch(/Client\s+WLAN\s+SSID\s+Interface\s+VLAN\s+Status/);
+    expect(text).toMatch(/Wireless-Client\s+1\s+CORP-WIFI\s+CORP-USERS\s+20\s+Ready/);
+    expect(result.session.wirelessController?.lastShowClientSummary).toBeGreaterThan(0);
+  });
+
+  it('does not report a ready wireless client before the WLAN is enabled', () => {
+    const s = run(fresh(), [
+      'config interface create CORP-USERS 20',
+      'config wlan create 1 CORP-WIFI CORP-WIFI',
+      'config wlan interface 1 CORP-USERS',
+    ]);
+
+    const text = pcAdapter.applyCommand(s, 'show client summary').output.map((o) => o.text).join('\n');
+
+    expect(text).toMatch(/Wireless-Client\s+1\s+CORP-WIFI\s+CORP-USERS\s+20\s+WLAN disabled/);
+  });
+
   it('rejects wireless controller commands on normal workstations', () => {
     const pc = pcAdapter.buildDevice({ id: 'PC-A', kind: 'pc', platform: 'Windows Workstation', interfaces: ['Eth0'] });
     const out = pcAdapter.applyCommand(pc, 'config wlan create 1 CORP-WIFI CORP-WIFI').output;

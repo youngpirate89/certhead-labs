@@ -83,6 +83,7 @@ export interface WirelessControllerState {
   readonly wlans: Map<number, WirelessLan>;
   lastShowWlanSummary: number;
   readonly lastShowWlanDetail: Map<number, number>;
+  lastShowClientSummary: number;
 }
 
 export interface PcSession {
@@ -347,7 +348,7 @@ export const pcAdapter: DeviceAdapter<PcSession> = {
       lastApiInterfaces: new Map(),
       lastApiInterfaceDetail: new Map(),
       wirelessController: isWirelessControllerPlatform(spec.platform)
-        ? { interfaces: new Map(), wlans: new Map(), lastShowWlanSummary: 0, lastShowWlanDetail: new Map() }
+        ? { interfaces: new Map(), wlans: new Map(), lastShowWlanSummary: 0, lastShowWlanDetail: new Map(), lastShowClientSummary: 0 }
         : undefined,
     };
   },
@@ -708,6 +709,10 @@ function handleWlcShow(
 ): ApplyResult<PcSession> {
   const controller = requireWirelessController(s);
   if (!controller) return { session: s, output: errLine('% This is a wireless controller command. Select the WLC device to use it.') };
+  if (args[0]?.toLowerCase() === 'client' && args[1]?.toLowerCase() === 'summary') {
+    if (opts?.record !== false) controller.lastShowClientSummary = nextEngineSeq();
+    return { session: s, output: renderClientSummary(controller) };
+  }
   if (args[0]?.toLowerCase() !== 'wlan') return { session: s, output: errLine('% Unsupported show command.') };
 
   const selector = args[1]?.toLowerCase();
@@ -751,6 +756,26 @@ function renderWlanDetail(controller: WirelessControllerState, wlan: WirelessLan
     { kind: 'output', text: `Interface              : ${iface}` },
     { kind: 'output', text: `VLAN                   : ${vlan}` },
   ];
+}
+
+function renderClientSummary(controller: WirelessControllerState): CommandOutput[] {
+  const lines: CommandOutput[] = [
+    { kind: 'output', text: 'Client           WLAN  SSID        Interface   VLAN  Status' },
+    { kind: 'output', text: '---------------  ----  ----------  ----------  ----  -------------' },
+  ];
+  const wlan = controller.wlans.get(1);
+  if (!wlan) {
+    lines.push({ kind: 'output', text: 'Wireless-Client  -     (none)      (none)      -     WLAN missing' });
+    return lines;
+  }
+  const ifaceName = wlan.interfaceName ?? '(none)';
+  const vlan = wlan.interfaceName ? controller.interfaces.get(wlan.interfaceName)?.vlanId.toString() ?? '-' : '-';
+  const status = wlan.enabled ? 'Ready' : 'WLAN disabled';
+  lines.push({
+    kind: 'output',
+    text: `Wireless-Client  ${wlan.id.toString().padEnd(4)}  ${wlan.ssid.padEnd(10)}  ${ifaceName.padEnd(10)}  ${vlan.padEnd(4)}  ${status}`,
+  });
+  return lines;
 }
 
 function handleSsh(
