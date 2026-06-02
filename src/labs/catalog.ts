@@ -15,6 +15,7 @@
 import type { Lab } from '@/engine/types';
 import { lab01InterfaceIp } from './ccna/lab-01-interface-ip';
 import { lab02NetworkDiscovery } from './ccna/lab-02-network-discovery';
+import { lab03Ipv4SubnettingRoutedInterfaces } from './ccna/lab-03-ipv4-subnetting-routed-interfaces';
 import { lab05OspfSingleArea } from './ccna/lab-05-ospf-single-area';
 import { lab06StandardAcl } from './ccna/lab-06-standard-acl';
 import { lab07VlanAccessPorts } from './ccna/lab-07-vlan-access-ports';
@@ -49,6 +50,7 @@ import { tshootEgressDown } from './ccna/tshoot-egress-down';
 const CATALOG: readonly Lab[] = [
   lab01InterfaceIp,
   lab02NetworkDiscovery,
+  lab03Ipv4SubnettingRoutedInterfaces,
   lab05OspfSingleArea,
   lab06StandardAcl,
   lab07VlanAccessPorts,
