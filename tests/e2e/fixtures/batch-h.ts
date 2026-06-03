@@ -37,4 +37,20 @@ export const batchHTicketLabs: LabSmokeCase[] = [
       { device: 'PC-BRANCH', workbench: 'Command Prompt', commands: ['ping 198.51.100.50'] },
     ],
   },
+  {
+    id: 'ccna-tshoot-return-route-missing-server-vlan',
+    title: 'Troubleshoot: Server VLAN Return Route Missing',
+    expectedStart: '0/5',
+    expectedComplete: '5/5',
+    steps: [
+      { device: 'PC-BRANCH', workbench: 'Command Prompt', commands: ['ping 10.150.50.20'] },
+      { device: 'CORE', commands: ['enable', 'show ip route'] },
+      {
+        device: 'CORE',
+        commands: ['configure terminal', 'ip route 10.150.10.0 255.255.255.0 10.150.0.1', 'end'],
+      },
+      { device: 'CORE', commands: ['show ip route'] },
+      { device: 'PC-BRANCH', workbench: 'Command Prompt', commands: ['ping 10.150.50.20'] },
+    ],
+  },
 ];

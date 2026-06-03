@@ -53,6 +53,7 @@ import { tshootAclBlocksBusinessApp } from './ccna/tshoot-acl-blocks-business-ap
 import { tshootOspfNeighborChangeWindow } from './ccna/tshoot-ospf-neighbor-change-window';
 import { tshootNatVlanOmission } from './ccna/tshoot-nat-vlan-omission';
 import { tshootDefaultRouteLostAtBranch } from './ccna/tshoot-default-route-lost-at-branch';
+import { tshootReturnRouteMissingServerVlan } from './ccna/tshoot-return-route-missing-server-vlan';
 
 const CATALOG: readonly Lab[] = [
   lab01InterfaceIp,
@@ -95,6 +96,7 @@ const CATALOG: readonly Lab[] = [
   tshootOspfNeighborChangeWindow,
   tshootNatVlanOmission,
   tshootDefaultRouteLostAtBranch,
+  tshootReturnRouteMissingServerVlan,
 ];
 
 const BY_ID: ReadonlyMap<string, Lab> = new Map(CATALOG.map((lab) => [lab.id, lab]));
