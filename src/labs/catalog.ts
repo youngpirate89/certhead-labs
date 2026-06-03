@@ -124,3 +124,9 @@ const BY_ID: ReadonlyMap<string, Lab> = new Map(CATALOG.map((lab) => [lab.id, la
 export function getLabById(id: string): Lab | null {
   return BY_ID.get(id) ?? null;
 }
+
+/** Snapshot the private 50-lab catalog for integration contract tests.
+ *  The public `/try` route must not import this helper. */
+export function getCatalogLabs(): readonly Lab[] {
+  return CATALOG;
+}

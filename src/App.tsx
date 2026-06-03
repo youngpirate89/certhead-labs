@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { TryMode } from '@/modes/TryMode';
+import { resolveDevLabSelection } from '@/routing/devLabSelection';
 
 const DevLabMode = import.meta.env.DEV
   ? lazy(() => import('@/modes/DevLabMode').then((module) => ({ default: module.DevLabMode })))
@@ -17,19 +18,17 @@ const DevLabMode = import.meta.env.DEV
  * registry, or the full catalog. Those modules live behind a DEV-only dynamic
  * import so the production `/try` bundle remains free-lab-only.
  *
- * The `/embed` Pro route (JWT auth + postMessage) is not implemented here. Do
- * not expose private catalog labs publicly without the CertHead entitlement gate.
+ * The `/embed` Pro route (JWT auth + postMessage) is not implemented here.
+ * Do not expose private catalog labs publicly without the CertHead entitlement gate.
  */
 export default function App() {
-  if (import.meta.env.DEV && typeof window !== 'undefined' && DevLabMode) {
-    const params = new URLSearchParams(window.location.search);
-    const pilotSlug = params.get('pilot');
-    const labId = params.get('lab');
+  if (typeof window !== 'undefined' && DevLabMode) {
+    const selection = resolveDevLabSelection(window.location.search, import.meta.env.DEV);
 
-    if (pilotSlug || labId) {
+    if (selection) {
       return (
         <Suspense fallback={null}>
-          <DevLabMode pilotSlug={pilotSlug} labId={labId} />
+          <DevLabMode pilotSlug={selection.pilotSlug} labId={selection.labId} />
         </Suspense>
       );
     }

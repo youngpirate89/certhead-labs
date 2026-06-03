@@ -11,7 +11,7 @@ import { initAnalytics, track } from '@/analytics/posthog';
 export const FREE_LAB_REGISTER_URL = 'https://certhead.com/register?source=free-lab';
 
 export const FREE_LAB_UPSELL_COPY = {
-  nextLab: 'Lab 04 — Static Routing',
+  nextLab: 'Lab 04: Static Routing',
   proLibrary: 'Pro includes the full 50-lab CCNA library.',
   cta: 'Unlock with CertHead Pro',
 } as const;
@@ -167,7 +167,7 @@ function CompletionBanner({ labId }: { labId: string }) {
         </div>
         <div className="flex-1">
           <p className="font-sans text-sm font-semibold text-terminal-prompt">
-            Lab complete — interface is up.
+            Lab complete: interface is up.
           </p>
           <p className="mt-0.5 font-sans text-sm text-terminal-fg/80">
             Next: <span className="text-terminal-fg">{FREE_LAB_UPSELL_COPY.nextLab}</span>{' '}

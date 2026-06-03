@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { grade } from '@/engine/grading';
 import { applyToActive, initLabSession, type DeviceSession, type LabSession } from '@/engine/lab-session';
-import { getLabById } from './catalog';
+import { getCatalogLabs, getLabById } from './catalog';
 import { lab01InterfaceIp } from './ccna/lab-01-interface-ip';
 
 // Stable, permanent ids the embed/JWT contract will encode. Adding a lab to
@@ -118,6 +118,14 @@ describe('lab catalog — getLabById', () => {
     expect(CATALOG_IDS).toHaveLength(50);
     expect(labs.filter((lab) => lab?.isFree === true)).toHaveLength(1);
     expect(labs.filter((lab) => lab?.isFree !== true)).toHaveLength(49);
+  });
+
+  it('keeps the private source catalog at exactly 50 labs with one public free lab', () => {
+    const labs = getCatalogLabs();
+    expect(labs).toHaveLength(50);
+    expect(labs.filter((lab) => lab.isFree === true)).toHaveLength(1);
+    expect(labs.filter((lab) => lab.isFree !== true)).toHaveLength(49);
+    expect(labs.find((lab) => lab.isFree === true)?.id).toBe('ccna-l01-interface-ip');
   });
 
   it.each(CATALOG_IDS)('published solution for %s completes all objectives', (id) => {
