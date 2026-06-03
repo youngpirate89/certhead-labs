@@ -44,6 +44,7 @@ const CATALOG_IDS = [
   'ccna-tshoot-dhcp-relay-missing',
   'ccna-tshoot-acl-blocks-business-app',
   'ccna-tshoot-ospf-neighbor-change-window',
+  'ccna-tshoot-nat-vlan-omission',
 ] as const;
 
 function runOn(ls: LabSession, id: string, lines: readonly string[]): LabSession {

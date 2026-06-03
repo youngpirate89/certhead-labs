@@ -5,6 +5,7 @@ import { batchDOspfLabs } from './batch-d';
 import { batchELabs22To28 } from './batch-e';
 import { batchFLabs29To30AndTickets } from './batch-f';
 import { batchGTicketLabs } from './batch-g';
+import { batchHTicketLabs } from './batch-h';
 import type { LabSmokeCase } from './batch-d';
 
 export type LabSmokeBatch = {
@@ -48,6 +49,11 @@ const batches: Record<string, LabSmokeBatch> = {
     id: 'g',
     name: 'Batch G ticket scenarios',
     labs: batchGTicketLabs,
+  },
+  h: {
+    id: 'h',
+    name: 'Batch H ticket scenarios',
+    labs: batchHTicketLabs,
   },
 };
 
