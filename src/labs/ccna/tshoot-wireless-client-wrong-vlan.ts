@@ -30,7 +30,7 @@ export const tshootWirelessClientWrongVlan: Lab = {
         platform: 'Wireless Client',
         interfaces: ['WLAN0'],
         pc: { ip: '10.170.99.23', mask: '255.255.255.0', gateway: '10.170.99.1' },
-        position: { x: 900, y: 60 },
+        position: { x: 620, y: 210 },
       },
       {
         id: 'WLC',

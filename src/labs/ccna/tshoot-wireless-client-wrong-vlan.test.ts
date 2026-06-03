@@ -12,6 +12,12 @@ function objectiveMet(ls: LabSession, id: string): boolean | undefined {
 }
 
 describe('Ticket 15 — wireless client in wrong VLAN', () => {
+  it('keeps the wireless client inside the default topology viewport comfort zone', () => {
+    const laptop = lab.topology.devices.find((device) => device.id === 'LAPTOP-SALES');
+
+    expect(laptop?.position?.x).toBeLessThanOrEqual(650);
+  });
+
   it('starts with SALES-WIFI mapped to the Guest VLAN and the laptop in the Guest subnet', () => {
     const ls = initLabSession(lab);
     const wlc = ls.devices.WLC;
