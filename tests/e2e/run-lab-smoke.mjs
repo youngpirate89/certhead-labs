@@ -19,6 +19,19 @@ export function parseLabSmokeArgs(args) {
       parsed.batch = value.toLowerCase();
       continue;
     }
+    if (arg === '--lab') {
+      const value = args[index + 1];
+      if (!value || value.startsWith('--')) throw new Error('--lab requires a value');
+      parsed.lab = value;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith('--lab=')) {
+      const value = arg.slice('--lab='.length);
+      if (!value) throw new Error('--lab requires a value');
+      parsed.lab = value;
+      continue;
+    }
     if (arg === '--headed' || arg === '--debug' || arg === '--ui' || arg === '--project=chromium') {
       parsed.passthrough.push(arg);
       continue;
@@ -42,7 +55,7 @@ function main() {
     ],
     {
       stdio: 'inherit',
-      env: { ...process.env, LAB_SMOKE_BATCH: parsed.batch },
+      env: { ...process.env, LAB_SMOKE_BATCH: parsed.batch, LAB_SMOKE_LAB: parsed.lab ?? '' },
     },
   );
   process.exit(result.status ?? 1);

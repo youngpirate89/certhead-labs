@@ -1,5 +1,6 @@
 import { batchDOspfLabs } from './batch-d';
 import { batchELabs22To28 } from './batch-e';
+import { batchFLabs29To30AndTickets } from './batch-f';
 import type { LabSmokeCase } from './batch-d';
 
 export type LabSmokeBatch = {
@@ -19,6 +20,11 @@ const batches: Record<string, LabSmokeBatch> = {
     name: 'Batch E labs 22–28',
     labs: batchELabs22To28,
   },
+  f: {
+    id: 'f',
+    name: 'Batch F labs 29–30 and ticket scenarios',
+    labs: batchFLabs29To30AndTickets,
+  },
 };
 
 export function getSelectedLabSmokeBatch(batchId = process.env.LAB_SMOKE_BATCH ?? 'd'): LabSmokeBatch {
@@ -27,5 +33,20 @@ export function getSelectedLabSmokeBatch(batchId = process.env.LAB_SMOKE_BATCH ?
   if (!batch) {
     throw new Error(`Unknown lab smoke batch: ${batchId}. Available batches: ${Object.keys(batches).join(', ')}`);
   }
-  return batch;
+
+  const selectedLabId = process.env.LAB_SMOKE_LAB;
+  if (!selectedLabId) return batch;
+
+  const selectedLab = Object.values(batches)
+    .flatMap((candidateBatch) => candidateBatch.labs)
+    .find((lab) => lab.id === selectedLabId);
+  if (!selectedLab) {
+    throw new Error(`Unknown lab smoke case: ${selectedLabId}`);
+  }
+
+  return {
+    id: `${batch.id}:${selectedLab.id}`,
+    name: `Single lab ${selectedLab.id}`,
+    labs: [selectedLab],
+  };
 }

@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { grade } from '@/engine/grading';
+import { applyToActive, initLabSession, type LabSession } from '@/engine/lab-session';
 import { getLabById } from './catalog';
 import { lab01InterfaceIp } from './ccna/lab-01-interface-ip';
 
@@ -40,6 +42,12 @@ const CATALOG_IDS = [
   'ccna-tshoot-egress-down',
 ] as const;
 
+function runOn(ls: LabSession, id: string, lines: readonly string[]): LabSession {
+  let cur: LabSession = { ...ls, activeDeviceId: id };
+  for (const line of lines) cur = applyToActive(cur, line).session;
+  return cur;
+}
+
 describe('lab catalog — getLabById', () => {
   it.each(CATALOG_IDS)('resolves catalog id %s to a Lab', (id) => {
     const lab = getLabById(id);
@@ -67,5 +75,24 @@ describe('lab catalog — getLabById', () => {
     const free = CATALOG_IDS.map((id) => getLabById(id)).filter((l) => l?.isFree === true);
     expect(free).toHaveLength(1);
     expect(free[0]?.id).toBe('ccna-l01-interface-ip');
+  });
+
+  it.each(CATALOG_IDS)('published solution for %s completes all objectives', (id) => {
+    const lab = getLabById(id);
+    expect(lab).not.toBeNull();
+    const solution = lab?.solution;
+    expect(solution, `${id} should expose a learner-facing solution`).toBeDefined();
+
+    let ls = initLabSession(lab!);
+    for (const step of solution!.steps) {
+      ls = runOn(ls, step.device, step.commands);
+    }
+
+    const result = grade(lab!, ls);
+    expect(
+      result.objectives.map((objective) => [objective.id, objective.met]),
+      `${id} incomplete objectives`,
+    ).toEqual(result.objectives.map((objective) => [objective.id, true]));
+    expect(result.allMet).toBe(true);
   });
 });

@@ -18,6 +18,22 @@ describe('parseLabSmokeArgs', () => {
     assert.deepEqual(parseLabSmokeArgs(['--batch=e']), { batch: 'e', passthrough: [] });
   });
 
+  it('accepts --lab for a single lab rerun', () => {
+    assert.deepEqual(parseLabSmokeArgs(['--lab', 'ccna-lab28-wireless-wlan-vlan-mapping']), {
+      batch: 'd',
+      lab: 'ccna-lab28-wireless-wlan-vlan-mapping',
+      passthrough: [],
+    });
+  });
+
+  it('accepts --lab=<id>', () => {
+    assert.deepEqual(parseLabSmokeArgs(['--lab=ccna-lab22-etherchannel-lacp']), {
+      batch: 'd',
+      lab: 'ccna-lab22-etherchannel-lacp',
+      passthrough: [],
+    });
+  });
+
   it('rejects unknown options before invoking Playwright', () => {
     assert.throws(() => parseLabSmokeArgs(['--not-real']), /Unknown option/);
   });
