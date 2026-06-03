@@ -57,4 +57,26 @@ export const batchGTicketLabs: LabSmokeCase[] = [
       { device: 'PC-OPS', workbench: 'Command Prompt', commands: ['ipconfig'] },
     ],
   },
+  {
+    id: 'ccna-tshoot-acl-blocks-business-app',
+    title: 'Troubleshoot: ACL Blocks Business App',
+    expectedStart: '0/5',
+    expectedComplete: '5/5',
+    steps: [
+      { device: 'PC-STAFF', workbench: 'Command Prompt', commands: ['ping 172.16.50.20'] },
+      { device: 'R1', commands: ['enable', 'show access-lists'] },
+      {
+        device: 'R1',
+        commands: [
+          'configure terminal',
+          'ip access-list extended STAFF-DMZ-FILTER',
+          'no 20',
+          'permit tcp 172.16.40.0 0.0.0.255 host 172.16.50.20 eq 8443',
+          'deny ip any any',
+          'end',
+          'show access-lists',
+        ],
+      },
+    ],
+  },
 ];

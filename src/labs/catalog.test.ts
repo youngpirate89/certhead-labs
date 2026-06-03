@@ -42,6 +42,7 @@ const CATALOG_IDS = [
   'ccna-tshoot-egress-down',
   'ccna-tshoot-vlan-trunk-allowed-list',
   'ccna-tshoot-dhcp-relay-missing',
+  'ccna-tshoot-acl-blocks-business-app',
 ] as const;
 
 function runOn(ls: LabSession, id: string, lines: readonly string[]): LabSession {
