@@ -48,6 +48,7 @@ import { tshootWrongNextHop } from './ccna/tshoot-wrong-next-hop';
 import { tshootWanSubnetMismatch } from './ccna/tshoot-wan-subnet-mismatch';
 import { tshootEgressDown } from './ccna/tshoot-egress-down';
 import { tshootVlanTrunkAllowedList } from './ccna/tshoot-vlan-trunk-allowed-list';
+import { tshootDhcpRelayMissing } from './ccna/tshoot-dhcp-relay-missing';
 
 const CATALOG: readonly Lab[] = [
   lab01InterfaceIp,
@@ -85,6 +86,7 @@ const CATALOG: readonly Lab[] = [
   tshootWanSubnetMismatch,
   tshootEgressDown,
   tshootVlanTrunkAllowedList,
+  tshootDhcpRelayMissing,
 ];
 
 const BY_ID: ReadonlyMap<string, Lab> = new Map(CATALOG.map((lab) => [lab.id, lab]));

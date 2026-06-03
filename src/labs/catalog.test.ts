@@ -41,6 +41,7 @@ const CATALOG_IDS = [
   'ccna-tshoot-wan-subnet-mismatch',
   'ccna-tshoot-egress-down',
   'ccna-tshoot-vlan-trunk-allowed-list',
+  'ccna-tshoot-dhcp-relay-missing',
 ] as const;
 
 function runOn(ls: LabSession, id: string, lines: readonly string[]): LabSession {

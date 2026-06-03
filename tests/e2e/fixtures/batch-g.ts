@@ -33,4 +33,28 @@ export const batchGTicketLabs: LabSmokeCase[] = [
       { device: 'PC-SALES', workbench: 'Command Prompt', commands: ['ping 192.168.30.50'] },
     ],
   },
+  {
+    id: 'ccna-tshoot-dhcp-relay-missing',
+    title: 'Troubleshoot: Missing DHCP Relay',
+    expectedStart: '0/5',
+    expectedComplete: '5/5',
+    steps: [
+      { device: 'PC-SALES', workbench: 'Command Prompt', commands: ['ipconfig'] },
+      { device: 'PC-OPS', workbench: 'Command Prompt', commands: ['ipconfig'] },
+      {
+        device: 'R1',
+        commands: [
+          'enable',
+          'show running-config interface gi0/1',
+          'configure terminal',
+          'interface gi0/1',
+          'ip helper-address 10.60.0.10',
+          'end',
+          'show running-config interface gi0/1',
+        ],
+      },
+      { device: 'PC-SALES', workbench: 'Command Prompt', commands: ['ipconfig'] },
+      { device: 'PC-OPS', workbench: 'Command Prompt', commands: ['ipconfig'] },
+    ],
+  },
 ];
