@@ -45,6 +45,7 @@ const CATALOG_IDS = [
   'ccna-tshoot-acl-blocks-business-app',
   'ccna-tshoot-ospf-neighbor-change-window',
   'ccna-tshoot-nat-vlan-omission',
+  'ccna-tshoot-default-route-lost-at-branch',
 ] as const;
 
 function runOn(ls: LabSession, id: string, lines: readonly string[]): LabSession {

@@ -52,6 +52,7 @@ import { tshootDhcpRelayMissing } from './ccna/tshoot-dhcp-relay-missing';
 import { tshootAclBlocksBusinessApp } from './ccna/tshoot-acl-blocks-business-app';
 import { tshootOspfNeighborChangeWindow } from './ccna/tshoot-ospf-neighbor-change-window';
 import { tshootNatVlanOmission } from './ccna/tshoot-nat-vlan-omission';
+import { tshootDefaultRouteLostAtBranch } from './ccna/tshoot-default-route-lost-at-branch';
 
 const CATALOG: readonly Lab[] = [
   lab01InterfaceIp,
@@ -93,6 +94,7 @@ const CATALOG: readonly Lab[] = [
   tshootAclBlocksBusinessApp,
   tshootOspfNeighborChangeWindow,
   tshootNatVlanOmission,
+  tshootDefaultRouteLostAtBranch,
 ];
 
 const BY_ID: ReadonlyMap<string, Lab> = new Map(CATALOG.map((lab) => [lab.id, lab]));

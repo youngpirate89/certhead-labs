@@ -22,4 +22,19 @@ export const batchHTicketLabs: LabSmokeCase[] = [
       { device: 'PC-TRAINING', workbench: 'Command Prompt', commands: ['ping 203.0.113.10'] },
     ],
   },
+  {
+    id: 'ccna-tshoot-default-route-lost-at-branch',
+    title: 'Troubleshoot: Branch Default Route Lost',
+    expectedStart: '0/4',
+    expectedComplete: '4/4',
+    steps: [
+      { device: 'BRANCH', commands: ['enable', 'show ip route'] },
+      {
+        device: 'BRANCH',
+        commands: ['configure terminal', 'ip route 0.0.0.0 0.0.0.0 10.140.0.2', 'end'],
+      },
+      { device: 'BRANCH', commands: ['show ip route'] },
+      { device: 'PC-BRANCH', workbench: 'Command Prompt', commands: ['ping 198.51.100.50'] },
+    ],
+  },
 ];
