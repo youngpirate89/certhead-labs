@@ -27,6 +27,10 @@ const batches: Record<string, LabSmokeBatch> = {
   },
 };
 
+export function getAllLabSmokeBatches(): LabSmokeBatch[] {
+  return Object.values(batches);
+}
+
 export function getSelectedLabSmokeBatch(batchId = process.env.LAB_SMOKE_BATCH ?? 'd'): LabSmokeBatch {
   const normalized = batchId.toLowerCase();
   const batch = batches[normalized];
