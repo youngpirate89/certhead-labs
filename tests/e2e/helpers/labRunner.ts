@@ -24,6 +24,7 @@ export async function runLabSmokeCase(page: Page, lab: LabSmokeCase): Promise<La
   await expect(page.getByRole('heading', { name: lab.title.replace(/^Lab \d+ — /, ''), exact: false })).toBeVisible();
   await page.getByRole('button', { name: /Start lab/i }).click();
   await expect(page.getByRole('button', { name: /Reset lab/i })).toBeVisible();
+  await expect(page.getByText(lab.expectedStart, { exact: true })).toBeVisible();
 
   for (const step of lab.steps) {
     await runStep(page, step);

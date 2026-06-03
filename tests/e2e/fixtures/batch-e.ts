@@ -4,6 +4,7 @@ export const batchELabs22To28: LabSmokeCase[] = [
   {
     id: 'ccna-lab22-etherchannel-lacp',
     title: 'Lab 22 — EtherChannel LACP: Bundle Two Switch Links',
+    expectedStart: '0/3',
     expectedComplete: '3/3',
     steps: [
       {
@@ -41,6 +42,7 @@ export const batchELabs22To28: LabSmokeCase[] = [
   {
     id: 'ccna-lab23-stp-root-bridge',
     title: 'Lab 23 — STP Root Bridge: Control VLAN 10 Election',
+    expectedStart: '0/3',
     expectedComplete: '3/3',
     steps: [
       {
@@ -56,6 +58,7 @@ export const batchELabs22To28: LabSmokeCase[] = [
   {
     id: 'ccna-lab24-ipv6-addressing-default-gateway',
     title: 'Lab 24 — IPv6 Addressing: Configure a LAN Default Gateway',
+    expectedStart: '0/6',
     expectedComplete: '6/6',
     steps: [
       {
@@ -83,6 +86,7 @@ export const batchELabs22To28: LabSmokeCase[] = [
   {
     id: 'ccna-lab25-ipv6-static-route',
     title: 'Lab 25 — IPv6 Static Routes: Connect Two Branch LANs',
+    expectedStart: '0/4',
     expectedComplete: '4/4',
     steps: [
       {
@@ -110,6 +114,7 @@ export const batchELabs22To28: LabSmokeCase[] = [
   {
     id: 'ccna-lab26-device-hardening-ssh',
     title: 'Lab 26 — Device Hardening: Enable SSH Management',
+    expectedStart: '0/6',
     expectedComplete: '6/6',
     steps: [
       {
@@ -137,6 +142,7 @@ export const batchELabs22To28: LabSmokeCase[] = [
   {
     id: 'ccna-lab27-ntp-syslog-basics',
     title: 'Lab 27 — NTP and Syslog: Centralized Time and Logging',
+    expectedStart: '0/7',
     expectedComplete: '7/7',
     steps: [
       {
@@ -159,6 +165,7 @@ export const batchELabs22To28: LabSmokeCase[] = [
   {
     id: 'ccna-lab28-wireless-wlan-vlan-mapping',
     title: 'Lab 28 — Wireless Basics: Map a WLAN to a VLAN',
+    expectedStart: '0/7',
     expectedComplete: '7/7',
     steps: [
       {

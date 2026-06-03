@@ -1,3 +1,6 @@
+import { batchALabs01To06 } from './batch-a';
+import { batchBLabs07To11 } from './batch-b';
+import { batchCLabs12To17 } from './batch-c';
 import { batchDOspfLabs } from './batch-d';
 import { batchELabs22To28 } from './batch-e';
 import { batchFLabs29To30AndTickets } from './batch-f';
@@ -10,6 +13,21 @@ export type LabSmokeBatch = {
 };
 
 const batches: Record<string, LabSmokeBatch> = {
+  a: {
+    id: 'a',
+    name: 'Batch A labs 01–06',
+    labs: batchALabs01To06,
+  },
+  b: {
+    id: 'b',
+    name: 'Batch B labs 07–11',
+    labs: batchBLabs07To11,
+  },
+  c: {
+    id: 'c',
+    name: 'Batch C labs 12–17',
+    labs: batchCLabs12To17,
+  },
   d: {
     id: 'd',
     name: 'Batch D OSPF labs',

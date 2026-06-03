@@ -16,6 +16,9 @@ describe('Playwright lab smoke fixtures', () => {
         const lab = getLabById(smokeCase.id);
         expect(lab, `${batch.id}:${smokeCase.id} should resolve in catalog`).not.toBeNull();
         expect(smokeCase.expectedComplete, `${batch.id}:${smokeCase.id} objective count`).toBe(expectedCountFor(smokeCase.id));
+        expect(smokeCase.expectedStart, `${batch.id}:${smokeCase.id} starting objective count`).toBe(
+          `0/${lab!.objectives.length}`,
+        );
         for (const step of smokeCase.steps) {
           expect(
             lab?.topology.devices.some((device) => device.id === step.device),

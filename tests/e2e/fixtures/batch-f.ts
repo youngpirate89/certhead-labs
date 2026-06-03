@@ -4,6 +4,7 @@ export const batchFLabs29To30AndTickets: LabSmokeCase[] = [
   {
     id: 'ccna-lab29-automation-api-basics',
     title: 'Lab 29 — Automation Ticket: Validate Branch Device Facts',
+    expectedStart: '0/5',
     expectedComplete: '5/5',
     steps: [
       {
@@ -22,6 +23,7 @@ export const batchFLabs29To30AndTickets: LabSmokeCase[] = [
   {
     id: 'ccna-lab30-vlan-dhcp-ticket',
     title: 'Lab 30 — Ticket: New VLAN Users Cannot Get DHCP',
+    expectedStart: '0/5',
     expectedComplete: '5/5',
     steps: [
       { device: 'PC-NEW', workbench: 'Command Prompt', commands: ['ipconfig'] },
@@ -45,6 +47,7 @@ export const batchFLabs29To30AndTickets: LabSmokeCase[] = [
   {
     id: 'ccna-tshoot-return-route',
     title: "Troubleshoot: PC-A can't reach PC-B",
+    expectedStart: '0/2',
     expectedComplete: '2/2',
     steps: [
       {
@@ -62,6 +65,7 @@ export const batchFLabs29To30AndTickets: LabSmokeCase[] = [
   {
     id: 'ccna-tshoot-wrong-next-hop',
     title: 'Troubleshoot: R2 points at the wrong next-hop',
+    expectedStart: '0/2',
     expectedComplete: '2/2',
     steps: [
       {
@@ -80,6 +84,7 @@ export const batchFLabs29To30AndTickets: LabSmokeCase[] = [
   {
     id: 'ccna-tshoot-wan-subnet-mismatch',
     title: 'Troubleshoot: Mismatched WAN subnet',
+    expectedStart: '0/2',
     expectedComplete: '2/2',
     steps: [
       {
@@ -99,6 +104,7 @@ export const batchFLabs29To30AndTickets: LabSmokeCase[] = [
   {
     id: 'ccna-tshoot-egress-down',
     title: 'Troubleshoot: WAN connectivity loss',
+    expectedStart: '0/2',
     expectedComplete: '2/2',
     steps: [
       {

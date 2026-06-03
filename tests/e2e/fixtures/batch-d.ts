@@ -7,6 +7,7 @@ export type LabCommandStep = {
 export type LabSmokeCase = {
   id: string;
   title: string;
+  expectedStart: string;
   expectedComplete: string;
   steps: LabCommandStep[];
 };
@@ -15,6 +16,7 @@ export const batchDOspfLabs: LabSmokeCase[] = [
   {
     id: 'ccna-lab18-ospf-tshoot-passive',
     title: 'Lab 18 — Troubleshoot OSPF: Passive-Interface on the Transit Link',
+    expectedStart: '0/4',
     expectedComplete: '4/4',
     steps: [
       { device: 'PC-A', workbench: 'Command Prompt', commands: ['ping 192.168.2.10'] },
@@ -38,6 +40,7 @@ export const batchDOspfLabs: LabSmokeCase[] = [
   {
     id: 'ccna-lab19-ospf-tshoot-hello-timers',
     title: 'Lab 19 — Troubleshoot OSPF: Hello/Dead Timer Mismatch',
+    expectedStart: '0/5',
     expectedComplete: '5/5',
     steps: [
       { device: 'PC-A', workbench: 'Command Prompt', commands: ['ping 192.168.2.10'] },
@@ -64,6 +67,7 @@ export const batchDOspfLabs: LabSmokeCase[] = [
   {
     id: 'ccna-lab20-ospf-tshoot-auth',
     title: 'Lab 20 — Troubleshoot OSPF: MD5 Authentication Mismatch',
+    expectedStart: '0/2',
     expectedComplete: '2/2',
     steps: [
       { device: 'PC-A', workbench: 'Command Prompt', commands: ['ping 10.2.0.10'] },
@@ -90,6 +94,7 @@ export const batchDOspfLabs: LabSmokeCase[] = [
   {
     id: 'ccna-lab21-ospf-default-information',
     title: 'Lab 21 — OSPF: Redistribute a Default Route',
+    expectedStart: '0/3',
     expectedComplete: '3/3',
     steps: [
       { device: 'PC-B', workbench: 'Command Prompt', commands: ['ping 8.8.8.2'] },
