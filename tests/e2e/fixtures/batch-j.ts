@@ -50,4 +50,32 @@ export const batchJTicketLabs: LabSmokeCase[] = [
       { device: 'ADMIN-PC', workbench: 'Command Prompt', commands: ['ssh admin@10.48.10.1'] },
     ],
   },
+  {
+    id: 'ccna-tshoot-ospf-acl-overlap-ticket',
+    title: 'Troubleshoot: OSPF and ACL Overlap Ticket',
+    expectedStart: '0/7',
+    expectedComplete: '7/7',
+    steps: [
+      { device: 'PC-BRANCH', workbench: 'Command Prompt', commands: ['ping 172.49.50.20'] },
+      { device: 'BRANCH', commands: ['enable', 'show ip route'] },
+      { device: 'EDGE', commands: ['enable', 'show ip route', 'show access-lists'] },
+      {
+        device: 'EDGE',
+        commands: [
+          'configure terminal',
+          'router ospf 1',
+          'default-information originate',
+          'exit',
+          'ip access-list extended BRANCH-APP-POLICY',
+          'no 20',
+          'permit tcp 10.49.10.0 0.0.0.255 host 172.49.50.20 eq 8443',
+          'deny ip any any',
+          'end',
+          'show access-lists',
+        ],
+      },
+      { device: 'BRANCH', commands: ['show ip route'] },
+      { device: 'PC-BRANCH', workbench: 'Command Prompt', commands: ['ping 172.49.50.20'] },
+    ],
+  },
 ];

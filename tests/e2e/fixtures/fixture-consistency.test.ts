@@ -30,11 +30,12 @@ describe('Playwright lab smoke fixtures', () => {
     }
   });
 
-  it('includes the Batch J Lab 47 and Lab 48 smoke fixtures', () => {
+  it('includes the Batch J Lab 47 through Lab 49 smoke fixtures', () => {
     const labIds = getAllLabSmokeBatches().flatMap((batch) => batch.labs.map((smokeCase) => smokeCase.id));
 
     expect(labIds).toContain('ccna-tshoot-ipv6-missing-default-gateway');
     expect(labIds).toContain('ccna-tshoot-api-management-acl-repair');
+    expect(labIds).toContain('ccna-tshoot-ospf-acl-overlap-ticket');
   });
 
   it('fails closed for unknown batches and unknown single-lab selections', () => {

@@ -61,6 +61,7 @@ import { tshootWirelessClientWrongVlan } from './ccna/tshoot-wireless-client-wro
 import { tshootPortSecurityErrdisabledUser } from './ccna/tshoot-port-security-errdisabled-user';
 import { tshootIpv6MissingDefaultGateway } from './ccna/tshoot-ipv6-missing-default-gateway';
 import { tshootApiManagementAclRepair } from './ccna/tshoot-api-management-acl-repair';
+import { tshootOspfAclOverlapTicket } from './ccna/tshoot-ospf-acl-overlap-ticket';
 
 const CATALOG: readonly Lab[] = [
   lab01InterfaceIp,
@@ -111,6 +112,7 @@ const CATALOG: readonly Lab[] = [
   tshootPortSecurityErrdisabledUser,
   tshootIpv6MissingDefaultGateway,
   tshootApiManagementAclRepair,
+  tshootOspfAclOverlapTicket,
 ];
 
 const BY_ID: ReadonlyMap<string, Lab> = new Map(CATALOG.map((lab) => [lab.id, lab]));
