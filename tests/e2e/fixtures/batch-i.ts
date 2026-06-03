@@ -44,4 +44,20 @@ export const batchITicketLabs: LabSmokeCase[] = [
       },
     ],
   },
+  {
+    id: 'ccna-tshoot-wireless-client-wrong-vlan',
+    title: 'Troubleshoot: Wireless Client in Wrong VLAN',
+    expectedStart: '0/5',
+    expectedComplete: '5/5',
+    steps: [
+      { device: 'LAPTOP-SALES', workbench: 'Command Prompt', commands: ['ipconfig'] },
+      { device: 'WLC', workbench: 'Controller CLI', commands: ['show wlan summary', 'show wlan 1'] },
+      {
+        device: 'WLC',
+        workbench: 'Controller CLI',
+        commands: ['config wlan interface 1 SALES-USERS', 'show wlan summary', 'show wlan 1', 'show client summary'],
+      },
+      { device: 'LAPTOP-SALES', workbench: 'Command Prompt', commands: ['ipconfig'] },
+    ],
+  },
 ];
