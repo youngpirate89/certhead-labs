@@ -52,6 +52,7 @@ const CATALOG_IDS = [
   'ccna-tshoot-ntp-syslog-source-mismatch',
   'ccna-tshoot-wireless-client-wrong-vlan',
   'ccna-tshoot-port-security-errdisabled-user',
+  'ccna-tshoot-ipv6-missing-default-gateway',
 ] as const;
 
 function runOn(ls: LabSession, id: string, lines: readonly string[]): LabSession {

@@ -30,6 +30,12 @@ describe('Playwright lab smoke fixtures', () => {
     }
   });
 
+  it('includes the Lab 47 IPv6 missing default gateway smoke fixture', () => {
+    const labIds = getAllLabSmokeBatches().flatMap((batch) => batch.labs.map((smokeCase) => smokeCase.id));
+
+    expect(labIds).toContain('ccna-tshoot-ipv6-missing-default-gateway');
+  });
+
   it('fails closed for unknown batches and unknown single-lab selections', () => {
     expect(() => getSelectedLabSmokeBatch('not-real')).toThrow(/Unknown lab smoke batch/);
 
