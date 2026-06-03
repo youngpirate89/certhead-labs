@@ -293,6 +293,8 @@ export interface SecurityState {
   cryptoKeyModulus: number | null;
   vtyLoginLocal: boolean;
   vtyTransportInput: 'all' | 'ssh' | 'telnet' | 'none';
+  /** Standard ACL applied inbound to VTY lines with `access-class <acl> in`. */
+  vtyAccessClassIn: number | null;
   motdBanner: string | null;
 }
 
@@ -700,6 +702,7 @@ export function buildDevice(spec: {
       cryptoKeyModulus: null,
       vtyLoginLocal: false,
       vtyTransportInput: 'all',
+      vtyAccessClassIn: null,
       motdBanner: null,
     },
     ntp: {

@@ -812,7 +812,8 @@ function handleSsh(
 
   const targetRouter = findRouterByInterfaceIp(ctx.lab, parsed.host);
   const reachable = canReach(ctx.lab, s.id, parsed.host, undefined, 'tcp');
-  const ok = Boolean(targetRouter && reachable.ok && isRouterSshReady(targetRouter, parsed.user));
+  const vtyDenied = targetRouter && reachable.ok ? vtyAccessClassDenyReason(targetRouter, s.ip) : null;
+  const ok = Boolean(targetRouter && reachable.ok && isRouterSshReady(targetRouter, parsed.user) && !vtyDenied);
   if (opts?.record !== false) s.lastSsh = { target: parsed.host, user: parsed.user, ok };
 
   if (ok && targetRouter) {
@@ -830,7 +831,9 @@ function handleSsh(
     ? '[sim] No router interface owns that management IP.'
     : !reachable.ok
       ? `[sim] ${failureDetail(reachable.failedAt, parsed.host)}`
-      : '[sim] SSH is not ready: configure a local user, domain name, RSA key, `login local`, and `transport input ssh`.';
+      : vtyDenied
+        ? `[sim] ${vtyDenied}`
+        : '[sim] SSH is not ready: configure a local user, domain name, RSA key, `login local`, and `transport input ssh`.';
   return {
     session: s,
     output: [
@@ -860,6 +863,17 @@ function isRouterSshReady(router: RouterSession, username: string): boolean {
       sec.vtyLoginLocal &&
       sec.vtyTransportInput === 'ssh',
   );
+}
+
+function vtyAccessClassDenyReason(router: RouterSession, sourceIp: string | null): string | null {
+  const aclNumber = router.device.security.vtyAccessClassIn;
+  if (aclNumber === null) return null;
+  if (!sourceIp) return `VTY access-class ${aclNumber} denies an unknown source.`;
+  const acl = router.device.acls.get(aclNumber);
+  if (!acl || evaluateAcl(acl, sourceIp, 'tcp', '0.0.0.0') !== 'permit') {
+    return `VTY access-class ${aclNumber} denies ${sourceIp}.`;
+  }
+  return null;
 }
 
 function parseSshTarget(args: readonly string[]): { user: string; host: string } | null {

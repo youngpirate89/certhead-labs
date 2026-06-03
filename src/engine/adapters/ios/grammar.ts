@@ -86,6 +86,18 @@ const showSubtree: CommandNode = {
           help: 'Filter to a single interface stanza',
           argument: arg('iface', done('Per-interface running config')),
         },
+        '|': {
+          children: {
+            section: {
+              help: 'Filter running-config to matching sections',
+              argument: arg('section', {
+                terminal: true,
+                help: 'Section-filtered running config',
+                argument: arg('section2', done('Section-filtered running config')),
+              }),
+            },
+          },
+        },
       },
     },
     ntp: {
@@ -816,6 +828,14 @@ const configLineMode: CommandNode = {
           },
         },
       },
+    },
+    'access-class': {
+      help: 'Restrict incoming VTY sessions with an ACL',
+      argument: arg('acl', {
+        children: {
+          in: done('Apply ACL inbound to VTY lines'),
+        },
+      }),
     },
     exit: done('Exit line configuration'),
     end: done('Return to privileged EXEC'),

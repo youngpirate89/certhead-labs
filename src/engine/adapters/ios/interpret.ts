@@ -540,6 +540,10 @@ function dispatch(
       if (command[1] === 'input') return setVtyTransportInput(s, command[2] as 'ssh' | 'telnet' | 'all' | 'none');
       return { session: s, output: err('% Unknown command.') };
 
+    case 'access-class':
+      if (command[2] === 'in') return setVtyAccessClassIn(s, args.acl, ec);
+      return { session: s, output: err('% Unknown command.') };
+
     case 'show':
       return show(s, command, args);
 
@@ -607,6 +611,14 @@ function setVtyTransportInput(s: Session, value: 'ssh' | 'telnet' | 'all' | 'non
   return { session: s, output: [] };
 }
 
+function setVtyAccessClassIn(s: Session, aclText: string | undefined, ec: ErrCtx): ApplyResult {
+  if (s.mode !== 'config-line' || s.activeLine !== 'vty') return { session: s, output: err('% Invalid line context.') };
+  const acl = Number.parseInt(aclText ?? '', 10);
+  if (!Number.isInteger(acl) || acl < 1 || acl > 99) return { session: s, output: badInput(ec, 'acl') };
+  s.device.security.vtyAccessClassIn = acl;
+  return { session: s, output: [] };
+}
+
 export function isSshReady(s: Session, username: string): boolean {
   const sec = s.device.security;
   return Boolean(
@@ -628,6 +640,7 @@ function hasSshHardening(s: Session): boolean {
       sec.cryptoKeyModulus !== null ||
       sec.vtyLoginLocal ||
       sec.vtyTransportInput !== 'all' ||
+      sec.vtyAccessClassIn !== null ||
       sec.motdBanner !== null,
   );
 }
@@ -2141,6 +2154,11 @@ function show(
     if (command[2] === 'interface' && args.iface) {
       return showRunningConfigInterface(s, args.iface);
     }
+    if (command[2] === '|' && command[3] === 'section' && args.section) {
+      const rawSection = [args.section, args.section2].filter(Boolean).join(' ');
+      const section = rawSection === 'line' || rawSection === 'vty' || rawSection === 'line vty' ? 'line vty 0 4' : rawSection;
+      return { session: s, output: out(...showRunningConfigSection(s, section)) };
+    }
     if (hasSshHardening(s) || hasManagementServices(s)) s.lastShowRunningConfig = nextEngineSeq();
     return { session: s, output: out(...showRunningConfig(s)) };
   }
@@ -2975,14 +2993,28 @@ function showRunningConfig(s: Session): string[] {
     }
     lines.push('!');
   }
-  if (sec.vtyLoginLocal || sec.vtyTransportInput !== 'all') {
+  if (sec.vtyLoginLocal || sec.vtyTransportInput !== 'all' || sec.vtyAccessClassIn !== null) {
     lines.push('line vty 0 4');
     if (sec.vtyLoginLocal) lines.push(' login local');
     if (sec.vtyTransportInput !== 'all') lines.push(` transport input ${sec.vtyTransportInput}`);
+    if (sec.vtyAccessClassIn !== null) lines.push(` access-class ${sec.vtyAccessClassIn} in`);
     lines.push('!');
   }
   lines.push('end');
   return lines;
+}
+
+function showRunningConfigSection(s: Session, sectionStart: string): string[] {
+  const lines = showRunningConfig(s);
+  const start = lines.findIndex((line) => line.includes(sectionStart));
+  if (start === -1) return [];
+  const section: string[] = [];
+  for (let i = start; i < lines.length; i += 1) {
+    const line = lines[i];
+    section.push(line);
+    if (i > start && line === '!') break;
+  }
+  return section;
 }
 
 /** Render an ACL entry's source-form for `show running-config`. */
