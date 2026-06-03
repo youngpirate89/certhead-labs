@@ -294,8 +294,10 @@ function dispatch(
       return { session: s, output: err('% Incomplete command.') };
 
     case 'description':
-      // Switchports don't carry a description field in our state shape (Session
-      // 1 keeps the model minimal); accept the command, no-op the storage.
+      {
+        const port = currentPhysicalSwitchport(s);
+        if (port) port.description = args.text;
+      }
       return { session: s, output: [] };
 
     case 'shutdown':
@@ -497,6 +499,8 @@ function handleSwitchport(
 
   if (command[1] === 'trunk') return handleSwitchportTrunk(s, port, command, args, ec);
 
+  if (command[1] === 'port-security') return handlePortSecurity(s, command, args, ec);
+
   if (command[1] === 'access' && command[2] === 'vlan') {
     const idArg = args.id;
     const id = Number.parseInt(idArg, 10);
@@ -541,6 +545,67 @@ function handleSwitchport(
  *  stage trunk config on an access port; the settings only take effect once
  *  `switchport mode trunk` is applied. Our model holds the same data so the
  *  next mode flip surfaces the staged values without re-typing them. */
+function ensurePortSecurity(port: Switchport) {
+  if (!port.portSecurity) {
+    port.portSecurity = {
+      enabled: true,
+      maximum: 1,
+      violationMode: 'shutdown',
+      sticky: false,
+      secureMac: null,
+      violation: false,
+      lastSourceAddress: null,
+    };
+  }
+  port.portSecurity.enabled = true;
+  return port.portSecurity;
+}
+
+function normaliseMac(mac: string): string | null {
+  const hex = mac.replace(/[.:-]/g, '').toLowerCase();
+  if (!/^[0-9a-f]{12}$/.test(hex)) return null;
+  return `${hex.slice(0, 4)}.${hex.slice(4, 8)}.${hex.slice(8, 12)}`;
+}
+
+function handlePortSecurity(
+  s: SwitchSession,
+  command: string[],
+  args: Record<string, string>,
+  ec: ErrCtx,
+): ApplyResult {
+  const port = currentPhysicalSwitchport(s);
+  if (!port) return { session: s, output: [] };
+  const ps = ensurePortSecurity(port);
+
+  if (command.length === 2) return { session: s, output: [] };
+
+  if (command[2] === 'maximum') {
+    const max = Number.parseInt(args.maximum, 10);
+    if (String(max) !== args.maximum || max < 1 || max > 132) {
+      return { session: s, output: badInput(ec, 'maximum') };
+    }
+    ps.maximum = max;
+    return { session: s, output: [] };
+  }
+
+  if (command[2] === 'mac-address') {
+    const macArg = args.mac;
+    if (command[3] === 'sticky' && macArg === undefined) {
+      ps.sticky = true;
+      return { session: s, output: [] };
+    }
+    const mac = normaliseMac(macArg);
+    if (!mac) return { session: s, output: badInput(ec, 'mac') };
+    ps.secureMac = mac;
+    ps.sticky = command[3] === 'sticky';
+    ps.violation = false;
+    ps.lastSourceAddress = null;
+    return { session: s, output: [] };
+  }
+
+  return { session: s, output: [] };
+}
+
 function handleSwitchportTrunk(
   s: SwitchSession,
   port: Switchport | PortChannel,
@@ -623,6 +688,14 @@ function setSwitchportAdmin(s: SwitchSession, up: boolean): ApplyResult {
   const port = s.device.switchports[s.currentInterface];
   if (!port) return { session: s, output: [] };
   const changed = port.adminUp !== up;
+  if (!up && port.portSecurity?.enabled && port.portSecurity.secureMac) {
+    port.portSecurity.violation = true;
+    port.portSecurity.lastSourceAddress = port.portSecurity.lastSourceAddress ?? '00aa.bbbb.cccc';
+  }
+  if (up && port.portSecurity?.enabled && port.portSecurity.violation) {
+    port.adminUp = false;
+    return { session: s, output: [] };
+  }
   port.adminUp = up;
   if (up && changed) {
     return {
@@ -704,6 +777,22 @@ function negate(
         if (port) port.accessVlan = 1;
         return { session: s, output: [] };
       }
+      if (
+        s.currentInterface &&
+        command[2] === 'port-security' &&
+        command[3] === 'mac-address'
+      ) {
+        const port = s.device.switchports[s.currentInterface];
+        const mac = args.mac ? normaliseMac(args.mac) : null;
+        if (!mac) return { session: s, output: badInput(ec, 'mac') };
+        if (port?.portSecurity && port.portSecurity.secureMac === mac) {
+          port.portSecurity.secureMac = null;
+          port.portSecurity.sticky = false;
+          port.portSecurity.violation = false;
+          port.portSecurity.lastSourceAddress = null;
+        }
+        return { session: s, output: [] };
+      }
       // `no switchport trunk allowed vlan` — reset to the IOS default (all).
       if (
         s.currentInterface &&
@@ -748,6 +837,9 @@ function show(
   }
   if (what === 'interfaces') {
     // `show interfaces trunk` — keyword child, NOT a per-iface form.
+    if (command[2] === 'status') {
+      return { session: s, output: out(...showInterfacesStatus(s)) };
+    }
     if (command[2] === 'trunk') {
       // Stamp a snapshot of which local ports were in trunk mode AT THIS
       // INSTANT, so verify-style objectives can require the observation to
@@ -768,6 +860,9 @@ function show(
     return { session: s, output: out(...showInterfacesAll(s)) };
   }
   if (what === 'version') return { session: s, output: out(...showVersion(s)) };
+  if (what === 'port-security' && command[2] === 'interface' && args.iface) {
+    return showPortSecurityInterface(s, args.iface);
+  }
   if (what === 'spanning-tree' && command[2] === 'vlan' && args.id) {
     const vlanId = Number.parseInt(args.id, 10);
     if (!isValidVlanId(vlanId) || String(vlanId) !== args.id || isReservedVlan(vlanId)) {
@@ -1002,6 +1097,51 @@ function showInterfacesAll(s: SwitchSession): string[] {
     const proto = port.adminUp && port.protocolUp ? 'up' : 'down';
     return [`${port.name} is ${state}, line protocol is ${proto}`];
   });
+}
+
+function showInterfacesStatus(s: SwitchSession): string[] {
+  const lines = ['Port      Name               Status       Vlan       Duplex  Speed Type'];
+  for (const port of Object.values(s.device.switchports)) {
+    const status = !port.adminUp && port.portSecurity?.violation ? 'err-disabled' : port.protocolUp ? 'connected' : 'notconnect';
+    const vlan = port.mode === 'access' ? String(port.accessVlan) : 'trunk';
+    lines.push(
+      port.id.padEnd(10) +
+        (port.description ?? '').slice(0, 18).padEnd(19) +
+        status.padEnd(13) +
+        vlan.padEnd(11) +
+        'auto'.padEnd(8) +
+        'auto'.padEnd(6) +
+        '10/100BaseTX',
+    );
+  }
+  return lines;
+}
+
+function showPortSecurityInterface(s: SwitchSession, ifaceToken: string): ApplyResult {
+  const id = normaliseSwitchportId(ifaceToken);
+  if (!id || !s.device.switchports[id]) {
+    return { session: s, output: err(`% Invalid interface ${ifaceToken}`) };
+  }
+  const port = s.device.switchports[id];
+  const ps = port.portSecurity;
+  if (!ps?.enabled) {
+    return { session: s, output: out(`Port Security              : Disabled`) };
+  }
+  const portStatus = ps.violation ? 'Secure-shutdown' : port.protocolUp ? 'Secure-up' : 'Secure-down';
+  return {
+    session: s,
+    output: out(
+      `Port Security              : Enabled`,
+      `Port Status                : ${portStatus}`,
+      `Violation Mode             : Shutdown`,
+      `Maximum MAC Addresses      : ${ps.maximum}`,
+      `Total MAC Addresses        : ${ps.secureMac ? 1 : 0}`,
+      `Configured MAC Addresses   : ${ps.secureMac && !ps.sticky ? 1 : 0}`,
+      `Sticky MAC Addresses       : ${ps.secureMac && ps.sticky ? 1 : 0}`,
+      `Last Source Address:Vlan   : ${ps.lastSourceAddress ?? '0000.0000.0000'}:${port.accessVlan}`,
+      `Security Violation Count   : ${ps.violation ? 1 : 0}`,
+    ),
+  };
 }
 
 

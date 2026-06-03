@@ -58,6 +58,7 @@ import { tshootFloatingStaticFailoverBroken } from './ccna/tshoot-floating-stati
 import { tshootSshManagementDenied } from './ccna/tshoot-ssh-management-denied';
 import { tshootNtpSyslogSourceMismatch } from './ccna/tshoot-ntp-syslog-source-mismatch';
 import { tshootWirelessClientWrongVlan } from './ccna/tshoot-wireless-client-wrong-vlan';
+import { tshootPortSecurityErrdisabledUser } from './ccna/tshoot-port-security-errdisabled-user';
 
 const CATALOG: readonly Lab[] = [
   lab01InterfaceIp,
@@ -105,6 +106,7 @@ const CATALOG: readonly Lab[] = [
   tshootSshManagementDenied,
   tshootNtpSyslogSourceMismatch,
   tshootWirelessClientWrongVlan,
+  tshootPortSecurityErrdisabledUser,
 ];
 
 const BY_ID: ReadonlyMap<string, Lab> = new Map(CATALOG.map((lab) => [lab.id, lab]));

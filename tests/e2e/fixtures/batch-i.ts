@@ -60,4 +60,27 @@ export const batchITicketLabs: LabSmokeCase[] = [
       { device: 'LAPTOP-SALES', workbench: 'Command Prompt', commands: ['ipconfig'] },
     ],
   },
+  {
+    id: 'ccna-tshoot-port-security-errdisabled-user',
+    title: 'Troubleshoot: Port Security Err-Disabled User',
+    expectedStart: '0/5',
+    expectedComplete: '5/5',
+    steps: [
+      { device: 'PC-USER', workbench: 'Command Prompt', commands: ['ping 10.200.20.60'] },
+      { device: 'SW1', commands: ['enable', 'show interfaces status', 'show port-security interface Fa0/12'] },
+      {
+        device: 'SW1',
+        commands: [
+          'configure terminal',
+          'interface Fa0/12',
+          'no switchport port-security mac-address sticky 0011.2233.4455',
+          'shutdown',
+          'no shutdown',
+          'end',
+          'show interfaces status',
+        ],
+      },
+      { device: 'PC-USER', workbench: 'Command Prompt', commands: ['ping 10.200.20.60'] },
+    ],
+  },
 ];

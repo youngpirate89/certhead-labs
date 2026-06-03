@@ -36,6 +36,7 @@ const showSubtree: CommandNode = {
       // child keyword prefix-matches).
       children: {
         trunk: done('Status of trunking interfaces'),
+        status: done('Interface status table'),
       },
       argument: arg('iface', {
         terminal: true,
@@ -75,6 +76,15 @@ const showSubtree: CommandNode = {
       },
     },
     version: done('System hardware and software status'),
+    'port-security': {
+      help: 'Port security information',
+      children: {
+        interface: {
+          help: 'Port security information for an interface',
+          argument: arg('iface', done('Per-interface port security')),
+        },
+      },
+    },
   },
 };
 
@@ -199,6 +209,27 @@ const configIfMode: CommandNode = {
             },
           },
         },
+        'port-security': {
+          terminal: true,
+          help: 'Enable port security on this interface',
+          children: {
+            maximum: {
+              help: 'Maximum secure MAC addresses',
+              argument: arg('maximum', done('Set maximum secure addresses')),
+            },
+            'mac-address': {
+              help: 'Configure a secure MAC address',
+              children: {
+                sticky: {
+                  terminal: true,
+                  help: 'Enable sticky secure MAC learning',
+                  argument: arg('mac', done('Configure sticky secure MAC')),
+                },
+              },
+              argument: arg('mac', done('Configure secure MAC')),
+            },
+          },
+        },
         trunk: {
           help: 'Configure trunk-mode parameters',
           children: {
@@ -282,6 +313,22 @@ const configIfMode: CommandNode = {
               help: 'Reset access-mode parameters',
               children: {
                 vlan: done('Reset access VLAN to 1'),
+              },
+            },
+            'port-security': {
+              help: 'Reset port security settings',
+              children: {
+                'mac-address': {
+                  help: 'Remove a secure MAC address',
+                  children: {
+                    sticky: {
+                      terminal: true,
+                      help: 'Remove sticky secure MAC learning',
+                      argument: arg('mac', done('Remove sticky secure MAC')),
+                    },
+                  },
+                  argument: arg('mac', done('Remove secure MAC')),
+                },
               },
             },
             trunk: {

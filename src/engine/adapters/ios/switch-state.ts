@@ -44,6 +44,8 @@ export interface Switchport {
   readonly id: string;
   /** Full IOS name, e.g. 'FastEthernet0/1'. */
   readonly name: string;
+  /** Optional interface description rendered by show interfaces status. */
+  description: string | null;
   mode: 'access' | 'trunk' | 'dynamic';
   /** VLAN id this port belongs to in access mode. Defaults to 1. */
   accessVlan: number;
@@ -61,6 +63,18 @@ export interface Switchport {
   lacpMode: LacpMode | null;
   /** Derived state: true when the member is bundled into its Port-channel. */
   bundled: boolean;
+  /** Scoped CCNA port-security model for access-port err-disable labs. */
+  portSecurity: PortSecurityState | null;
+}
+
+export interface PortSecurityState {
+  enabled: boolean;
+  maximum: number;
+  violationMode: 'shutdown';
+  sticky: boolean;
+  secureMac: string | null;
+  violation: boolean;
+  lastSourceAddress: string | null;
 }
 
 export interface PortChannel {
@@ -228,6 +242,7 @@ export function buildSwitchDevice(spec: {
     switchports[id] = {
       id,
       name: fullSwitchportName(id),
+      description: null,
       mode: 'access',
       accessVlan: 1,
       // Trunk fields default to IOS factory: all VLANs allowed, native VLAN 1.
@@ -245,6 +260,7 @@ export function buildSwitchDevice(spec: {
       channelGroup: null,
       lacpMode: null,
       bundled: false,
+      portSecurity: null,
     };
   }
   const vlans = new Map<number, Vlan>();

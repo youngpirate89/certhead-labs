@@ -189,6 +189,37 @@ describe('switch — switchport configuration', () => {
     expect(s.device.switchports['Fa0/1'].accessVlan).toBe(1);
   });
 
+  it('supports narrow port-security configuration and stale sticky MAC cleanup', () => {
+    let s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface fa0/1',
+      'switchport mode access',
+      'switchport port-security',
+      'switchport port-security maximum 1',
+      'switchport port-security mac-address sticky 0011.2233.4455',
+    ]);
+
+    expect(s.device.switchports['Fa0/1'].portSecurity).toMatchObject({
+      enabled: true,
+      maximum: 1,
+      violationMode: 'shutdown',
+      sticky: true,
+      secureMac: '0011.2233.4455',
+    });
+
+    s = run(s, ['no switchport port-security mac-address sticky 0011.2233.4455']);
+    expect(s.device.switchports['Fa0/1'].portSecurity).toMatchObject({
+      enabled: true,
+      maximum: 1,
+      violationMode: 'shutdown',
+      sticky: false,
+      secureMac: null,
+      violation: false,
+      lastSourceAddress: null,
+    });
+  });
+
   it('rejects ip address on a switchport with the L2 sentence', () => {
     const result = applySwitchCommand(
       run(fresh(), ['enable', 'configure terminal', 'interface fa0/1']),
@@ -242,6 +273,55 @@ describe('switch — show commands', () => {
       .join('\n');
     expect(text).toMatch(/VLAN\s+Name\s+Status\s+Ports/);
     expect(text).toMatch(/1\s+default\s+active\s+Fa0\/1, Fa0\/2, Fa0\/3/);
+  });
+
+  it('show interfaces status renders connected and err-disabled access ports', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface fa0/1',
+      'description User-desk-move',
+      'switchport access vlan 20',
+      'switchport port-security',
+      'switchport port-security maximum 1',
+      'switchport port-security mac-address sticky 0011.2233.4455',
+      'shutdown',
+      'end',
+    ]);
+    const text = applySwitchCommand(s, 'show interfaces status')
+      .output.map((o) => o.text)
+      .join('\n');
+
+    expect(text).toMatch(/Port\s+Name\s+Status\s+Vlan\s+Duplex\s+Speed\s+Type/);
+    expect(text).toMatch(/Fa0\/1\s+User-desk-move\s+err-disabled\s+20\s+auto\s+auto\s+10\/100BaseTX/);
+    expect(text).toMatch(/Fa0\/2\s+\s+connected\s+1\s+auto\s+auto\s+10\/100BaseTX/);
+  });
+
+  it('show port-security interface renders secure-shutdown state', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface fa0/1',
+      'switchport access vlan 20',
+      'switchport port-security',
+      'switchport port-security maximum 1',
+      'switchport port-security mac-address sticky 0011.2233.4455',
+      'end',
+    ]);
+    s.device.switchports['Fa0/1'].adminUp = false;
+    s.device.switchports['Fa0/1'].portSecurity!.violation = true;
+    s.device.switchports['Fa0/1'].portSecurity!.lastSourceAddress = '00aa.bbbb.cccc';
+
+    const text = applySwitchCommand(s, 'show port-security interface Fa0/1')
+      .output.map((o) => o.text)
+      .join('\n');
+
+    expect(text).toMatch(/Port Security\s+: Enabled/);
+    expect(text).toMatch(/Port Status\s+: Secure-shutdown/);
+    expect(text).toMatch(/Violation Mode\s+: Shutdown/);
+    expect(text).toMatch(/Maximum MAC Addresses\s+: 1/);
+    expect(text).toMatch(/Sticky MAC Addresses\s+: 1/);
+    expect(text).toMatch(/Last Source Address:Vlan\s+: 00aa\.bbbb\.cccc:20/);
   });
 
   it('show vlan brief lists assigned ports under the right VLAN', () => {
