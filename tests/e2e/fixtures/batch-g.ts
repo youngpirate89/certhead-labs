@@ -79,4 +79,27 @@ export const batchGTicketLabs: LabSmokeCase[] = [
       },
     ],
   },
+  {
+    id: 'ccna-tshoot-ospf-neighbor-change-window',
+    title: 'Troubleshoot: OSPF Neighbor Down After Change Window',
+    expectedStart: '0/4',
+    expectedComplete: '4/4',
+    steps: [
+      { device: 'PC-HQ', workbench: 'Command Prompt', commands: ['ping 10.80.20.10'] },
+      { device: 'HQ', commands: ['enable', 'show ip ospf neighbor', 'show ip ospf'] },
+      {
+        device: 'HQ',
+        commands: [
+          'configure terminal',
+          'router ospf 1',
+          'no passive-interface GigabitEthernet0/2',
+          'passive-interface GigabitEthernet0/0',
+          'end',
+          'show ip ospf neighbor',
+          'show ip route',
+        ],
+      },
+      { device: 'PC-HQ', workbench: 'Command Prompt', commands: ['ping 10.80.20.10'] },
+    ],
+  },
 ];

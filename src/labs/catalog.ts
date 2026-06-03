@@ -50,6 +50,7 @@ import { tshootEgressDown } from './ccna/tshoot-egress-down';
 import { tshootVlanTrunkAllowedList } from './ccna/tshoot-vlan-trunk-allowed-list';
 import { tshootDhcpRelayMissing } from './ccna/tshoot-dhcp-relay-missing';
 import { tshootAclBlocksBusinessApp } from './ccna/tshoot-acl-blocks-business-app';
+import { tshootOspfNeighborChangeWindow } from './ccna/tshoot-ospf-neighbor-change-window';
 
 const CATALOG: readonly Lab[] = [
   lab01InterfaceIp,
@@ -89,6 +90,7 @@ const CATALOG: readonly Lab[] = [
   tshootVlanTrunkAllowedList,
   tshootDhcpRelayMissing,
   tshootAclBlocksBusinessApp,
+  tshootOspfNeighborChangeWindow,
 ];
 
 const BY_ID: ReadonlyMap<string, Lab> = new Map(CATALOG.map((lab) => [lab.id, lab]));
