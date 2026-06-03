@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { grade } from '@/engine/grading';
-import { applyToActive, initLabSession, type LabSession } from '@/engine/lab-session';
+import { applyToActive, initLabSession, type DeviceSession, type LabSession } from '@/engine/lab-session';
 import { getLabById } from './catalog';
 import { lab01InterfaceIp } from './ccna/lab-01-interface-ip';
 
@@ -66,6 +66,24 @@ function runOn(ls: LabSession, id: string, lines: readonly string[]): LabSession
   return cur;
 }
 
+function modeOf(device: DeviceSession): string | undefined {
+  return 'mode' in device ? device.mode : undefined;
+}
+
+function isVerificationCommand(command: string): boolean {
+  return /^(show|ping|ipconfig|curl|Get-NetIPConfiguration)\b/i.test(command.trim());
+}
+
+function learnerFacingStrings(lab: NonNullable<ReturnType<typeof getLabById>>): string[] {
+  return [
+    lab.title,
+    lab.scenario,
+    ...lab.objectives.map((objective) => objective.text),
+    ...lab.hints.map((hint) => hint.text),
+    ...(lab.solution?.steps.flatMap((step) => [step.note ?? '', ...step.commands]) ?? []),
+  ];
+}
+
 describe('lab catalog — getLabById', () => {
   it.each(CATALOG_IDS)('resolves catalog id %s to a Lab', (id) => {
     const lab = getLabById(id);
@@ -119,5 +137,49 @@ describe('lab catalog — getLabById', () => {
       `${id} incomplete objectives`,
     ).toEqual(result.objectives.map((objective) => [objective.id, true]));
     expect(result.allMet).toBe(true);
+  });
+
+  it.each(CATALOG_IDS)('published solution for %s runs verification commands from exec/user contexts', (id) => {
+    const lab = getLabById(id);
+    expect(lab).not.toBeNull();
+    expect(lab?.solution, `${id} should expose a learner-facing solution`).toBeDefined();
+
+    let ls = initLabSession(lab!);
+    for (const step of lab!.solution!.steps) {
+      ls = { ...ls, activeDeviceId: step.device };
+      for (const command of step.commands) {
+        const modeBefore = modeOf(ls.devices[step.device]);
+        if (isVerificationCommand(command) && modeBefore !== undefined) {
+          expect(
+            modeBefore,
+            `${id} solution runs '${command}' on ${step.device} from ${modeBefore}`,
+          ).not.toMatch(/^config/);
+        }
+        ls = applyToActive(ls, command).session;
+      }
+    }
+  });
+
+  it.each(CATALOG_IDS)('learner-facing copy for %s stays professional and product-tier neutral', (id) => {
+    const lab = getLabById(id);
+    expect(lab).not.toBeNull();
+
+    const forbidden = [
+      /PuTTY-style/i,
+      /\bcheap(?:est)?\b/i,
+      /\bfake\b/i,
+      /\btoy\b/i,
+      /\bChatGPT\b/i,
+      /\bClaude\b/i,
+      /\$4\.99/i,
+      /\$9\.99/i,
+      /question\/exam-only/i,
+    ];
+
+    for (const text of learnerFacingStrings(lab!)) {
+      for (const pattern of forbidden) {
+        expect(text, `${id} copy should not match ${pattern}`).not.toMatch(pattern);
+      }
+    }
   });
 });
