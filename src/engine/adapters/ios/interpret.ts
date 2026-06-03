@@ -664,9 +664,21 @@ function addNtpServer(s: Session, server: string | undefined, ec: ErrCtx): Apply
   return { session: s, output: [] };
 }
 
+function removeNtpServer(s: Session, server: string | undefined, ec: ErrCtx): ApplyResult {
+  if (!server || !isValidIpv4(server)) return { session: s, output: badInput(ec, 'server') };
+  s.device.ntp.servers.delete(server);
+  return { session: s, output: [] };
+}
+
 function addSyslogHost(s: Session, host: string | undefined, ec: ErrCtx): ApplyResult {
   if (!host || !isValidIpv4(host)) return { session: s, output: badInput(ec, 'host') };
   s.device.syslog.hosts.set(host, { host, configuredAt: nextEngineSeq() });
+  return { session: s, output: [] };
+}
+
+function removeSyslogHost(s: Session, host: string | undefined, ec: ErrCtx): ApplyResult {
+  if (!host || !isValidIpv4(host)) return { session: s, output: badInput(ec, 'host') };
+  s.device.syslog.hosts.delete(host);
   return { session: s, output: [] };
 }
 
@@ -1044,6 +1056,12 @@ function negate(
     case 'hostname':
       s.device.hostname = 'Router';
       return { session: s, output: [] };
+    case 'ntp':
+      if (command[2] === 'server') return removeNtpServer(s, args.server, ec);
+      return { session: s, output: err('% Unknown command.') };
+    case 'logging':
+      if (command[2] === 'host') return removeSyslogHost(s, args.host, ec);
+      return { session: s, output: err('% Unknown command.') };
     case 'ip':
       if (command[2] === 'route') {
         return removeStaticRoute(s, args.prefix, args.mask, args.target, ec);
@@ -2159,6 +2177,10 @@ function show(
       const section = rawSection === 'line' || rawSection === 'vty' || rawSection === 'line vty' ? 'line vty 0 4' : rawSection;
       return { session: s, output: out(...showRunningConfigSection(s, section)) };
     }
+    if (command[2] === '|' && command[3] === 'include' && args.include) {
+      if (hasSshHardening(s) || hasManagementServices(s)) s.lastShowRunningConfig = nextEngineSeq();
+      return { session: s, output: out(...showRunningConfigInclude(s, args.include)) };
+    }
     if (hasSshHardening(s) || hasManagementServices(s)) s.lastShowRunningConfig = nextEngineSeq();
     return { session: s, output: out(...showRunningConfig(s)) };
   }
@@ -3015,6 +3037,18 @@ function showRunningConfigSection(s: Session, sectionStart: string): string[] {
     if (i > start && line === '!') break;
   }
   return section;
+}
+
+function showRunningConfigInclude(s: Session, include: string): string[] {
+  const patterns = include
+    .split('|')
+    .map((pattern) => pattern.trim().toLowerCase())
+    .filter(Boolean);
+  if (patterns.length === 0) return [];
+  return showRunningConfig(s).filter((line) => {
+    const normalized = line.toLowerCase();
+    return patterns.some((pattern) => normalized.includes(pattern));
+  });
 }
 
 /** Render an ACL entry's source-form for `show running-config`. */

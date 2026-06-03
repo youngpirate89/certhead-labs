@@ -56,6 +56,7 @@ import { tshootDefaultRouteLostAtBranch } from './ccna/tshoot-default-route-lost
 import { tshootReturnRouteMissingServerVlan } from './ccna/tshoot-return-route-missing-server-vlan';
 import { tshootFloatingStaticFailoverBroken } from './ccna/tshoot-floating-static-failover-broken';
 import { tshootSshManagementDenied } from './ccna/tshoot-ssh-management-denied';
+import { tshootNtpSyslogSourceMismatch } from './ccna/tshoot-ntp-syslog-source-mismatch';
 
 const CATALOG: readonly Lab[] = [
   lab01InterfaceIp,
@@ -101,6 +102,7 @@ const CATALOG: readonly Lab[] = [
   tshootReturnRouteMissingServerVlan,
   tshootFloatingStaticFailoverBroken,
   tshootSshManagementDenied,
+  tshootNtpSyslogSourceMismatch,
 ];
 
 const BY_ID: ReadonlyMap<string, Lab> = new Map(CATALOG.map((lab) => [lab.id, lab]));

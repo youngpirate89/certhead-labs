@@ -49,6 +49,7 @@ const CATALOG_IDS = [
   'ccna-tshoot-return-route-missing-server-vlan',
   'ccna-tshoot-floating-static-failover-broken',
   'ccna-tshoot-ssh-management-denied',
+  'ccna-tshoot-ntp-syslog-source-mismatch',
 ] as const;
 
 function runOn(ls: LabSession, id: string, lines: readonly string[]): LabSession {

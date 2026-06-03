@@ -21,4 +21,27 @@ export const batchITicketLabs: LabSmokeCase[] = [
       { device: 'ADMIN-PC', workbench: 'Command Prompt', commands: ['ssh admin@10.180.10.5'] },
     ],
   },
+  {
+    id: 'ccna-tshoot-ntp-syslog-source-mismatch',
+    title: 'Troubleshoot: NTP and Syslog Server Mismatch',
+    expectedStart: '0/5',
+    expectedComplete: '5/5',
+    steps: [
+      { device: 'BRANCH', commands: ['enable', 'show running-config | include ntp|logging', 'show ntp status', 'show logging'] },
+      {
+        device: 'BRANCH',
+        commands: [
+          'configure terminal',
+          'no ntp server 10.190.0.10',
+          'ntp server 10.190.0.50',
+          'no logging host 10.190.0.10',
+          'logging host 10.190.0.50',
+          'end',
+          'show running-config | include ntp|logging',
+          'show ntp status',
+          'show logging',
+        ],
+      },
+    ],
+  },
 ];

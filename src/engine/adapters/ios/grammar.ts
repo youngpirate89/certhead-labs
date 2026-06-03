@@ -88,6 +88,10 @@ const showSubtree: CommandNode = {
         },
         '|': {
           children: {
+            include: {
+              help: 'Filter running-config to matching lines',
+              argument: arg('include', done('Line-filtered running config')),
+            },
             section: {
               help: 'Filter running-config to matching sections',
               argument: arg('section', {
@@ -447,6 +451,8 @@ const configMode: CommandNode = {
           },
         },
         ipv6: ipv6ConfigSubtree,
+        ntp: ntpConfigSubtree,
+        logging: loggingConfigSubtree,
         'access-list': noAccessListSubtree,
       },
     },
