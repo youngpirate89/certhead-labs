@@ -62,6 +62,7 @@ import { tshootPortSecurityErrdisabledUser } from './ccna/tshoot-port-security-e
 import { tshootIpv6MissingDefaultGateway } from './ccna/tshoot-ipv6-missing-default-gateway';
 import { tshootApiManagementAclRepair } from './ccna/tshoot-api-management-acl-repair';
 import { tshootOspfAclOverlapTicket } from './ccna/tshoot-ospf-acl-overlap-ticket';
+import { tshootBranchMultiSymptomFinal } from './ccna/tshoot-branch-multi-symptom-final';
 
 const CATALOG: readonly Lab[] = [
   lab01InterfaceIp,
@@ -113,6 +114,7 @@ const CATALOG: readonly Lab[] = [
   tshootIpv6MissingDefaultGateway,
   tshootApiManagementAclRepair,
   tshootOspfAclOverlapTicket,
+  tshootBranchMultiSymptomFinal,
 ];
 
 const BY_ID: ReadonlyMap<string, Lab> = new Map(CATALOG.map((lab) => [lab.id, lab]));

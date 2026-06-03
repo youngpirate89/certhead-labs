@@ -78,4 +78,29 @@ export const batchJTicketLabs: LabSmokeCase[] = [
       { device: 'PC-BRANCH', workbench: 'Command Prompt', commands: ['ping 172.49.50.20'] },
     ],
   },
+  {
+    id: 'ccna-tshoot-branch-multi-symptom-final',
+    title: 'Troubleshoot: Branch Multi-Symptom Final Ticket',
+    expectedStart: '0/7',
+    expectedComplete: '7/7',
+    steps: [
+      { device: 'PC-FINANCE', workbench: 'Command Prompt', commands: ['ipconfig', 'ping 198.51.50.10'] },
+      { device: 'PC-OPS', workbench: 'Command Prompt', commands: ['ipconfig'] },
+      { device: 'R1', commands: ['enable', 'show ip route'] },
+      {
+        device: 'SW1',
+        commands: [
+          'enable',
+          'show interfaces trunk',
+          'configure terminal',
+          'interface Gi0/1',
+          'switchport trunk allowed vlan add 30',
+          'end',
+          'show interfaces trunk',
+        ],
+      },
+      { device: 'PC-FINANCE', workbench: 'Command Prompt', commands: ['ipconfig', 'ping 198.51.50.10'] },
+      { device: 'PC-OPS', workbench: 'Command Prompt', commands: ['ipconfig'] },
+    ],
+  },
 ];

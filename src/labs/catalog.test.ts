@@ -55,6 +55,7 @@ const CATALOG_IDS = [
   'ccna-tshoot-ipv6-missing-default-gateway',
   'ccna-tshoot-api-management-acl-repair',
   'ccna-tshoot-ospf-acl-overlap-ticket',
+  'ccna-tshoot-branch-multi-symptom-final',
 ] as const;
 
 function runOn(ls: LabSession, id: string, lines: readonly string[]): LabSession {
