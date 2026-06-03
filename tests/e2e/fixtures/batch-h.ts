@@ -53,4 +53,24 @@ export const batchHTicketLabs: LabSmokeCase[] = [
       { device: 'PC-BRANCH', workbench: 'Command Prompt', commands: ['ping 10.150.50.20'] },
     ],
   },
+  {
+    id: 'ccna-tshoot-floating-static-failover-broken',
+    title: 'Troubleshoot: Floating Static Failover Broken',
+    expectedStart: '0/4',
+    expectedComplete: '4/4',
+    steps: [
+      { device: 'BRANCH', commands: ['enable', 'show ip route'] },
+      {
+        device: 'BRANCH',
+        commands: [
+          'configure terminal',
+          'no ip route 0.0.0.0 0.0.0.0 10.160.0.9 200',
+          'ip route 0.0.0.0 0.0.0.0 10.160.0.6 200',
+          'end',
+        ],
+      },
+      { device: 'BRANCH', commands: ['show ip route'] },
+      { device: 'PC-BRANCH', workbench: 'Command Prompt', commands: ['ping 198.51.100.160'] },
+    ],
+  },
 ];

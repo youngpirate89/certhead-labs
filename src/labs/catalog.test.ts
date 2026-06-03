@@ -47,6 +47,7 @@ const CATALOG_IDS = [
   'ccna-tshoot-nat-vlan-omission',
   'ccna-tshoot-default-route-lost-at-branch',
   'ccna-tshoot-return-route-missing-server-vlan',
+  'ccna-tshoot-floating-static-failover-broken',
 ] as const;
 
 function runOn(ls: LabSession, id: string, lines: readonly string[]): LabSession {
