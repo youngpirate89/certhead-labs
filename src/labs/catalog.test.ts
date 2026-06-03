@@ -19,6 +19,8 @@ const CATALOG_IDS = [
   'ccna-lab09-intervlan-routing',
   'ccna-lab10-dhcp-server',
   'ccna-lab11-nat-pat',
+  'ccna-lab12-extended-acl',
+  'ccna-lab13-ospf-tshoot',
   'ccna-lab14-dhcp-relay',
   'ccna-lab15-default-static-route',
   'ccna-lab16-floating-static-route',
@@ -91,6 +93,13 @@ describe('lab catalog — getLabById', () => {
     const free = CATALOG_IDS.map((id) => getLabById(id)).filter((l) => l?.isFree === true);
     expect(free).toHaveLength(1);
     expect(free[0]?.id).toBe('ccna-l01-interface-ip');
+  });
+
+  it('keeps the private catalog contract at 50 total labs with one free public lab', () => {
+    const labs = CATALOG_IDS.map((id) => getLabById(id));
+    expect(CATALOG_IDS).toHaveLength(50);
+    expect(labs.filter((lab) => lab?.isFree === true)).toHaveLength(1);
+    expect(labs.filter((lab) => lab?.isFree !== true)).toHaveLength(49);
   });
 
   it.each(CATALOG_IDS)('published solution for %s completes all objectives', (id) => {

@@ -1,40 +1,39 @@
+import { lazy, Suspense } from 'react';
 import { TryMode } from '@/modes/TryMode';
-import { PilotMode } from '@/modes/PilotMode';
-import { findPilot } from '@/labs/_pilots/registry';
-import { getLabById } from '@/labs/catalog';
+
+const DevLabMode = import.meta.env.DEV
+  ? lazy(() => import('@/modes/DevLabMode').then((module) => ({ default: module.DevLabMode })))
+  : null;
 
 /**
  * Entry point. Default route renders the public free lab (the `/try` surface).
  *
- * Local-only escape hatch (DEV ONLY): `?pilot=<slug>` loads a registered pilot
- * lab in a minimal dev view (no analytics, no marketing CTA, no brief screen).
- * The branch is gated behind `import.meta.env.DEV`; Vite replaces that flag
- * with `false` at build time and tree-shakes the dead branch — including the
- * pilot registry, PilotMode, and every pilot lab they transitively pull in.
- * Production bundles cannot reach `?pilot=…`.
+ * Local-only escape hatches (DEV ONLY):
+ * - `?pilot=<slug>` loads a registered pilot lab.
+ * - `?lab=<id>` loads any catalog lab by id for Pro-lab cold-runs before the
+ *   `/embed` route exists.
  *
- * Local-only escape hatch (DEV ONLY): `?lab=<id>` loads any catalog lab by id
- * through the same minimal `PilotMode` host, so Pro-tier labs can be cold-run
- * locally before the `/embed` route exists. Same tree-shake guarantee: gated
- * behind `import.meta.env.DEV`, and `getLabById`/the catalog are side-effect
- * free, so the branch and its imports drop out of production builds.
+ * Production safety: App has no static imports of `PilotMode`, the pilot
+ * registry, or the full catalog. Those modules live behind a DEV-only dynamic
+ * import so the production `/try` bundle remains free-lab-only.
  *
- * The `/embed` Pro route (JWT auth + postMessage) is Ship Milestone 2, gated
- * on CertHead reaching 300+ paid subscribers — not built yet.
+ * The `/embed` Pro route (JWT auth + postMessage) is not implemented here. Do
+ * not expose private catalog labs publicly without the CertHead entitlement gate.
  */
 export default function App() {
-  if (import.meta.env.DEV && typeof window !== 'undefined') {
+  if (import.meta.env.DEV && typeof window !== 'undefined' && DevLabMode) {
     const params = new URLSearchParams(window.location.search);
-
-    const slug = params.get('pilot');
-    const pilot = findPilot(slug);
-    if (pilot) return <PilotMode lab={pilot} />;
-
+    const pilotSlug = params.get('pilot');
     const labId = params.get('lab');
-    if (labId) {
-      const lab = getLabById(labId);
-      if (lab) return <PilotMode lab={lab} />;
+
+    if (pilotSlug || labId) {
+      return (
+        <Suspense fallback={null}>
+          <DevLabMode pilotSlug={pilotSlug} labId={labId} />
+        </Suspense>
+      );
     }
   }
+
   return <TryMode />;
 }
