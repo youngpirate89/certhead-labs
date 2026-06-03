@@ -31,7 +31,7 @@ export const tshootDhcpRelayMissing: Lab = {
         platform: 'Workstation',
         interfaces: ['Eth0'],
         pc: { dhcp: true },
-        position: { x: 0, y: 120 },
+        position: { x: 0, y: 40 },
       },
       {
         id: 'PC-SALES',
@@ -39,21 +39,21 @@ export const tshootDhcpRelayMissing: Lab = {
         platform: 'Workstation',
         interfaces: ['Eth0'],
         pc: { dhcp: true },
-        position: { x: 0, y: 360 },
+        position: { x: 0, y: 220 },
       },
       {
         id: 'R1',
         kind: 'router',
         platform: 'ISR4321',
         interfaces: ['Gi0/0', 'Gi0/1', 'Gi0/2'],
-        position: { x: 320, y: 240 },
+        position: { x: 320, y: 130 },
       },
       {
         id: 'DHCP-SRV',
         kind: 'router',
         platform: 'server',
         interfaces: ['Gi0/0'],
-        position: { x: 640, y: 240 },
+        position: { x: 640, y: 130 },
       },
     ],
     links: [
