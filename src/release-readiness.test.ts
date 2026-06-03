@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { FREE_LAB_REGISTER_URL, FREE_LAB_UPSELL_COPY } from '@/modes/TryMode';
 
@@ -34,12 +34,26 @@ describe('release readiness — public free-lab surface', () => {
     expect(tryModeSource).not.toContain('Lab complete —');
   });
 
-  it('documents the future embed assumption without adding a public route implementation', () => {
-    const appSource = readFileSync(`${process.cwd()}/src/App.tsx`, 'utf8');
-    const catalogSource = readFileSync(`${process.cwd()}/src/labs/catalog.ts`, 'utf8');
 
-    expect(appSource).toContain('The `/embed` Pro route (JWT auth + postMessage) is not implemented here.');
-    expect(appSource).toContain('Do not expose private catalog labs publicly without the CertHead entitlement gate.');
-    expect(catalogSource).toContain('the `/embed` Pro route uses to resolve a token');
+  it('documents the Pro embed integration contract without implementing server auth here', () => {
+    const contractPath = `${process.cwd()}/docs/pro-embed-integration-contract.md`;
+    expect(existsSync(contractPath)).toBe(true);
+
+    const contract = readFileSync(contractPath, 'utf8');
+    expect(contract).toContain('Owned here');
+    expect(contract).toContain('Owned by the main CertHead app or API');
+    expect(contract).toContain('claim: labId');
+    expect(contract).toContain('claim: entitlement');
+    expect(contract).toContain('value: pro');
+    expect(contract).toContain('getLabById(labId)');
+    expect(contract).toContain('unknown, missing, expired, or non-Pro tokens fail closed');
+    expect(contract).toContain('only `ccna-l01-interface-ip` is free');
+    expect(contract).toContain('49 catalog labs require Pro');
+    expect(contract).toContain('completion message');
+    expect(contract).toContain('window.parent.postMessage');
+    expect(contract).toContain('The targetOrigin must not be `*`.');
+    expect(contract).not.toContain('$4.99');
+    expect(contract).not.toContain('question/exam-only');
+    expect(contract).not.toContain('—');
   });
 });
