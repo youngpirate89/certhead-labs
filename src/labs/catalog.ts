@@ -60,6 +60,7 @@ import { tshootNtpSyslogSourceMismatch } from './ccna/tshoot-ntp-syslog-source-m
 import { tshootWirelessClientWrongVlan } from './ccna/tshoot-wireless-client-wrong-vlan';
 import { tshootPortSecurityErrdisabledUser } from './ccna/tshoot-port-security-errdisabled-user';
 import { tshootIpv6MissingDefaultGateway } from './ccna/tshoot-ipv6-missing-default-gateway';
+import { tshootApiManagementAclRepair } from './ccna/tshoot-api-management-acl-repair';
 
 const CATALOG: readonly Lab[] = [
   lab01InterfaceIp,
@@ -109,6 +110,7 @@ const CATALOG: readonly Lab[] = [
   tshootWirelessClientWrongVlan,
   tshootPortSecurityErrdisabledUser,
   tshootIpv6MissingDefaultGateway,
+  tshootApiManagementAclRepair,
 ];
 
 const BY_ID: ReadonlyMap<string, Lab> = new Map(CATALOG.map((lab) => [lab.id, lab]));

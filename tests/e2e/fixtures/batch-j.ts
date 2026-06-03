@@ -19,4 +19,35 @@ export const batchJTicketLabs: LabSmokeCase[] = [
       },
     ],
   },
+  {
+    id: 'ccna-tshoot-api-management-acl-repair',
+    title: 'Troubleshoot: API-Assisted Management ACL Repair',
+    expectedStart: '0/6',
+    expectedComplete: '6/6',
+    steps: [
+      {
+        device: 'ADMIN-PC',
+        workbench: 'Command Prompt',
+        commands: [
+          'curl http://api.certhead.local/devices',
+          'curl http://api.certhead.local/devices/R1',
+          'curl http://api.certhead.local/devices/R1/interfaces',
+          'curl http://api.certhead.local/devices/R1/interfaces/Gi0%2F0',
+          'ping 10.48.10.1',
+          'ssh admin@10.48.10.1',
+        ],
+      },
+      { device: 'R1', commands: ['enable', 'show running-config | section line vty', 'show access-lists'] },
+      {
+        device: 'R1',
+        commands: [
+          'configure terminal',
+          'access-list 48 permit 10.48.10.0 0.0.0.255',
+          'end',
+          'show access-lists',
+        ],
+      },
+      { device: 'ADMIN-PC', workbench: 'Command Prompt', commands: ['ssh admin@10.48.10.1'] },
+    ],
+  },
 ];
