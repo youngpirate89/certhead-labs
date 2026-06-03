@@ -6,6 +6,8 @@ const DevLabMode = import.meta.env.DEV
   ? lazy(() => import('@/modes/DevLabMode').then((module) => ({ default: module.DevLabMode })))
   : null;
 
+const EmbedMode = lazy(() => import('@/modes/EmbedMode').then((module) => ({ default: module.EmbedMode })));
+
 /**
  * Entry point. Default route renders the public free lab (the `/try` surface).
  *
@@ -18,10 +20,18 @@ const DevLabMode = import.meta.env.DEV
  * registry, or the full catalog. Those modules live behind a DEV-only dynamic
  * import so the production `/try` bundle remains free-lab-only.
  *
- * The `/embed` Pro route (JWT auth + postMessage) is not implemented here.
- * Do not expose private catalog labs publicly without the CertHead entitlement gate.
+ * `/embed/:labId?token=...` is the Pro iframe surface. It verifies the
+ * short-lived token with the CertHead API before importing the full catalog.
  */
 export default function App() {
+  if (typeof window !== 'undefined' && window.location.pathname.startsWith('/embed/')) {
+    return (
+      <Suspense fallback={null}>
+        <EmbedMode />
+      </Suspense>
+    );
+  }
+
   if (typeof window !== 'undefined' && DevLabMode) {
     const selection = resolveDevLabSelection(window.location.search, import.meta.env.DEV);
 
