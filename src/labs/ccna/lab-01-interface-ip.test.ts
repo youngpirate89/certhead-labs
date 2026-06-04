@@ -87,6 +87,23 @@ describe('free lab — pilot validation', () => {
     expect(result.objectives.find((o) => o.id === 'verify')?.met).toBe(false);
     expect(result.allMet).toBe(false);
   });
+
+  it('does not mark the IP objective complete for the wrong address on Gi0/0', () => {
+    const s = run(start(), [
+      'enable',
+      'configure terminal',
+      'interface gi0/0',
+      'ip address 192.168.10.1 255.255.255.0',
+      'no shutdown',
+      'end',
+      'show ip interface brief',
+    ]);
+    const result = grade(lab, s);
+    expect(result.objectives.find((o) => o.id === 'ip')?.met).toBe(false);
+    expect(result.objectives.find((o) => o.id === 'noshut')?.met).toBe(true);
+    expect(result.objectives.find((o) => o.id === 'verify')?.met).toBe(true);
+    expect(result.allMet).toBe(false);
+  });
 });
 
 /**
