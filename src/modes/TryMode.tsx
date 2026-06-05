@@ -158,7 +158,7 @@ export function TryMode() {
 /** Completion banner — same content as the previous in-terminal CompletionCard.
  *  Renders as a fixed-position strip at the bottom of the viewport so it works
  *  regardless of which (or how many) floating panels are open. */
-function CompletionBanner({ labId }: { labId: string }) {
+export function CompletionBanner({ labId }: { labId: string }) {
   return (
     <div className="animate-slide-up fixed inset-x-0 bottom-0 z-30 border-t border-terminal-prompt/40 bg-panel-header/95 p-5 backdrop-blur">
       <div className="animate-celebrate mx-auto flex max-w-2xl items-center gap-4 rounded-md p-1 sm:flex-row">
@@ -176,6 +176,8 @@ function CompletionBanner({ labId }: { labId: string }) {
         </div>
         <a
           href={FREE_LAB_REGISTER_URL}
+          target="_blank"
+          rel="noopener noreferrer"
           onClick={() => track('cta_clicked', { labId })}
           className="shrink-0 rounded-md bg-terminal-prompt px-4 py-2 text-center font-sans text-sm font-semibold text-[#06231d] transition hover:brightness-110"
         >
