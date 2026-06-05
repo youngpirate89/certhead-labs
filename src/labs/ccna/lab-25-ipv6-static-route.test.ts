@@ -25,6 +25,14 @@ describe('Lab 25 — IPv6 static route', () => {
     expect(grade(lab, ls).allMet).toBe(false);
   });
 
+  it('keeps PC-A and R1 far enough apart for readable interface labels', () => {
+    const pc = lab.topology.devices.find((device) => device.id === 'PC-A');
+    const r1 = lab.topology.devices.find((device) => device.id === 'R1');
+
+    expect(pc?.position?.x).toBe(0);
+    expect(r1?.position?.x).toBeGreaterThanOrEqual(320);
+  });
+
   it('grades complete after adding reciprocal IPv6 static routes and running show ipv6 route on both routers', () => {
     let ls = initLabSession(lab);
 

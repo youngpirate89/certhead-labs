@@ -31,6 +31,14 @@ describe('Troubleshoot: SSH management denied', () => {
     expect(grade(lab, ls).allMet).toBe(false);
   });
 
+  it('keeps ADMIN-PC and R1 far enough apart for readable interface labels', () => {
+    const pc = lab.topology.devices.find((device) => device.id === 'ADMIN-PC');
+    const r1 = lab.topology.devices.find((device) => device.id === 'R1');
+
+    expect(pc?.position?.x).toBe(0);
+    expect(r1?.position?.x).toBeGreaterThanOrEqual(320);
+  });
+
   it('shows the VTY access-class and the stale management ACL with Cisco-style commands', () => {
     const ls = initLabSession(lab);
 

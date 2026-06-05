@@ -77,11 +77,12 @@ export interface FloatingTerminalPanelProps {
  *    + 32px  Terminal body padding (px-4 → 16px each side)
  *    + 16px  vertical scrollbar gutter (overflow-y-auto)
  *    +  2px  panel border (1px each side)
- *    ≈ 739px → 740px
- *  The user can still resize narrower (MIN_PANEL_WIDTH unchanged); this only
- *  moves the *default* so tabular show output reads cleanly on first open. */
-const DEFAULT_PANEL_WIDTH = 740;
-const DEFAULT_PANEL_HEIGHT = 520;
+ *    ≈ 739px. Default is intentionally larger (900px × 620px) so the
+ *    learner starts with real workspace breathing room instead of having to
+ *    resize immediately.
+ *  The user can still resize narrower (MIN_PANEL_WIDTH unchanged). */
+const DEFAULT_PANEL_WIDTH = 900;
+const DEFAULT_PANEL_HEIGHT = 620;
 /** Floor sizes — below these the tab strip wraps and the terminal becomes
  *  illegible. Hardcoded rather than measured because a dynamic measurement
  *  loop here would re-fire mid-drag and feel sticky. */

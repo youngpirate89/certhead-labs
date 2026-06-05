@@ -39,7 +39,7 @@ export const tshootSshManagementDenied: Lab = {
         kind: 'router',
         platform: 'ISR4321',
         interfaces: ['Gi0/0'],
-        position: { x: 260, y: 0 },
+        position: { x: 320, y: 0 },
       },
     ],
     links: [{ a: { deviceId: 'ADMIN-PC', iface: 'Eth0' }, b: { deviceId: 'R1', iface: 'Gi0/0' } }],

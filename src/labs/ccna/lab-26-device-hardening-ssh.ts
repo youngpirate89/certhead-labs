@@ -32,7 +32,7 @@ export const lab26DeviceHardeningSsh: Lab = {
         kind: 'router',
         platform: 'ISR4321',
         interfaces: ['Gi0/0'],
-        position: { x: 260, y: 0 },
+        position: { x: 320, y: 0 },
       },
     ],
     links: [{ a: { deviceId: 'PC-A', iface: 'Eth0' }, b: { deviceId: 'R1', iface: 'Gi0/0' } }],
@@ -66,7 +66,7 @@ export const lab26DeviceHardeningSsh: Lab = {
     },
     {
       id: 'domain-and-rsa-key',
-      text: 'R1: set ip domain-name certhead.local and generate a 1024-bit RSA key',
+      text: 'R1: set ip domain-name certhead.local and run crypto key generate rsa modulus 1024',
       check: (_state, _history, session) => {
         const r1 = session.devices.R1;
         return (

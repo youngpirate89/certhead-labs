@@ -19,6 +19,16 @@ describe('Lab 26 — Device hardening with SSH', () => {
     expect(grade(lab, ls).allMet).toBe(false);
   });
 
+  it('uses explicit RSA command wording and keeps PC-A/R1 spacing readable', () => {
+    const pc = lab.topology.devices.find((device) => device.id === 'PC-A');
+    const r1 = lab.topology.devices.find((device) => device.id === 'R1');
+    const rsaObjective = lab.objectives.find((objective) => objective.id === 'domain-and-rsa-key');
+
+    expect(pc?.position?.x).toBe(0);
+    expect(r1?.position?.x).toBeGreaterThanOrEqual(320);
+    expect(rsaObjective?.text).toContain('crypto key generate rsa modulus 1024');
+  });
+
   it('grades complete after configuring SSH hardening, verifying running config, and testing SSH from PC-A', () => {
     let ls = initLabSession(lab);
 

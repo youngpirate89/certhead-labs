@@ -404,17 +404,16 @@ describe('FloatingTerminalPanel', () => {
     ).toBeNull();
   });
 
-  it('opens at the default size (740 wide, 520 tall)', () => {
+  it('opens at a larger default size for readable command output and PC workbench controls', () => {
     const { container } = renderPanel();
     const panel = container.querySelector(
       '[data-floating-terminal-panel]',
     ) as HTMLElement;
-    // 740px holds 80-column IOS tables without wrapping at the 14px default
-    // font (see DEFAULT_PANEL_WIDTH rationale in FloatingTerminalPanel.tsx).
-    // 520px gives the PC workbench enough vertical room for launcher cards
-    // and adapter controls at normal laptop viewport sizes.
-    expect(panel.style.width).toBe('740px');
-    expect(panel.style.height).toBe('520px');
+    // The default terminal window should feel closer to a real lab workspace:
+    // wide enough for 80-column IOS tables plus breathing room, and tall enough
+    // for the PC workbench without cramped controls on normal laptop displays.
+    expect(panel.style.width).toBe('900px');
+    expect(panel.style.height).toBe('620px');
   });
 
   it('minimized snap-bar uses 320px width and docks bottom-center via CSS transform', () => {

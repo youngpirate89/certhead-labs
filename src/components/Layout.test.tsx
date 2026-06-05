@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { Layout } from './Layout';
 
 /**
@@ -96,5 +96,17 @@ describe('Layout', () => {
     expect(main?.className).toContain('flex');
     // No `flex-col` — siblings flow horizontally in the row.
     expect(main?.className).not.toContain('flex-col');
+  });
+
+  it('defaults to dark mode and exposes a learner-facing light theme toggle', () => {
+    const { container } = renderSample();
+    const shell = container.querySelector('[data-lab-theme]');
+    expect(shell?.getAttribute('data-lab-theme')).toBe('dark');
+
+    fireEvent.click(screen.getByRole('button', { name: /switch to light theme/i }));
+
+    expect(shell?.getAttribute('data-lab-theme')).toBe('light');
+    expect(screen.getByRole('button', { name: /switch to dark theme/i })).toBeInTheDocument();
+    expect(shell?.className).toContain('lab-theme-light');
   });
 });

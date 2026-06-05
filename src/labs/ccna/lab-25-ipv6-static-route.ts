@@ -31,7 +31,7 @@ export const lab25Ipv6StaticRoute: Lab = {
         kind: 'router',
         platform: 'ISR4321',
         interfaces: ['Gi0/0', 'Gi0/1'],
-        position: { x: 260, y: 0 },
+        position: { x: 320, y: 0 },
       },
       {
         id: 'R2',
