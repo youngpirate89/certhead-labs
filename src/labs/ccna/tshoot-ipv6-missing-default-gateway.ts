@@ -38,7 +38,7 @@ export const tshootIpv6MissingDefaultGateway: Lab = {
         kind: 'router',
         platform: 'ISR4321',
         interfaces: ['Gi0/0'],
-        position: { x: 360, y: 140 },
+        position: { x: 400, y: 140 },
       },
     ],
     links: [

@@ -168,6 +168,28 @@ describe('lab catalog — getLabById', () => {
     }
   });
 
+  it('keeps explicit two-device topology spacing wide enough for readable labels', () => {
+    const explicitTwoDeviceLabs = getCatalogLabs().filter(
+      (lab) =>
+        lab.topology.devices.length === 2 &&
+        lab.topology.links.length >= 1 &&
+        lab.topology.devices.every((device) => device.position !== undefined),
+    );
+
+    expect(explicitTwoDeviceLabs.length).toBeGreaterThan(0);
+
+    for (const lab of explicitTwoDeviceLabs) {
+      const [a, b] = lab.topology.devices;
+      const dx = Math.abs(b.position!.x - a.position!.x);
+      const dy = Math.abs(b.position!.y - a.position!.y);
+
+      expect(
+        Math.max(dx, dy),
+        `${lab.id} should keep two device cards at least 320px apart to protect interface labels`,
+      ).toBeGreaterThanOrEqual(320);
+    }
+  });
+
   it.each(CATALOG_IDS)('learner-facing copy for %s stays professional and product-tier neutral', (id) => {
     const lab = getLabById(id);
     expect(lab).not.toBeNull();
