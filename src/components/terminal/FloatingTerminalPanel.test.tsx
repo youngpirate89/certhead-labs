@@ -49,6 +49,19 @@ describe('FloatingTerminalPanel', () => {
     expect(screen.getByLabelText('Terminal input')).toBeInTheDocument();
   });
 
+  it('can render as a docked terminal that participates in layout instead of a fixed overlay', () => {
+    const { container } = renderPanel({ mode: 'docked' });
+    const panel = container.querySelector('[data-floating-terminal-panel]') as HTMLElement;
+
+    expect(panel).not.toBeNull();
+    expect(panel.className).toContain('relative');
+    expect(panel.className).not.toContain('fixed');
+    expect(panel.style.width).toBe('100%');
+    expect(panel.style.height).toBe('100%');
+    expect(panel.style.left).toBe('');
+    expect(panel.style.top).toBe('');
+  });
+
   it('renders a PC workbench with Desktop, Network Adapter, and Terminal tabs for PC devices', () => {
     renderPanel({
       activeDeviceId: 'PC-A',

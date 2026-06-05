@@ -60,6 +60,11 @@ export interface FloatingTerminalPanelProps {
   readonly onCloseDevice: (id: string) => void;
   /** Header close-all (`×` on the title bar) — closes every tab at once. */
   readonly onCloseAll: () => void;
+  /**
+   * `floating` preserves the legacy draggable overlay. `docked` participates
+   * in the parent layout so the terminal cannot cover objectives/topology.
+   */
+  readonly mode?: 'floating' | 'docked';
 }
 
 /** Initial panel dimensions when first opened. Resize state lives in
@@ -133,6 +138,7 @@ export function FloatingTerminalPanel({
   onSelectDevice,
   onCloseDevice,
   onCloseAll,
+  mode = 'floating',
 }: FloatingTerminalPanelProps) {
   const [pos, setPos] = useState(initialPosition);
   const [size, setSize] = useState({
@@ -273,20 +279,23 @@ export function FloatingTerminalPanel({
   // Minimized snap-bar: docked bottom-center of the viewport, fixed width,
   // unaffected by pos/size. The full-panel pos/size remain in state so the
   // restore returns the window to exactly where the learner left it.
-  const panelStyle: React.CSSProperties = minimized
-    ? {
-        left: '50%',
-        bottom: 0,
-        transform: 'translateX(-50%)',
-        width: MINIMIZED_WIDTH,
-        height: TITLE_BAR_HEIGHT,
-      }
-    : {
-        left: pos.x,
-        top: pos.y,
-        width: size.w,
-        height: size.h,
-      };
+  const isDocked = mode === 'docked';
+  const panelStyle: React.CSSProperties = isDocked
+    ? { width: '100%', height: '100%' }
+    : minimized
+      ? {
+          left: '50%',
+          bottom: 0,
+          transform: 'translateX(-50%)',
+          width: MINIMIZED_WIDTH,
+          height: TITLE_BAR_HEIGHT,
+        }
+      : {
+          left: pos.x,
+          top: pos.y,
+          width: size.w,
+          height: size.h,
+        };
 
   const tabCount = openDeviceIds.length;
   const minimizedLabel = `Terminal — ${tabCount} ${tabCount === 1 ? 'device' : 'devices'}`;
@@ -297,16 +306,16 @@ export function FloatingTerminalPanel({
       aria-label="Terminal"
       data-floating-terminal-panel
       data-floating-terminal-minimized={minimized ? 'true' : 'false'}
-      className="fixed z-30 flex flex-col rounded-md border border-panel-border bg-[#0d1117] shadow-2xl"
+      className={`${isDocked ? 'relative' : 'fixed z-30 rounded-md shadow-2xl'} flex flex-col border border-panel-border bg-[#0d1117]`}
       style={panelStyle}
     >
       <div
         // Drag handler only attaches when NOT minimized — the snap-bar is
         // pinned to bottom-center and clicking it must restore, not drag.
-        onPointerDown={minimized ? undefined : onTitlePointerDown}
-        onPointerMove={minimized ? undefined : onTitlePointerMove}
-        onPointerUp={minimized ? undefined : endDrag}
-        onPointerCancel={minimized ? undefined : endDrag}
+        onPointerDown={minimized || isDocked ? undefined : onTitlePointerDown}
+        onPointerMove={minimized || isDocked ? undefined : onTitlePointerMove}
+        onPointerUp={minimized || isDocked ? undefined : endDrag}
+        onPointerCancel={minimized || isDocked ? undefined : endDrag}
         onClick={minimized ? () => setMinimized(false) : undefined}
         role={minimized ? 'button' : undefined}
         aria-label={minimized ? 'Restore terminal panel' : undefined}
@@ -322,7 +331,7 @@ export function FloatingTerminalPanel({
             : undefined
         }
         className={`flex h-[36px] shrink-0 select-none items-center justify-between border-b border-panel-border bg-panel-header px-3 ${
-          minimized ? 'cursor-pointer' : 'cursor-move'
+          minimized ? 'cursor-pointer' : isDocked ? 'cursor-default' : 'cursor-move'
         }`}
         data-floating-terminal-title
       >

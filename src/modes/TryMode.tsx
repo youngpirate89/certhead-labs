@@ -120,22 +120,24 @@ export function TryMode() {
             solution={lab.solution}
           />
         }
+        terminal={
+          briefDismissed ? (
+            <FloatingTerminalPanel
+              mode="docked"
+              openDeviceIds={session.openDeviceIds}
+              activeDeviceId={session.activeDeviceId}
+              forDevice={session.forDevice}
+              platformLabel={platformLabel}
+              deviceKind={session.deviceKind}
+              pcNetwork={session.pcNetwork}
+              onPcNetworkApply={session.updatePcNetwork}
+              onSelectDevice={session.setActiveDevice}
+              onCloseDevice={session.closeDevice}
+              onCloseAll={session.closeAllDevices}
+            />
+          ) : undefined
+        }
       />
-
-      {briefDismissed && (
-        <FloatingTerminalPanel
-          openDeviceIds={session.openDeviceIds}
-          activeDeviceId={session.activeDeviceId}
-          forDevice={session.forDevice}
-          platformLabel={platformLabel}
-          deviceKind={session.deviceKind}
-          pcNetwork={session.pcNetwork}
-          onPcNetworkApply={session.updatePcNetwork}
-          onSelectDevice={session.setActiveDevice}
-          onCloseDevice={session.closeDevice}
-          onCloseAll={session.closeAllDevices}
-        />
-      )}
 
       {!briefDismissed && (
         <div className="fixed inset-0 z-40 bg-[#070a0e]/85 backdrop-blur-sm">

@@ -77,6 +77,21 @@
   color: #64748b !important;
 }
 
+.lab-theme-light button[aria-label="Zoom in"],
+.lab-theme-light button[aria-label="Zoom out"],
+.lab-theme-light button[aria-label="Fit topology to view"] {
+  background-color: #ffffff !important;
+  border-color: #94a3b8 !important;
+  color: #334155 !important;
+}
+
+.lab-theme-light button[aria-label="Zoom in"]:hover,
+.lab-theme-light button[aria-label="Zoom out"]:hover,
+.lab-theme-light button[aria-label="Fit topology to view"]:hover {
+  border-color: #0f766e !important;
+  color: #0f172a !important;
+}
+
 @layer utilities {
   /* Plays once when an objective transitions to met — a brief teal flash that
      fades, plus a slight nudge. Coupled with check-pop on the check icon. */

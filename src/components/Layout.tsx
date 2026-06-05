@@ -2,11 +2,9 @@ import { useState, type ReactNode } from 'react';
 
 /**
  * Topology-first lab shell: a full-height topology canvas on the left and a
- * fixed objectives sidebar on the right. Per-device terminals are NOT owned
- * by Layout — modes mount them as draggable floating panels
- * (FloatingDevicePanel) that overlay this shell at the document root, so the
- * canvas underneath stays free to pan and zoom regardless of how many panels
- * are open.
+ * fixed objectives sidebar on the right, with an optional docked terminal
+ * region below both. The dock avoids covering objectives/topology content while
+ * preserving the topology-first orientation.
  *
  * Sidebar contract (Section 3 wiring):
  *  - Fixed `SIDEBAR_WIDTH` px wide, never shrinks (shrink-0)
@@ -25,6 +23,7 @@ import { useState, type ReactNode } from 'react';
 interface LayoutProps {
   topology: ReactNode;
   objectives: ReactNode;
+  terminal?: ReactNode;
   labTitle: string;
   examLabel: string;
 }
@@ -35,7 +34,7 @@ interface LayoutProps {
  *  viewport on a 1280px display. */
 const SIDEBAR_WIDTH = 300;
 
-export function Layout({ topology, objectives, labTitle, examLabel }: LayoutProps) {
+export function Layout({ topology, objectives, terminal, labTitle, examLabel }: LayoutProps) {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const isLight = theme === 'light';
 
@@ -74,29 +73,42 @@ export function Layout({ topology, objectives, labTitle, examLabel }: LayoutProp
         </div>
       </header>
 
-      <main className={`flex min-h-0 flex-1 overflow-hidden ${isLight ? 'bg-[#cbd5e1]' : 'bg-panel-border'}`}>
-        {/* Topology canvas — fills remaining viewport width. `min-w-0` is
-            mandatory: without it, the inner React Flow container can refuse
-            to shrink below its content's natural size and push the sidebar
-            off-screen on narrow viewports. */}
-        <section
-          data-region="topology"
-          className={`min-h-0 min-w-0 flex-1 overflow-hidden ${isLight ? 'bg-[#eef3f8]' : 'bg-panel-bg'}`}
-        >
-          {topology}
-        </section>
-        {/* Fixed-width objectives sidebar — full main height, internal scroll
-            via ObjectivesPanel itself. The `border-l` is the only visual
-            separator between the canvas and the sidebar. */}
-        <aside
-          data-region="objectives"
-          className={`h-full min-w-0 shrink-0 overflow-hidden border-l ${
-            isLight ? 'border-[#cbd5e1] bg-white' : 'border-panel-border bg-panel-bg'
-          }`}
-          style={{ width: SIDEBAR_WIDTH }}
-        >
-          {objectives}
-        </aside>
+      <main className={`flex min-h-0 flex-1 flex-col overflow-hidden ${isLight ? 'bg-[#cbd5e1]' : 'bg-panel-border'}`}>
+        <div data-region="workspace-row" className="flex min-h-0 flex-1 overflow-hidden">
+          {/* Topology canvas — fills remaining viewport width. `min-w-0` is
+              mandatory: without it, the inner React Flow container can refuse
+              to shrink below its content's natural size and push the sidebar
+              off-screen on narrow viewports. */}
+          <section
+            data-region="topology"
+            className={`min-h-0 min-w-0 flex-1 overflow-hidden ${isLight ? 'bg-[#eef3f8]' : 'bg-panel-bg'}`}
+          >
+            {topology}
+          </section>
+          {/* Fixed-width objectives sidebar — full main height, internal scroll
+              via ObjectivesPanel itself. The `border-l` is the only visual
+              separator between the canvas and the sidebar. */}
+          <aside
+            data-region="objectives"
+            className={`h-full min-w-0 shrink-0 overflow-hidden border-l ${
+              isLight ? 'border-[#cbd5e1] bg-white' : 'border-panel-border bg-panel-bg'
+            }`}
+            style={{ width: SIDEBAR_WIDTH }}
+          >
+            {objectives}
+          </aside>
+        </div>
+        {terminal && (
+          <section
+            data-region="terminal-dock"
+            className={`shrink-0 overflow-hidden border-t ${
+              isLight ? 'border-[#cbd5e1] bg-[#0d1117]' : 'border-panel-border bg-[#0d1117]'
+            }`}
+            style={{ height: '34%' }}
+          >
+            {terminal}
+          </section>
+        )}
       </main>
     </div>
   );
