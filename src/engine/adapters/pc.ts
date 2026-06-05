@@ -177,6 +177,10 @@ const pcGrammar: CommandNode = {
       help: 'Ping an IPv4 destination',
       argument: { name: 'target', node: { terminal: true, help: 'Send ICMP request' } },
     },
+    route: {
+      help: 'Show the workstation IPv4 route table',
+      argument: { name: 'print', node: { terminal: true, help: 'Print routes' } },
+    },
     tracert: {
       help: 'Trace the route to an IPv4 destination',
       argument: { name: 'target', node: { terminal: true, help: 'Trace hops' } },
@@ -234,6 +238,7 @@ const COMMANDS: readonly PcCommand[] = [
   // ---- WORKING tier ----
   { name: 'ipconfig', aliases: ['get-netipconfiguration'], kind: 'working', handler: handleIpconfig },
   { name: 'ping',     kind: 'working', handler: handlePing },
+  { name: 'route',    kind: 'working', handler: handleRoute },
   { name: 'tracert',  aliases: ['traceroute'], kind: 'working', handler: handleTracert },
   { name: 'ssh',      kind: 'working', handler: handleSsh },
   { name: 'curl',     kind: 'working', handler: handleAutomationApi },
@@ -285,12 +290,6 @@ const COMMANDS: readonly PcCommand[] = [
     kind: 'redirect',
     message:
       "getmac isn't part of this lab — MAC addresses aren't modeled. Use `ipconfig` for your IPv4 configuration.",
-  },
-  {
-    name: 'route',
-    kind: 'redirect',
-    message:
-      "route isn't part of this lab on PCs — routing happens on R1/R2. Click a router and run `show ip route` to inspect its table.",
   },
   {
     name: 'nbtstat',
@@ -954,6 +953,16 @@ function handleGateway6(
   }
   s.gateway6 = gateway;
   return { session: s, output: [] };
+}
+
+function handleRoute(
+  s: PcSession,
+  args: readonly string[],
+): ApplyResult<PcSession> {
+  if (args.length !== 1 || args[0].toLowerCase() !== 'print') {
+    return { session: s, output: errLine('Usage: route print') };
+  }
+  return { session: s, output: renderRoutePrint(s) };
 }
 
 function handlePing(
@@ -1664,9 +1673,9 @@ function renderIpconfig(s: PcSession, all: boolean): CommandOutput[] {
       out.push({ kind: 'output', text: `   DHCP Enabled. . . . . . . . . . . : Yes` });
     }
   }
-  const apipa = s.dhcpMode && s.nicUp && !s.ip ? apipaAddressFor(s.id) : null;
-  const ipLabel = apipa ?? s.ip ?? '(none)';
-  const maskLabel = apipa ? '255.255.0.0' : s.mask ?? '(none)';
+  const ipv4 = pcEffectiveIpv4(s);
+  const ipLabel = ipv4.ip ?? '(none)';
+  const maskLabel = ipv4.mask ?? '(none)';
   out.push({ kind: 'output', text: `   IPv4 Address. . . . . . . . . . . : ${ipLabel}` });
   out.push({ kind: 'output', text: `   Subnet Mask . . . . . . . . . . . : ${maskLabel}` });
   out.push({ kind: 'output', text: `   Default Gateway . . . . . . . . . : ${s.gateway ?? '(none)'}` });
@@ -1677,6 +1686,45 @@ function renderIpconfig(s: PcSession, all: boolean): CommandOutput[] {
     text: `   Media State . . . . . . . . . . . : ${s.nicUp ? 'connected' : 'Media disconnected'}`,
   });
   return out;
+}
+
+function renderRoutePrint(s: PcSession): CommandOutput[] {
+  const out: CommandOutput[] = [
+    { kind: 'output', text: '==========================================================================' },
+    { kind: 'output', text: 'Interface List' },
+    { kind: 'output', text: ` 12...${s.nic}...${s.platform}` },
+    { kind: 'output', text: '==========================================================================' },
+    { kind: 'output', text: '' },
+    { kind: 'output', text: 'IPv4 Route Table' },
+    { kind: 'output', text: '==========================================================================' },
+    { kind: 'output', text: 'Active Routes:' },
+    { kind: 'output', text: 'Network Destination        Netmask          Gateway       Interface  Metric' },
+    { kind: 'output', text: routeRow('127.0.0.0', '255.0.0.0', 'On-link', '127.0.0.1', '331') },
+  ];
+
+  const ipv4 = pcEffectiveIpv4(s);
+  if (s.nicUp && ipv4.ip && ipv4.mask) {
+    const localNetwork = networkAddress(ipv4.ip, ipv4.mask);
+    out.push({ kind: 'output', text: routeRow(localNetwork, ipv4.mask, 'On-link', ipv4.ip, '281') });
+    out.push({ kind: 'output', text: routeRow(ipv4.ip, '255.255.255.255', 'On-link', ipv4.ip, '281') });
+    if (s.gateway) {
+      out.push({ kind: 'output', text: routeRow('0.0.0.0', '0.0.0.0', s.gateway, ipv4.ip, '25') });
+    }
+  }
+
+  out.push({ kind: 'output', text: '==========================================================================' });
+  return out;
+}
+
+function routeRow(destination: string, mask: string, gateway: string, iface: string, metric: string): string {
+  return `${destination.padEnd(19)} ${mask.padEnd(15)} ${gateway.padEnd(15)} ${iface.padEnd(12)} ${metric}`;
+}
+
+function pcEffectiveIpv4(s: PcSession): { ip: string | null; mask: string | null } {
+  if (s.dhcpMode && s.nicUp && !s.ip) {
+    return { ip: apipaAddressFor(s.id), mask: '255.255.0.0' };
+  }
+  return { ip: s.ip, mask: s.mask };
 }
 
 function apipaAddressFor(id: string): string {

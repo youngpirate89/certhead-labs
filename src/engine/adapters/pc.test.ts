@@ -126,6 +126,31 @@ describe('pcAdapter — commands', () => {
     expect(text).not.toMatch(/DHCP request pending/);
   });
 
+  it('`route print` renders the workstation IPv4 route table from the current adapter state', () => {
+    const s = { ...pcAdapter.buildDevice(SPEC_PRECONFIGURED), nicUp: true };
+    const text = pcAdapter
+      .applyCommand(s, 'route print')
+      .output.map((o) => o.text)
+      .join('\n');
+
+    expect(text).toMatch(/IPv4 Route Table/);
+    expect(text).toMatch(/0\.0\.0\.0\s+0\.0\.0\.0\s+192\.168\.1\.1\s+192\.168\.1\.10/);
+    expect(text).toMatch(/192\.168\.1\.0\s+255\.255\.255\.0\s+On-link\s+192\.168\.1\.10/);
+    expect(text).not.toMatch(/route isn't part of this lab/);
+  });
+
+  it('`route print` shows only loopback and on-link APIPA routes when DHCP has no lease', () => {
+    const s = { ...pcAdapter.buildDevice({ ...SPEC, pc: { dhcp: true } }), nicUp: true };
+    const text = pcAdapter
+      .applyCommand(s, 'route print')
+      .output.map((o) => o.text)
+      .join('\n');
+
+    expect(text).toMatch(/169\.254\.\d+\.\d+/);
+    expect(text).toMatch(/169\.254\.0\.0\s+255\.255\.0\.0\s+On-link/);
+    expect(text).not.toMatch(/0\.0\.0\.0\s+0\.0\.0\.0/);
+  });
+
   it('`ip <ip> <mask>` sets the NIC IP / mask', () => {
     const s = run(pcAdapter.buildDevice(SPEC), ['ip 10.0.0.42 255.255.255.0']);
     expect(s.ip).toBe('10.0.0.42');
@@ -600,7 +625,6 @@ describe('pcAdapter — redirect tier (sensible-but-out-of-scope commands)', () 
     ['telnet 192.168.2.1', /telnet isn't part of this lab/i],
     ['ftp 192.168.2.10', /ftp isn't part of this lab/i],
     ['getmac', /getmac isn't part of this lab/i],
-    ['route print', /route isn't part of this lab/i],
     ['nbtstat -n', /nbtstat isn't part of this lab/i],
   ])('`%s` → tailored system message, not a bare error', (line, expected) => {
     const out = pcAdapter.applyCommand(s(), line).output;
