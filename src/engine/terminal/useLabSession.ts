@@ -218,6 +218,7 @@ export function useLabSession(lab: Lab): UseLabSession {
       mask: s.mask,
       gateway: s.gateway,
       dnsServers: s.dnsServers,
+      ...effectivePcIpv4(s),
       ipv6: s.ipv6,
       gateway6: s.gateway6,
     };
@@ -269,4 +270,51 @@ export function useLabSession(lab: Lab): UseLabSession {
     reset,
     resetToken,
   };
+}
+
+function effectivePcIpv4(s: Extract<DeviceSession, { kind: 'pc' }>): Pick<
+  PcNetworkConfig,
+  'effectiveIp' | 'effectiveMask' | 'effectiveGateway' | 'effectiveSource'
+> {
+  if (!s.dhcpMode) {
+    return {
+      effectiveIp: s.ip,
+      effectiveMask: s.mask,
+      effectiveGateway: s.gateway,
+      effectiveSource: 'static',
+    };
+  }
+
+  if (s.ip) {
+    return {
+      effectiveIp: s.ip,
+      effectiveMask: s.mask,
+      effectiveGateway: s.gateway,
+      effectiveSource: 'dhcp',
+    };
+  }
+
+  if (s.nicUp) {
+    return {
+      effectiveIp: apipaAddressFor(s.id),
+      effectiveMask: '255.255.0.0',
+      effectiveGateway: null,
+      effectiveSource: 'apipa',
+    };
+  }
+
+  return {
+    effectiveIp: null,
+    effectiveMask: null,
+    effectiveGateway: null,
+    effectiveSource: 'pending',
+  };
+}
+
+function apipaAddressFor(id: string): string {
+  let hash = 0;
+  for (const char of id) hash = (hash + char.charCodeAt(0)) % 65024;
+  const third = Math.floor(hash / 254);
+  const fourth = (hash % 254) + 1;
+  return `169.254.${third}.${fourth}`;
 }

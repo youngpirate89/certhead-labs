@@ -258,6 +258,36 @@ describe('FloatingTerminalPanel', () => {
     }));
   });
 
+  it('shows effective APIPA addressing when DHCP is selected without a lease', () => {
+    renderPanel({
+      activeDeviceId: 'PC-A',
+      openDeviceIds: ['PC-A'],
+      deviceKind: () => 'pc',
+      pcNetwork: () => ({
+        mode: 'dhcp',
+        ip: null,
+        mask: null,
+        gateway: null,
+        dnsServers: [],
+        effectiveIp: '169.254.0.42',
+        effectiveMask: '255.255.0.0',
+        effectiveGateway: null,
+        effectiveSource: 'apipa',
+        ipv6: null,
+        gateway6: null,
+      }),
+      onPcNetworkApply: vi.fn(),
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Network Adapter' }));
+
+    expect(screen.getByText('Current effective IPv4')).toBeInTheDocument();
+    expect(screen.getByText('169.254.0.42')).toBeInTheDocument();
+    expect(screen.getByText('255.255.0.0')).toBeInTheDocument();
+    expect(screen.getByText('APIPA fallback')).toBeInTheDocument();
+    expect(screen.getByText(/No DHCP lease was received/)).toBeInTheDocument();
+  });
+
   it('submits PC network adapter GUI changes and shows applied feedback', () => {
     const onPcNetworkApply = vi.fn();
     renderPanel({

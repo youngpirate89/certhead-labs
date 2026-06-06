@@ -663,6 +663,8 @@ function PcWorkbench({
                   : 'Static addressing is selected. Enter values exactly as the lab instructions require.'}
               </p>
 
+              <EffectiveIpv4Summary network={network} />
+
               <div className="grid gap-4 xl:grid-cols-1">
                 {activeAdapterSection === 'ipv4' ? (
                   <section className="rounded-lg border border-panel-border bg-[#08111f]/75 p-3">
@@ -886,6 +888,52 @@ function normalizePcNetworkDraft(draft: PcNetworkConfig): PcNetworkConfig {
 
 function normalizeDnsServerDraft(values: readonly string[] | undefined): string[] {
   return (values ?? []).map((value) => value.trim()).filter(Boolean);
+}
+
+function EffectiveIpv4Summary({ network }: { readonly network: PcNetworkConfig }) {
+  const source = network.effectiveSource ?? network.mode;
+  const sourceLabel = source === 'apipa'
+    ? 'APIPA fallback'
+    : source === 'dhcp'
+      ? 'DHCP lease'
+      : source === 'pending'
+        ? 'DHCP pending'
+        : 'Static configuration';
+  const note = source === 'apipa'
+    ? 'No DHCP lease was received, so Windows uses an APIPA address while the link is up.'
+    : source === 'dhcp'
+      ? 'The workstation is using an address received from DHCP.'
+      : source === 'pending'
+        ? 'The workstation is waiting for DHCP or the link is down.'
+        : 'The workstation is using the static adapter values.';
+
+  return (
+    <section className="rounded-lg border border-panel-border bg-[#08111f]/75 p-3 text-xs">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-semibold text-terminal-fg">Current effective IPv4</h3>
+          <p className="mt-1 text-terminal-fg/60">{note}</p>
+        </div>
+        <span className="rounded-full border border-terminal-prompt/25 bg-terminal-prompt/10 px-2 py-1 font-semibold text-terminal-prompt">
+          {sourceLabel}
+        </span>
+      </div>
+      <dl className="mt-3 grid gap-2 sm:grid-cols-3">
+        <div>
+          <dt className="uppercase tracking-[0.08em] text-terminal-dim">Address</dt>
+          <dd className="mt-1 font-mono text-terminal-fg">{network.effectiveIp ?? '(none)'}</dd>
+        </div>
+        <div>
+          <dt className="uppercase tracking-[0.08em] text-terminal-dim">Mask</dt>
+          <dd className="mt-1 font-mono text-terminal-fg">{network.effectiveMask ?? '(none)'}</dd>
+        </div>
+        <div>
+          <dt className="uppercase tracking-[0.08em] text-terminal-dim">Gateway</dt>
+          <dd className="mt-1 font-mono text-terminal-fg">{network.effectiveGateway ?? '(none)'}</dd>
+        </div>
+      </dl>
+    </section>
+  );
 }
 
 function WorkbenchTab({

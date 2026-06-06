@@ -312,6 +312,10 @@ export interface PcNetworkConfig {
   readonly mask?: string | null;
   readonly gateway?: string | null;
   readonly dnsServers?: readonly string[];
+  readonly effectiveIp?: string | null;
+  readonly effectiveMask?: string | null;
+  readonly effectiveGateway?: string | null;
+  readonly effectiveSource?: 'static' | 'dhcp' | 'apipa' | 'pending';
   readonly ipv6?: string | null;
   readonly gateway6?: string | null;
 }
