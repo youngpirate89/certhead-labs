@@ -228,6 +228,36 @@ describe('FloatingTerminalPanel', () => {
     expect(screen.queryByLabelText('IPv4 address')).toBeNull();
   });
 
+  it('renders preferred DNS server as IPv4 octet inputs and submits it with adapter settings', () => {
+    const onPcNetworkApply = vi.fn();
+    renderPanel({
+      activeDeviceId: 'PC-A',
+      openDeviceIds: ['PC-A'],
+      deviceKind: () => 'pc',
+      pcNetwork: () => ({
+        mode: 'static',
+        ip: '10.10.10.50',
+        mask: '255.255.255.0',
+        gateway: '10.10.10.1',
+        dnsServers: ['10.10.10.53'],
+        ipv6: null,
+        gateway6: null,
+      }),
+      onPcNetworkApply,
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Network Adapter' }));
+
+    expect(screen.getByLabelText('Preferred DNS server octet 1')).toHaveValue('10');
+    expect(screen.getByLabelText('Preferred DNS server octet 4')).toHaveValue('53');
+    fireEvent.change(screen.getByLabelText('Preferred DNS server octet 4'), { target: { value: '54' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply network adapter settings' }));
+
+    expect(onPcNetworkApply).toHaveBeenCalledWith('PC-A', expect.objectContaining({
+      dnsServers: ['10.10.10.54'],
+    }));
+  });
+
   it('submits PC network adapter GUI changes and shows applied feedback', () => {
     const onPcNetworkApply = vi.fn();
     renderPanel({

@@ -275,6 +275,26 @@ describe('lab-session — pc adapter wired in (3b)', () => {
     expect(initial.devices['PC-A']).not.toBe(pc);
   });
 
+  it('updatePcNetwork applies GUI DNS server settings to PC command state', () => {
+    const initial = initLabSession(pcRouterLab());
+    const after = updatePcNetwork(initial, 'PC-A', {
+      mode: 'static',
+      ip: '10.10.10.50',
+      mask: '255.255.255.0',
+      gateway: '10.10.10.1',
+      dnsServers: ['10.10.10.53'],
+    });
+
+    const pc = after.devices['PC-A'];
+    if (pc.kind !== 'pc') throw new Error('expected pc kind');
+    expect(pc.dnsServers).toEqual(['10.10.10.53']);
+
+    const ipconfig = applyToActive(setActive(after, 'PC-A'), 'ipconfig /all');
+    expect(ipconfig.output.map((line) => line.text).join('\n')).toContain(
+      'DNS Servers . . . . . . . . . . . : 10.10.10.53',
+    );
+  });
+
   it('updatePcNetwork switches a PC to DHCP mode and clears stale static values', () => {
     const initial = initLabSession(
       pcRouterLab({ ip: '192.168.1.10', mask: '255.255.255.0', gateway: '192.168.1.1' }),

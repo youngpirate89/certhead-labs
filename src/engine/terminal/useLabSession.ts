@@ -217,6 +217,7 @@ export function useLabSession(lab: Lab): UseLabSession {
       ip: s.ip,
       mask: s.mask,
       gateway: s.gateway,
+      dnsServers: s.dnsServers,
       ipv6: s.ipv6,
       gateway6: s.gateway6,
     };

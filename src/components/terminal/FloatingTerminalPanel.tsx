@@ -517,6 +517,17 @@ function PcWorkbench({
     setField(field, joinIpv4(octets));
   };
 
+  const setPreferredDnsOctet = (index: number, value: string) => {
+    const octets = splitIpv4(draft.dnsServers?.[0]);
+    octets[index] = value.replace(/\D/g, '').slice(0, 3);
+    const preferredDns = joinIpv4(octets);
+    setDraft((cur) => ({
+      ...cur,
+      dnsServers: preferredDns ? [preferredDns] : [],
+    }));
+    setAppliedNotice(null);
+  };
+
   return (
     <div className="flex h-full flex-col bg-gradient-to-b from-[#111827] via-[#0d1117] to-[#070a0f] font-sans text-terminal-fg">
       <div
@@ -661,6 +672,7 @@ function PcWorkbench({
                       <Ipv4OctetField label="IPv4 address" value={draft.ip} disabled={draft.mode === 'dhcp'} onChange={(index, value) => setIpv4Octet('ip', index, value)} />
                       <Ipv4OctetField label="Subnet mask" value={draft.mask} disabled={draft.mode === 'dhcp'} onChange={(index, value) => setIpv4Octet('mask', index, value)} />
                       <Ipv4OctetField label="Default gateway" value={draft.gateway} disabled={draft.mode === 'dhcp'} onChange={(index, value) => setIpv4Octet('gateway', index, value)} />
+                      <Ipv4OctetField label="Preferred DNS server" value={draft.dnsServers?.[0]} onChange={setPreferredDnsOctet} />
                     </div>
                   </section>
                 ) : (
@@ -859,15 +871,21 @@ function ModeOption({
 }
 
 function normalizePcNetworkDraft(draft: PcNetworkConfig): PcNetworkConfig {
-  if (draft.mode === 'dhcp') return { mode: 'dhcp' };
+  const dnsServers = normalizeDnsServerDraft(draft.dnsServers);
+  if (draft.mode === 'dhcp') return dnsServers.length > 0 ? { mode: 'dhcp', dnsServers } : { mode: 'dhcp' };
   return {
     mode: 'static',
     ip: draft.ip?.trim() || null,
     mask: draft.mask?.trim() || null,
     gateway: draft.gateway?.trim() || null,
+    ...(dnsServers.length > 0 ? { dnsServers } : {}),
     ipv6: draft.ipv6?.trim() || null,
     gateway6: draft.gateway6?.trim() || null,
   };
+}
+
+function normalizeDnsServerDraft(values: readonly string[] | undefined): string[] {
+  return (values ?? []).map((value) => value.trim()).filter(Boolean);
 }
 
 function WorkbenchTab({

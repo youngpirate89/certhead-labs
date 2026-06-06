@@ -311,6 +311,7 @@ export interface PcNetworkConfig {
   readonly ip?: string | null;
   readonly mask?: string | null;
   readonly gateway?: string | null;
+  readonly dnsServers?: readonly string[];
   readonly ipv6?: string | null;
   readonly gateway6?: string | null;
 }
@@ -333,6 +334,7 @@ export function updatePcNetwork(
         ip: null,
         mask: null,
         gateway: null,
+        dnsServers: normalizeDnsServers(config.dnsServers),
         dhcpMode: true,
       }
     : {
@@ -340,6 +342,7 @@ export function updatePcNetwork(
         ip: emptyToNull(config.ip),
         mask: emptyToNull(config.mask),
         gateway: emptyToNull(config.gateway),
+        dnsServers: normalizeDnsServers(config.dnsServers),
         ipv6: emptyToNull(config.ipv6),
         gateway6: emptyToNull(config.gateway6),
         dhcpMode: false,
@@ -354,6 +357,10 @@ export function updatePcNetwork(
 function emptyToNull(value: string | null | undefined): string | null {
   const trimmed = value?.trim() ?? '';
   return trimmed === '' ? null : trimmed;
+}
+
+function normalizeDnsServers(values: readonly string[] | undefined): string[] {
+  return (values ?? []).map((value) => value.trim()).filter(Boolean);
 }
 
 /** Build a fresh session for one device from its spec — used by reset(). */
