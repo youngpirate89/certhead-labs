@@ -103,6 +103,8 @@ export interface PcSession {
   dnsServers: string[];
   /** Scoped lab DNS records. Keys are normalized lowercase hostnames. */
   dnsRecords: Record<string, string>;
+  /** Minimal Windows-style ARP cache learned by successful ping attempts. */
+  arpCache: Record<string, string>;
   /** IPv6 unicast address/prefix configured on the PC, e.g. 2001:db8::10/64. */
   ipv6: string | null;
   /** IPv6 default gateway for the PC, normally the router interface address. */
@@ -197,6 +199,10 @@ const pcGrammar: CommandNode = {
       help: 'Resolve a scoped lab hostname',
       argument: { name: 'hostname', node: { terminal: true, help: 'Resolve host' } },
     },
+    arp: {
+      help: 'Display the workstation ARP cache',
+      argument: { name: '-a', node: { terminal: true, help: 'Show ARP cache' } },
+    },
     curl: {
       help: 'Query the scoped read-only automation API',
       argument: { name: 'url', node: { terminal: true, help: 'GET URL' } },
@@ -250,6 +256,7 @@ const COMMANDS: readonly PcCommand[] = [
   { name: 'tracert',  aliases: ['traceroute'], kind: 'working', handler: handleTracert },
   { name: 'ssh',      kind: 'working', handler: handleSsh },
   { name: 'nslookup', kind: 'working', handler: handleNslookup },
+  { name: 'arp',      kind: 'working', handler: handleArp },
   { name: 'curl',     kind: 'working', handler: handleAutomationApi },
   { name: 'invoke-restmethod', aliases: ['irm'], kind: 'working', handler: handleAutomationApi },
   { name: 'config',   kind: 'working', handler: handleWlcConfig },
@@ -264,12 +271,6 @@ const COMMANDS: readonly PcCommand[] = [
   // ---- KNOWN-BUT-REDIRECTED tier (register here, don't implement) ----
   // Each message names the in-scope alternatives so the learner has a path
   // forward — never a dead-end "Unrecognized command" for a sensible try.
-  {
-    name: 'arp',
-    kind: 'redirect',
-    message:
-      "arp isn't part of this lab — ARP tables aren't modeled. Use `ping <ip>` to confirm reachability or `ipconfig` to see your own addressing.",
-  },
   {
     name: 'netstat',
     kind: 'redirect',
@@ -337,6 +338,7 @@ export const pcAdapter: DeviceAdapter<PcSession> = {
       gateway: dhcpMode ? null : spec.pc?.gateway ?? null,
       dnsServers: [...(spec.pc?.dnsServers ?? [])],
       dnsRecords: normalizeDnsRecords(spec.pc?.dnsRecords ?? {}),
+      arpCache: {},
       ipv6: null,
       gateway6: null,
       dhcpMode,
@@ -1008,6 +1010,16 @@ function handleNslookup(
   };
 }
 
+function handleArp(
+  s: PcSession,
+  args: readonly string[],
+): ApplyResult<PcSession> {
+  if (args.length !== 1 || args[0].toLowerCase() !== '-a') {
+    return { session: s, output: errLine('Usage: arp -a') };
+  }
+  return { session: s, output: renderArp(s) };
+}
+
 function handlePing(
   s: PcSession,
   args: readonly string[],
@@ -1029,6 +1041,7 @@ function handlePing(
   // Ping is ICMP — pass the protocol so extended `deny icmp` ACLs (Lab 12)
   // fire. Standard ACLs ignore the protocol arg, so this is backward-safe.
   const result = canReach(ctx.lab, s.id, resolvedTarget.ip, undefined, 'icmp');
+  if (result.ok) learnArpForPing(s, resolvedTarget.ip);
   // Record the ping outcome so reachability objectives can require an ACTUAL
   // ping from the learner (not just state-permits-reachability). Gated on
   // record:false so a seeded ping (Lab.setup) couldn't pre-satisfy a
@@ -1045,6 +1058,13 @@ function resolvePingTarget(s: PcSession, target: string): { ip: string; name?: s
   const ip = s.dnsRecords[name];
   if (!ip || !isValidIpv4(ip)) return null;
   return { ip, name };
+}
+
+function learnArpForPing(s: PcSession, targetIp: string): void {
+  if (!s.ip || !s.mask) return;
+  const arpIp = ipInSubnet(targetIp, s.ip, s.mask) ? targetIp : s.gateway;
+  if (!arpIp || arpIp === s.ip) return;
+  s.arpCache[arpIp] = macAddressFor(arpIp);
 }
 
 /**
@@ -1774,6 +1794,24 @@ function renderRoutePrint(s: PcSession): CommandOutput[] {
   return out;
 }
 
+function renderArp(s: PcSession): CommandOutput[] {
+  const iface = pcEffectiveIpv4(s).ip ?? '0.0.0.0';
+  const entries = Object.entries(s.arpCache).sort(([a], [b]) => a.localeCompare(b));
+  const out: CommandOutput[] = [
+    { kind: 'output', text: '' },
+    { kind: 'output', text: `Interface: ${iface} --- 0xc` },
+    { kind: 'output', text: '  Internet Address      Physical Address      Type' },
+  ];
+  if (entries.length === 0) {
+    out.push({ kind: 'output', text: '  No ARP Entries Found' });
+    return out;
+  }
+  for (const [ip, mac] of entries) {
+    out.push({ kind: 'output', text: `  ${ip.padEnd(20)}${mac.padEnd(22)}dynamic` });
+  }
+  return out;
+}
+
 function routeRow(destination: string, mask: string, gateway: string, iface: string, metric: string): string {
   return `${destination.padEnd(19)} ${mask.padEnd(15)} ${gateway.padEnd(15)} ${iface.padEnd(12)} ${metric}`;
 }
@@ -1791,6 +1829,12 @@ function apipaAddressFor(id: string): string {
   const third = Math.floor(hash / 254);
   const fourth = (hash % 254) + 1;
   return `169.254.${third}.${fourth}`;
+}
+
+function macAddressFor(ip: string): string {
+  const octets = ip.split('.').map((part) => Number(part));
+  const bytes = [0x02, 0x42, ...octets.slice(0, 4)];
+  return bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('-');
 }
 
 /**

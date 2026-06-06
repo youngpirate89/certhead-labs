@@ -382,6 +382,36 @@ describe('pcAdapter — ping (calls canReach)', () => {
     expect(out[0].text).toMatch(/Ping request could not find host google\.com/);
   });
 
+
+  it('arp -a starts with no dynamic entries before traffic', () => {
+    const ls = fullyConfigured();
+    const out = applyToActive({ ...ls, activeDeviceId: 'PC-A' }, 'arp -a').output.map((o) => o.text).join('\n');
+    expect(out).toMatch(/Interface: 192\.168\.1\.10/);
+    expect(out).toMatch(/No ARP Entries Found/);
+  });
+
+  it('successful local-subnet ping learns the target in arp -a', () => {
+    let ls = fullyConfigured();
+    ls = pingFrom(ls, 'PC-A', '192.168.1.1').session;
+    const out = applyToActive({ ...ls, activeDeviceId: 'PC-A' }, 'arp -a').output.map((o) => o.text).join('\n');
+    expect(out).toMatch(/192\.168\.1\.1\s+[0-9a-f-]{17}\s+dynamic/);
+  });
+
+  it('successful off-subnet ping learns the default gateway, not the remote host', () => {
+    let ls = fullyConfigured();
+    ls = pingFrom(ls, 'PC-A', '192.168.2.10').session;
+    const out = applyToActive({ ...ls, activeDeviceId: 'PC-A' }, 'arp -a').output.map((o) => o.text).join('\n');
+    expect(out).toMatch(/192\.168\.1\.1\s+[0-9a-f-]{17}\s+dynamic/);
+    expect(out).not.toMatch(/192\.168\.2\.10\s+[0-9a-f-]{17}\s+dynamic/);
+  });
+
+  it('failed hostname resolution does not create ARP state', () => {
+    let ls = fullyConfigured();
+    ls = pingFrom(ls, 'PC-A', 'google.com').session;
+    const out = applyToActive({ ...ls, activeDeviceId: 'PC-A' }, 'arp -a').output.map((o) => o.text).join('\n');
+    expect(out).toMatch(/No ARP Entries Found/);
+  });
+
   it('records lastPing.ok=true on a successful ping with the right target', () => {
     const ls = fullyConfigured();
     expect((ls.devices['PC-A'] as PcSession).lastPing).toBeNull();
@@ -733,7 +763,6 @@ describe('pcAdapter — redirect tier (sensible-but-out-of-scope commands)', () 
   }
 
   it.each([
-    ['arp -a', /arp isn't part of this lab/i],
     ['netstat -an', /netstat isn't part of this lab/i],
     ['telnet 192.168.2.1', /telnet isn't part of this lab/i],
     ['ftp 192.168.2.10', /ftp isn't part of this lab/i],
@@ -747,9 +776,9 @@ describe('pcAdapter — redirect tier (sensible-but-out-of-scope commands)', () 
   });
 
   it('redirects DO record to history (the command was recognized, just not implemented)', () => {
-    const after = pcAdapter.applyCommand(s(), 'arp -a').session;
-    expect(after.history).toContain('arp -a');
-    expect(after.resolvedHistory).toContain('arp -a');
+    const after = pcAdapter.applyCommand(s(), 'netstat -an').session;
+    expect(after.history).toContain('netstat -an');
+    expect(after.resolvedHistory).toContain('netstat -an');
   });
 
   it('alias collapsing: `traceroute X` records canonical `tracert X` in resolvedHistory', () => {
