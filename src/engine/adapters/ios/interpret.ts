@@ -21,6 +21,7 @@ import {
   prompt as promptFor,
   routingTable,
   deriveRouterId,
+  createLoopbackInterface,
   ospfNetworkType,
   OSPF_DEFAULT_HELLO_INTERVAL,
   OSPF_DEFAULT_DEAD_INTERVAL,
@@ -509,6 +510,9 @@ function dispatch(
       if (s.mode === 'config-dhcp') return setDhcpNetwork(s, args.ip, args.mask, ec);
       return addOspfNetwork(s, args.prefix, args.wildcard, args.area, ec);
 
+    case 'router-id':
+      return setOspfRouterId(s, args.routerId, ec);
+
     case 'passive-interface':
       // Only reachable from config-router (grammar exposes it nowhere else).
       // The argument is a free-form iface token — normalise + validate.
@@ -898,7 +902,11 @@ function enterInterface(s: Session, token: string, ec: ErrCtx): ApplyResult {
     return { session: s, output: [] };
   }
   if (!s.device.interfaces[id]) {
-    return { session: s, output: err(`% Invalid interface ${fullInterfaceName(id)}`) };
+    if (id.startsWith('Lo')) {
+      s.device.interfaces[id] = createLoopbackInterface(id);
+    } else {
+      return { session: s, output: err(`% Invalid interface ${fullInterfaceName(id)}`) };
+    }
   }
   s.mode = 'config-if';
   s.currentInterface = id;
@@ -1264,6 +1272,12 @@ function enterRouterOspf(s: Session, pidArg: string, ec: ErrCtx): ApplyResult {
  *  does not require a contiguous mask. */
 function isValidWildcard(value: string): boolean {
   return isValidIpv4(value);
+}
+
+function setOspfRouterId(s: Session, routerId: string, ec: ErrCtx): ApplyResult {
+  if (!isValidIpv4(routerId)) return { session: s, output: badInput(ec, 'routerId') };
+  s.device.ospf.routerId = routerId;
+  return { session: s, output: [] };
 }
 
 function addOspfNetwork(

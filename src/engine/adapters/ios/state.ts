@@ -469,6 +469,7 @@ export interface Session {
 const FULL_NAMES: Record<string, string> = {
   Gi: 'GigabitEthernet',
   Fa: 'FastEthernet',
+  Lo: 'Loopback',
 };
 
 /**
@@ -479,6 +480,8 @@ const FULL_NAMES: Record<string, string> = {
  * Returns null if the token is not a recognised interface spec.
  */
 export function normaliseInterface(token: string): string | null {
+  const loop = /^(loopback|lo)(\d+)$/i.exec(token);
+  if (loop) return `Lo${loop[2]}`;
   const m = /^(gigabitethernet|gig|gi|g|fastethernet|fa|f)(\d+\/\d+(?:\/\d+)?)(\.\d+)?$/i.exec(
     token,
   );
@@ -577,6 +580,8 @@ const VALID_MASKS = new Set([
   '255.255.255.240',
   '255.255.255.248',
   '255.255.255.252',
+  '255.255.255.254',
+  '255.255.255.255',
 ]);
 
 export function isValidMask(value: string): boolean {
@@ -717,26 +722,42 @@ export function buildDevice(spec: {
 }
 
 /**
- * Derive the OSPF router-id: highest interface IP (loopbacks would win in
- * real IOS but the engine doesn't model them, so this is the
- * highest-IP-across-all-up-or-down interfaces rule). Returns null if no
- * interface has an IP — process is created but adjacency cannot form.
+ * Derive the OSPF router-id: highest loopback IP wins, then highest non-loopback
+ * interface IP. Returns null if no interface has an IP — process is created but
+ * adjacency cannot form.
  */
 export function deriveRouterId(device: DeviceState): string | null {
-  let best: string | null = null;
-  let bestVal = -1;
-  for (const i of Object.values(device.interfaces)) {
-    if (!i.ip) continue;
-    const parts = i.ip.split('.').map(Number);
-    const n = ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
-    if (n > bestVal) {
-      bestVal = n;
-      best = i.ip;
+  const chooseHighest = (ifaces: InterfaceState[]): string | null => {
+    let best: string | null = null;
+    let bestVal = -1;
+    for (const i of ifaces) {
+      if (!i.ip) continue;
+      const parts = i.ip.split('.').map(Number);
+      const n = ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
+      if (n > bestVal) {
+        bestVal = n;
+        best = i.ip;
+      }
     }
-  }
-  return best;
+    return best;
+  };
+  const all = Object.values(device.interfaces);
+  return chooseHighest(all.filter((i) => i.id.startsWith('Lo'))) ?? chooseHighest(all);
 }
 
+export function createLoopbackInterface(id: string): InterfaceState {
+  return {
+    id,
+    name: fullInterfaceName(id),
+    ip: null,
+    mask: null,
+    ipv6Addresses: [],
+    description: null,
+    adminUp: true,
+    protocolUp: true,
+    accessGroups: { in: null, out: null },
+  };
+}
 /** The prompt string for the current mode, e.g. `R1(config-if)#`. */
 export function prompt(session: Session): string {
   const h = session.device.hostname;

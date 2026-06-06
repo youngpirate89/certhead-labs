@@ -497,6 +497,10 @@ const defaultInformationSubtree: CommandNode = {
 const configRouterMode: CommandNode = {
   children: {
     network: networkSubtree,
+    'router-id': {
+      help: 'Manually set the OSPF router ID',
+      argument: arg('routerId', done('Apply OSPF router ID')),
+    },
     'passive-interface': passiveInterfaceSubtree,
     'default-information': defaultInformationSubtree,
     no: {

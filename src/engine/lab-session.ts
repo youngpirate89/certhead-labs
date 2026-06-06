@@ -865,6 +865,7 @@ function ifaceProtocolUp(
   iface: string,
   adminUp: boolean,
 ): boolean {
+  if (iface.startsWith('Lo')) return adminUp;
   return peerLinkIsUp(lab, deviceId, iface, adminUp);
 }
 
