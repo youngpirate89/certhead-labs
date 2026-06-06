@@ -375,11 +375,11 @@ describe('pcAdapter — ping (calls canReach)', () => {
     expect(out).toMatch(/Reply from 192\.168\.1\.1/);
   });
 
-  it('rejects a non-IPv4 ping target with a clear error', () => {
+  it('reports a Windows-style name-resolution failure when pinging an unknown hostname', () => {
     const ls = fullyConfigured();
     const out = pingFrom(ls, 'PC-A', 'google.com').output;
     expect(out[0].kind).toBe('error');
-    expect(out[0].text).toMatch(/not a valid IPv4/);
+    expect(out[0].text).toMatch(/Ping request could not find host google\.com/);
   });
 
   it('records lastPing.ok=true on a successful ping with the right target', () => {
@@ -403,6 +403,121 @@ describe('pcAdapter — ping (calls canReach)', () => {
     const after = pingFrom(ls, 'PC-A', 'google.com').session;
     const pc = after.devices['PC-A'] as PcSession;
     expect(pc.lastPing).toBeNull();
+  });
+});
+
+describe('pcAdapter — scoped DNS and hostname resolution', () => {
+  function dnsLab(): Lab {
+    return {
+      id: 'pc-dns-fixture',
+      title: 'DNS fixture',
+      exam: 'TEST',
+      difficulty: 1,
+      estimatedMinutes: 1,
+      isFree: false,
+      scenario: 'fixture',
+      topology: {
+        devices: [
+          {
+            id: 'PC-A',
+            kind: 'pc',
+            platform: 'Workstation',
+            interfaces: ['Eth0'],
+            pc: {
+              ip: '192.168.1.10',
+              mask: '255.255.255.0',
+              gateway: '192.168.1.1',
+              dnsServers: ['192.168.1.53'],
+              dnsRecords: { 'app.certhead.local': '192.168.2.10' },
+            },
+          },
+          { id: 'R1', kind: 'router', platform: 'ISR4321', interfaces: ['Gi0/0', 'Gi0/1'] },
+          { id: 'R2', kind: 'router', platform: 'ISR4321', interfaces: ['Gi0/0', 'Gi0/1'] },
+          {
+            id: 'PC-B',
+            kind: 'pc',
+            platform: 'Workstation',
+            interfaces: ['Eth0'],
+            pc: { ip: '192.168.2.10', mask: '255.255.255.0', gateway: '192.168.2.1' },
+          },
+        ],
+        links: [
+          { a: { deviceId: 'PC-A', iface: 'Eth0' }, b: { deviceId: 'R1', iface: 'Gi0/1' } },
+          { a: { deviceId: 'R1', iface: 'Gi0/0' }, b: { deviceId: 'R2', iface: 'Gi0/0' } },
+          { a: { deviceId: 'R2', iface: 'Gi0/1' }, b: { deviceId: 'PC-B', iface: 'Eth0' } },
+        ],
+      },
+      objectives: [],
+      hints: [],
+    };
+  }
+
+  function configure(ls: LabSession, id: string, lines: string[]): LabSession {
+    let cur: LabSession = { ...ls, activeDeviceId: id };
+    for (const line of lines) cur = applyToActive(cur, line).session;
+    return cur;
+  }
+
+  function fullyConfigured(): LabSession {
+    let ls = initLabSession(dnsLab());
+    ls = configure(ls, 'R1', [
+      'enable',
+      'configure terminal',
+      'interface gi0/1',
+      'ip address 192.168.1.1 255.255.255.0',
+      'no shutdown',
+      'exit',
+      'interface gi0/0',
+      'ip address 192.168.12.1 255.255.255.252',
+      'no shutdown',
+      'exit',
+      'ip route 192.168.2.0 255.255.255.0 192.168.12.2',
+    ]);
+    ls = configure(ls, 'R2', [
+      'enable',
+      'configure terminal',
+      'interface gi0/0',
+      'ip address 192.168.12.2 255.255.255.252',
+      'no shutdown',
+      'exit',
+      'interface gi0/1',
+      'ip address 192.168.2.1 255.255.255.0',
+      'no shutdown',
+      'exit',
+      'ip route 192.168.1.0 255.255.255.0 192.168.12.1',
+    ]);
+    return ls;
+  }
+
+  function runPc(ls: LabSession, line: string) {
+    return applyToActive({ ...ls, activeDeviceId: 'PC-A' }, line);
+  }
+
+  it('ipconfig /all shows configured DNS servers', () => {
+    const text = runPc(fullyConfigured(), 'ipconfig /all').output.map((o) => o.text).join('\n');
+    expect(text).toMatch(/DNS Servers.*192\.168\.1\.53/);
+  });
+
+  it('nslookup resolves lab-scoped host records', () => {
+    const text = runPc(fullyConfigured(), 'nslookup app.certhead.local').output.map((o) => o.text).join('\n');
+    expect(text).toMatch(/Server:\s+192\.168\.1\.53/);
+    expect(text).toMatch(/Name:\s+app\.certhead\.local/);
+    expect(text).toMatch(/Address:\s+192\.168\.2\.10/);
+    expect(text).not.toMatch(/nslookup isn't part of this lab/);
+  });
+
+  it('ping resolves a hostname through scoped DNS before testing reachability', () => {
+    const result = runPc(fullyConfigured(), 'ping app.certhead.local');
+    const text = result.output.map((o) => o.text).join('\n');
+    expect(text).toMatch(/Pinging app\.certhead\.local \[192\.168\.2\.10\] with 32 bytes of data:/);
+    expect(text).toMatch(/Reply from 192\.168\.2\.10/);
+    expect((result.session.devices['PC-A'] as PcSession).lastPing).toEqual({ target: 'app.certhead.local', ok: true });
+  });
+
+  it('nslookup reports a credible failure for hostnames outside the scoped lab zone', () => {
+    const out = runPc(fullyConfigured(), 'nslookup google.com').output;
+    expect(out.map((o) => o.text).join('\n')).toMatch(/Non-existent domain/);
+    expect(out.map((o) => o.text).join('\n')).toMatch(/google\.com/);
   });
 });
 
@@ -618,8 +733,6 @@ describe('pcAdapter — redirect tier (sensible-but-out-of-scope commands)', () 
   }
 
   it.each([
-    ['nslookup', /nslookup isn't part of this lab/i],
-    ['nslookup google.com', /nslookup isn't part of this lab/i],
     ['arp -a', /arp isn't part of this lab/i],
     ['netstat -an', /netstat isn't part of this lab/i],
     ['telnet 192.168.2.1', /telnet isn't part of this lab/i],
@@ -634,9 +747,9 @@ describe('pcAdapter — redirect tier (sensible-but-out-of-scope commands)', () 
   });
 
   it('redirects DO record to history (the command was recognized, just not implemented)', () => {
-    const after = pcAdapter.applyCommand(s(), 'nslookup google.com').session;
-    expect(after.history).toContain('nslookup google.com');
-    expect(after.resolvedHistory).toContain('nslookup google.com');
+    const after = pcAdapter.applyCommand(s(), 'arp -a').session;
+    expect(after.history).toContain('arp -a');
+    expect(after.resolvedHistory).toContain('arp -a');
   });
 
   it('alias collapsing: `traceroute X` records canonical `tracert X` in resolvedHistory', () => {

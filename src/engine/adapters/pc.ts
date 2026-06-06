@@ -99,6 +99,10 @@ export interface PcSession {
   ip: string | null;
   mask: string | null;
   gateway: string | null;
+  /** Scoped workstation DNS servers, shown by ipconfig /all. */
+  dnsServers: string[];
+  /** Scoped lab DNS records. Keys are normalized lowercase hostnames. */
+  dnsRecords: Record<string, string>;
   /** IPv6 unicast address/prefix configured on the PC, e.g. 2001:db8::10/64. */
   ipv6: string | null;
   /** IPv6 default gateway for the PC, normally the router interface address. */
@@ -189,6 +193,10 @@ const pcGrammar: CommandNode = {
       help: 'Connect to a network device over SSH',
       argument: { name: 'target', node: { terminal: true, help: 'Connect' } },
     },
+    nslookup: {
+      help: 'Resolve a scoped lab hostname',
+      argument: { name: 'hostname', node: { terminal: true, help: 'Resolve host' } },
+    },
     curl: {
       help: 'Query the scoped read-only automation API',
       argument: { name: 'url', node: { terminal: true, help: 'GET URL' } },
@@ -241,6 +249,7 @@ const COMMANDS: readonly PcCommand[] = [
   { name: 'route',    kind: 'working', handler: handleRoute },
   { name: 'tracert',  aliases: ['traceroute'], kind: 'working', handler: handleTracert },
   { name: 'ssh',      kind: 'working', handler: handleSsh },
+  { name: 'nslookup', kind: 'working', handler: handleNslookup },
   { name: 'curl',     kind: 'working', handler: handleAutomationApi },
   { name: 'invoke-restmethod', aliases: ['irm'], kind: 'working', handler: handleAutomationApi },
   { name: 'config',   kind: 'working', handler: handleWlcConfig },
@@ -255,12 +264,6 @@ const COMMANDS: readonly PcCommand[] = [
   // ---- KNOWN-BUT-REDIRECTED tier (register here, don't implement) ----
   // Each message names the in-scope alternatives so the learner has a path
   // forward — never a dead-end "Unrecognized command" for a sensible try.
-  {
-    name: 'nslookup',
-    kind: 'redirect',
-    message:
-      "nslookup isn't part of this lab — there's no DNS in this environment. Use `ping <ip>` or `tracert <ip>` to test connectivity.",
-  },
   {
     name: 'arp',
     kind: 'redirect',
@@ -332,6 +335,8 @@ export const pcAdapter: DeviceAdapter<PcSession> = {
       ip: dhcpMode ? null : spec.pc?.ip ?? null,
       mask: dhcpMode ? null : spec.pc?.mask ?? null,
       gateway: dhcpMode ? null : spec.pc?.gateway ?? null,
+      dnsServers: [...(spec.pc?.dnsServers ?? [])],
+      dnsRecords: normalizeDnsRecords(spec.pc?.dnsRecords ?? {}),
       ipv6: null,
       gateway6: null,
       dhcpMode,
@@ -624,6 +629,12 @@ function deviceInterfaces(device: DeviceSession): Record<string, unknown>[] {
 
 function isWirelessControllerPlatform(platform: string): boolean {
   return /wireless\s+lan\s+controller|\bwlc\b/i.test(platform);
+}
+
+function normalizeDnsRecords(records: Readonly<Record<string, string>>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(records).map(([name, ip]) => [name.toLowerCase(), ip]),
+  );
 }
 
 function requireWirelessController(s: PcSession): WirelessControllerState | null {
@@ -965,6 +976,38 @@ function handleRoute(
   return { session: s, output: renderRoutePrint(s) };
 }
 
+function handleNslookup(
+  s: PcSession,
+  args: readonly string[],
+): ApplyResult<PcSession> {
+  const hostname = args[0]?.toLowerCase();
+  if (!hostname) return { session: s, output: errLine('Usage: nslookup <hostname>') };
+  const server = s.dnsServers[0];
+  if (!server) {
+    return { session: s, output: errLine(`*** No DNS servers are configured for ${s.hostname}`) };
+  }
+  const ip = s.dnsRecords[hostname];
+  if (!ip) {
+    return {
+      session: s,
+      output: [
+        { kind: 'output', text: `Server:  ${server}` },
+        { kind: 'output', text: '' },
+        { kind: 'error', text: `*** ${server} can't find ${hostname}: Non-existent domain` },
+      ],
+    };
+  }
+  return {
+    session: s,
+    output: [
+      { kind: 'output', text: `Server:  ${server}` },
+      { kind: 'output', text: '' },
+      { kind: 'output', text: `Name:    ${hostname}` },
+      { kind: 'output', text: `Address: ${ip}` },
+    ],
+  };
+}
+
 function handlePing(
   s: PcSession,
   args: readonly string[],
@@ -972,11 +1015,12 @@ function handlePing(
   opts: ApplyOptions | undefined,
 ): ApplyResult<PcSession> {
   if (args.length < 1) return { session: s, output: errLine('% Incomplete command.') };
-  const target = args[0];
-  if (!isValidIpv4(target)) {
+  const requestedTarget = args[0];
+  const resolvedTarget = resolvePingTarget(s, requestedTarget);
+  if (!resolvedTarget) {
     return {
       session: s,
-      output: errLine(`Ping target '${target}' is not a valid IPv4 address.`),
+      output: errLine(`Ping request could not find host ${requestedTarget}. Please check the name and try again.`),
     };
   }
   if (!ctx?.lab) {
@@ -984,15 +1028,23 @@ function handlePing(
   }
   // Ping is ICMP — pass the protocol so extended `deny icmp` ACLs (Lab 12)
   // fire. Standard ACLs ignore the protocol arg, so this is backward-safe.
-  const result = canReach(ctx.lab, s.id, target, undefined, 'icmp');
+  const result = canReach(ctx.lab, s.id, resolvedTarget.ip, undefined, 'icmp');
   // Record the ping outcome so reachability objectives can require an ACTUAL
   // ping from the learner (not just state-permits-reachability). Gated on
   // record:false so a seeded ping (Lab.setup) couldn't pre-satisfy a
   // verification objective — same contract as history.
   if (opts?.record !== false) {
-    s.lastPing = { target, ok: result.ok };
+    s.lastPing = { target: requestedTarget, ok: result.ok };
   }
-  return { session: s, output: renderPing(result, target) };
+  return { session: s, output: renderPing(result, resolvedTarget.ip, resolvedTarget.name) };
+}
+
+function resolvePingTarget(s: PcSession, target: string): { ip: string; name?: string } | null {
+  if (isValidIpv4(target)) return { ip: target };
+  const name = target.toLowerCase();
+  const ip = s.dnsRecords[name];
+  if (!ip || !isValidIpv4(ip)) return null;
+  return { ip, name };
 }
 
 /**
@@ -1679,6 +1731,12 @@ function renderIpconfig(s: PcSession, all: boolean): CommandOutput[] {
   out.push({ kind: 'output', text: `   IPv4 Address. . . . . . . . . . . : ${ipLabel}` });
   out.push({ kind: 'output', text: `   Subnet Mask . . . . . . . . . . . : ${maskLabel}` });
   out.push({ kind: 'output', text: `   Default Gateway . . . . . . . . . : ${s.gateway ?? '(none)'}` });
+  if (all && s.dnsServers.length > 0) {
+    out.push({ kind: 'output', text: `   DNS Servers . . . . . . . . . . . : ${s.dnsServers[0]}` });
+    for (const server of s.dnsServers.slice(1)) {
+      out.push({ kind: 'output', text: `                                       ${server}` });
+    }
+  }
   out.push({ kind: 'output', text: `   IPv6 Address. . . . . . . . . . . : ${s.ipv6 ?? '(none)'}` });
   out.push({ kind: 'output', text: `   IPv6 Default Gateway . . . . . . : ${s.gateway6 ?? '(none)'}` });
   out.push({
@@ -1749,11 +1807,13 @@ function apipaAddressFor(id: string): string {
 function renderPing(
   result: ReturnType<typeof canReach>,
   target: string,
+  resolvedName?: string,
 ): CommandOutput[] {
+  const pingTarget = resolvedName ? `${resolvedName} [${target}]` : target;
   if (result.ok) {
     return [
       { kind: 'output', text: '' },
-      { kind: 'output', text: `Pinging ${target} with 32 bytes of data:` },
+      { kind: 'output', text: `Pinging ${pingTarget} with 32 bytes of data:` },
       { kind: 'output', text: `Reply from ${target}: bytes=32 time<1ms TTL=64` },
       { kind: 'output', text: `Reply from ${target}: bytes=32 time<1ms TTL=64` },
       { kind: 'output', text: `Reply from ${target}: bytes=32 time<1ms TTL=64` },
@@ -1765,7 +1825,7 @@ function renderPing(
   }
   return [
     { kind: 'output', text: '' },
-    { kind: 'output', text: `Pinging ${target} with 32 bytes of data:` },
+    { kind: 'output', text: `Pinging ${pingTarget} with 32 bytes of data:` },
     { kind: 'error', text: 'Request timed out.' },
     { kind: 'error', text: 'Request timed out.' },
     { kind: 'error', text: 'Request timed out.' },

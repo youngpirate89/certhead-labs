@@ -104,6 +104,9 @@ export interface LabDevice {
     readonly ip?: string;
     readonly mask?: string;
     readonly gateway?: string;
+    /** Optional workstation DNS config for scoped name-resolution labs. */
+    readonly dnsServers?: readonly string[];
+    readonly dnsRecords?: Readonly<Record<string, string>>;
     /** Lab 10: this PC starts with no static IP and pulls its addressing
      *  from the connected router's DHCP server. `ip`/`mask`/`gateway`
      *  are ignored when `dhcp` is true — the values come from the matching
