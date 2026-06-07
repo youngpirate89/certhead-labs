@@ -114,12 +114,13 @@ export const lab39TshootNatOutsideRole: Lab = {
         const r1 = session.devices.R1;
         if (r1?.kind !== 'router') return false;
         const acl = r1.device.acls.get(1);
+        const inspectedPolicy = r1.resolvedHistory.some((cmd) => cmd === 'show running-config');
         const aclOk = acl?.entries.some(aclPermitsInsideSubnet) ?? false;
         const insideOk = r1.device.interfaces['Gi0/0']?.natRole === 'inside';
         const overloadOk = r1.device.natStatements.some(
           (s) => s.type === 'inside-source-list-overload' && s.aclId === 1 && s.outsideInterface === 'Gi0/1',
         );
-        return aclOk && insideOk && overloadOk;
+        return inspectedPolicy && aclOk && insideOk && overloadOk;
       },
     },
     {

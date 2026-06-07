@@ -38,6 +38,16 @@ describe('Playwright lab smoke fixtures', () => {
     expect(labIds).toContain('ccna-tshoot-ospf-acl-overlap-ticket');
   });
 
+  it('includes the Batch K numbered Lab 37 through Lab 40 smoke fixtures', () => {
+    const batch = getAllLabSmokeBatches().find((candidate) => candidate.id === 'k');
+    expect(batch?.labs.map((smokeCase) => smokeCase.id)).toEqual([
+      'ccna-lab37-tshoot-etherchannel-lacp-mode',
+      'ccna-lab38-tshoot-ipv6-static-wrong-next-hop',
+      'ccna-lab39-tshoot-nat-outside-role',
+      'ccna-lab40-tshoot-dhcp-relay-wrong-helper',
+    ]);
+  });
+
   it('fails closed for unknown batches and unknown single-lab selections', () => {
     expect(() => getSelectedLabSmokeBatch('not-real')).toThrow(/Unknown lab smoke batch/);
 

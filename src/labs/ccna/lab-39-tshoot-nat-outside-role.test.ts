@@ -43,7 +43,15 @@ describe('Lab 39 - Troubleshoot missing NAT outside role', () => {
     }));
     expect(outputOn(ls, 'R1', 'show running-config')).toMatch(/ip nat inside source list 1 interface GigabitEthernet0\/1 overload/i);
     expect(outputOn(ls, 'R1', 'show running-config interface Gi0/1')).not.toMatch(/ip nat outside/i);
-    expect(grade(lab39TshootNatOutsideRole, ls).allMet).toBe(false);
+    const g = grade(lab39TshootNatOutsideRole, ls);
+    expect(g.allMet).toBe(false);
+    expect(g.objectives.map((o) => [o.id, o.met])).toEqual([
+      ['confirm-client-symptom', false],
+      ['inspect-nat-evidence', false],
+      ['repair-outside-role', false],
+      ['preserve-existing-nat-policy', false],
+      ['verify-translated-reachability', false],
+    ]);
   });
 
   it('requires symptom confirmation, NAT evidence, the outside role repair, and post-fix NAT verification', () => {
