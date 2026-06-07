@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { Layout } from './Layout';
 
 /**
@@ -20,6 +20,7 @@ describe('Layout', () => {
         labTitle="Sample lab"
         topology={<div data-testid="topology-content">topology here</div>}
         objectives={<div data-testid="objectives-content">objectives here</div>}
+        terminal={<div data-testid="terminal-content">terminal here</div>}
       />,
     );
   }
@@ -90,11 +91,34 @@ describe('Layout', () => {
     expect(objectives?.className).toContain('h-full');
   });
 
-  it('main row uses flex so topology and sidebar are side-by-side, not stacked', () => {
+  it('main content uses a vertical split: workspace row above docked terminal', () => {
     const { container } = renderSample();
     const main = container.querySelector('main');
+    const workspaceRow = container.querySelector('[data-region="workspace-row"]');
     expect(main?.className).toContain('flex');
-    // No `flex-col` — siblings flow horizontally in the row.
-    expect(main?.className).not.toContain('flex-col');
+    expect(main?.className).toContain('flex-col');
+    expect(workspaceRow?.className).toContain('flex');
+  });
+
+  it('reserves a docked terminal region below the topology/objectives row instead of overlaying them', () => {
+    const { container } = renderSample();
+    const terminal = container.querySelector('[data-region="terminal-dock"]') as HTMLElement;
+
+    expect(terminal).not.toBeNull();
+    expect(screen.getByTestId('terminal-content')).toBeInTheDocument();
+    expect(terminal.className).toContain('shrink-0');
+    expect(terminal.style.height).toBe('34%');
+  });
+
+  it('defaults to dark mode and exposes a learner-facing light theme toggle', () => {
+    const { container } = renderSample();
+    const shell = container.querySelector('[data-lab-theme]');
+    expect(shell?.getAttribute('data-lab-theme')).toBe('dark');
+
+    fireEvent.click(screen.getByRole('button', { name: /switch to light theme/i }));
+
+    expect(shell?.getAttribute('data-lab-theme')).toBe('light');
+    expect(screen.getByRole('button', { name: /switch to dark theme/i })).toBeInTheDocument();
+    expect(shell?.className).toContain('lab-theme-light');
   });
 });

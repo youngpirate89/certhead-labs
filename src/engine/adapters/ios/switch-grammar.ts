@@ -36,6 +36,7 @@ const showSubtree: CommandNode = {
       // child keyword prefix-matches).
       children: {
         trunk: done('Status of trunking interfaces'),
+        status: done('Interface status table'),
       },
       argument: arg('iface', {
         terminal: true,
@@ -51,11 +52,39 @@ const showSubtree: CommandNode = {
       children: {
         interface: {
           help: 'Show one interface\'s configuration stanza',
+          children: {
+            'port-channel': {
+              help: 'Show one Port-channel interface stanza',
+              argument: arg('id', done('Per-Port-channel running config')),
+            },
+          },
           argument: arg('iface', done('Per-interface running config')),
         },
       },
     },
+    etherchannel: {
+      help: 'EtherChannel information',
+      children: { summary: done('EtherChannel summary') },
+    },
+    'spanning-tree': {
+      help: 'Spanning Tree Protocol information',
+      children: {
+        vlan: {
+          help: 'Spanning-tree information for a VLAN',
+          argument: arg('id', done('Per-VLAN spanning-tree state')),
+        },
+      },
+    },
     version: done('System hardware and software status'),
+    'port-security': {
+      help: 'Port security information',
+      children: {
+        interface: {
+          help: 'Port security information for an interface',
+          argument: arg('iface', done('Per-interface port security')),
+        },
+      },
+    },
   },
 };
 
@@ -86,6 +115,12 @@ const configMode: CommandNode = {
   children: {
     interface: {
       help: 'Select an interface to configure',
+      children: {
+        'port-channel': {
+          help: 'Select a Port-channel interface to configure',
+          argument: arg('id', done('Enter Port-channel interface configuration')),
+        },
+      },
       argument: arg('iface', done('Enter interface configuration')),
     },
     hostname: {
@@ -95,6 +130,29 @@ const configMode: CommandNode = {
     vlan: {
       help: 'Create or configure a VLAN (enters config-vlan submode)',
       argument: arg('id', done('Enter VLAN configuration')),
+    },
+    'spanning-tree': {
+      help: 'Configure Spanning Tree Protocol',
+      children: {
+        vlan: {
+          help: 'Configure STP for a VLAN',
+          argument: arg('id', {
+            children: {
+              priority: {
+                help: 'Set bridge priority for this VLAN',
+                argument: arg('priority', done('Apply STP priority')),
+              },
+              root: {
+                help: 'Configure root bridge macro',
+                children: {
+                  primary: done('Set this switch as primary root'),
+                  secondary: done('Set this switch as secondary root'),
+                },
+              },
+            },
+          }),
+        },
+      },
     },
     no: {
       help: 'Negate a command',
@@ -115,6 +173,12 @@ const configIfMode: CommandNode = {
   children: {
     interface: {
       help: 'Select another interface to configure',
+      children: {
+        'port-channel': {
+          help: 'Select a Port-channel interface to configure',
+          argument: arg('id', done('Switch to Port-channel interface configuration')),
+        },
+      },
       argument: arg('iface', done('Switch to interface configuration')),
     },
     switchport: {
@@ -142,6 +206,27 @@ const configIfMode: CommandNode = {
             vlan: {
               help: 'Assign the port to a VLAN',
               argument: arg('id', done('Apply access VLAN')),
+            },
+          },
+        },
+        'port-security': {
+          terminal: true,
+          help: 'Enable port security on this interface',
+          children: {
+            maximum: {
+              help: 'Maximum secure MAC addresses',
+              argument: arg('maximum', done('Set maximum secure addresses')),
+            },
+            'mac-address': {
+              help: 'Configure a secure MAC address',
+              children: {
+                sticky: {
+                  terminal: true,
+                  help: 'Enable sticky secure MAC learning',
+                  argument: arg('mac', done('Configure sticky secure MAC')),
+                },
+              },
+              argument: arg('mac', done('Configure secure MAC')),
             },
           },
         },
@@ -198,10 +283,53 @@ const configIfMode: CommandNode = {
       argument: arg('text', done('Apply description')),
     },
     shutdown: done('Administratively shut down the interface'),
+    'channel-group': {
+      help: 'Assign interface to an EtherChannel group',
+      argument: arg('id', {
+        children: {
+          mode: {
+            help: 'Set EtherChannel mode',
+            children: {
+              active: done('Enable LACP active mode'),
+              passive: done('Enable LACP passive mode'),
+              on: done('Enable static EtherChannel mode'),
+            },
+          },
+        },
+      }),
+    },
+    'spanning-tree': {
+      help: 'Configure interface Spanning Tree Protocol',
+      children: {
+        portfast: done('Enable PortFast on this access interface'),
+        bpduguard: {
+          help: 'Configure BPDU Guard on this interface',
+          children: {
+            enable: done('Enable BPDU Guard on this interface'),
+          },
+        },
+      },
+    },
     no: {
       help: 'Negate a command',
       children: {
         shutdown: done('Bring the interface up'),
+        'spanning-tree': {
+          help: 'Reset interface Spanning Tree Protocol settings',
+          children: {
+            portfast: done('Disable PortFast on this interface'),
+            bpduguard: {
+              help: 'Reset BPDU Guard on this interface',
+              children: {
+                enable: done('Disable BPDU Guard on this interface'),
+              },
+            },
+          },
+        },
+        'channel-group': {
+          help: 'Remove interface from an EtherChannel group',
+          argument: arg('id', done('Remove channel-group membership')),
+        },
         switchport: {
           help: 'Reset switchport settings',
           children: {
@@ -209,6 +337,22 @@ const configIfMode: CommandNode = {
               help: 'Reset access-mode parameters',
               children: {
                 vlan: done('Reset access VLAN to 1'),
+              },
+            },
+            'port-security': {
+              help: 'Reset port security settings',
+              children: {
+                'mac-address': {
+                  help: 'Remove a secure MAC address',
+                  children: {
+                    sticky: {
+                      terminal: true,
+                      help: 'Remove sticky secure MAC learning',
+                      argument: arg('mac', done('Remove sticky secure MAC')),
+                    },
+                  },
+                  argument: arg('mac', done('Remove secure MAC')),
+                },
               },
             },
             trunk: {
@@ -251,6 +395,12 @@ const configVlanMode: CommandNode = {
     // config-if; same dispatch path as the in-mode case (enterInterface).
     interface: {
       help: 'Select an interface to configure',
+      children: {
+        'port-channel': {
+          help: 'Select a Port-channel interface to configure',
+          argument: arg('id', done('Switch to Port-channel interface configuration')),
+        },
+      },
       argument: arg('iface', done('Switch to interface configuration')),
     },
     exit: done('Exit to global config'),

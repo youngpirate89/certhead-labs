@@ -49,6 +49,284 @@ describe('FloatingTerminalPanel', () => {
     expect(screen.getByLabelText('Terminal input')).toBeInTheDocument();
   });
 
+  it('can render as a docked terminal that participates in layout instead of a fixed overlay', () => {
+    const { container } = renderPanel({ mode: 'docked' });
+    const panel = container.querySelector('[data-floating-terminal-panel]') as HTMLElement;
+
+    expect(panel).not.toBeNull();
+    expect(panel.className).toContain('relative');
+    expect(panel.className).not.toContain('fixed');
+    expect(panel.style.width).toBe('100%');
+    expect(panel.style.height).toBe('100%');
+    expect(panel.style.left).toBe('');
+    expect(panel.style.top).toBe('');
+  });
+
+  it('renders a PC workbench with Desktop, Network Adapter, and Terminal tabs for PC devices', () => {
+    renderPanel({
+      activeDeviceId: 'PC-A',
+      openDeviceIds: ['PC-A'],
+      deviceKind: (id) => (id === 'PC-A' ? 'pc' : 'router'),
+      pcNetwork: () => ({
+        mode: 'static',
+        ip: '192.168.1.10',
+        mask: '255.255.255.0',
+        gateway: '192.168.1.1',
+        ipv6: null,
+        gateway6: null,
+      }),
+      onPcNetworkApply: vi.fn(),
+    });
+
+    expect(screen.getByRole('tab', { name: 'Desktop' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Network Adapter' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Terminal' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Network Adapter' }));
+    expect(screen.getByLabelText('IPv4 address octet 1')).toHaveValue('192');
+    expect(screen.getByLabelText('IPv4 address octet 4')).toHaveValue('10');
+    expect(screen.getByLabelText('Subnet mask octet 1')).toHaveValue('255');
+    expect(screen.getByLabelText('Subnet mask octet 4')).toHaveValue('0');
+    expect(screen.getByLabelText('Default gateway octet 1')).toHaveValue('192');
+    expect(screen.getByLabelText('Default gateway octet 4')).toHaveValue('1');
+  });
+
+  it('renders a simple Packet Tracer-style desktop launcher instead of a status dashboard', () => {
+    renderPanel({
+      activeDeviceId: 'PC-A',
+      openDeviceIds: ['PC-A'],
+      deviceKind: () => 'pc',
+      pcNetwork: () => ({
+        mode: 'static',
+        ip: '192.168.1.10',
+        mask: '255.255.255.0',
+        gateway: '192.168.1.1',
+        ipv6: '2001:db8:acad:1::10/64',
+        gateway6: '2001:db8:acad:1::1',
+      }),
+      onPcNetworkApply: vi.fn(),
+    });
+
+    expect(screen.getByText('PC-A Workstation')).toBeInTheDocument();
+    expect(screen.getByText('Select a desktop tool')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'IP Configuration' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'IPv6 Configuration' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Command Prompt' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'SSH Client' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Terminal' })).toBeNull();
+    expect(screen.queryByText('Desktop status')).toBeNull();
+    expect(screen.queryByText('Adapter')).toBeNull();
+    expect(screen.queryByText('Workflow')).toBeNull();
+    expect(screen.queryByText('Configure adapter → verify IP → test SSH')).toBeNull();
+    expect(screen.queryByText('2001:db8:acad:1::10/64')).toBeNull();
+  });
+
+  it('labels a wireless controller workbench as a controller, not a workstation', () => {
+    renderPanel({
+      activeDeviceId: 'WLC1',
+      openDeviceIds: ['WLC1'],
+      deviceKind: () => 'pc',
+      platformLabel: () => 'Wireless LAN Controller',
+      pcNetwork: () => ({
+        mode: 'static',
+        ip: '10.28.20.50',
+        mask: '255.255.255.0',
+        gateway: '10.28.20.1',
+        ipv6: null,
+        gateway6: null,
+      }),
+      onPcNetworkApply: vi.fn(),
+    });
+
+    expect(screen.getByText('WLC1 Wireless LAN Controller')).toBeInTheDocument();
+    expect(screen.queryByText('WLC1 Workstation')).toBeNull();
+  });
+
+  it('opens a professional SSH client from the desktop and prepares a realistic ssh command', () => {
+    const term = stubTerm('PC-A$');
+    renderPanel({
+      activeDeviceId: 'PC-A',
+      openDeviceIds: ['PC-A'],
+      forDevice: () => term,
+      deviceKind: () => 'pc',
+      pcNetwork: () => ({
+        mode: 'static',
+        ip: '192.168.1.10',
+        mask: '255.255.255.0',
+        gateway: '192.168.1.1',
+        ipv6: null,
+        gateway6: null,
+      }),
+      onPcNetworkApply: vi.fn(),
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'SSH Client' }));
+
+    expect(screen.getByText('SSH Client')).toBeInTheDocument();
+    expect(screen.getByText('Remote SSH access')).toBeInTheDocument();
+    expect(screen.queryByText(/PuTTY/i)).toBeNull();
+    expect(screen.getByLabelText('Host Name or IP address')).toHaveValue('192.168.1.1');
+    const portInput = screen.getByLabelText('Port');
+    expect(portInput).toHaveValue('22');
+    expect(portInput).toHaveClass('w-full');
+    expect(portInput.closest('label')).toHaveClass('min-w-0');
+    expect(screen.getByLabelText('Username')).toHaveValue('admin');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open SSH session' }));
+
+    expect(term.setInput).toHaveBeenCalledWith('ssh admin@192.168.1.1');
+  });
+
+  it('opens IPv6 configuration from the desktop and keeps IPv6 fields visible', () => {
+    renderPanel({
+      activeDeviceId: 'PC-A',
+      openDeviceIds: ['PC-A'],
+      deviceKind: () => 'pc',
+      pcNetwork: () => ({
+        mode: 'static',
+        ip: '192.168.1.10',
+        mask: '255.255.255.0',
+        gateway: '192.168.1.1',
+        ipv6: '2001:db8:acad:1::10/64',
+        gateway6: '2001:db8:acad:1::1',
+      }),
+      onPcNetworkApply: vi.fn(),
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'IPv6 Configuration' }));
+
+    expect(screen.getByRole('tab', { name: 'Network Adapter' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('IPv6 Configuration')).toBeInTheDocument();
+    expect(screen.queryByText('IPv4 Configuration')).toBeNull();
+    expect(screen.getByLabelText('IPv6 address / prefix')).toHaveValue('2001:db8:acad:1::10/64');
+    expect(screen.getByLabelText('IPv6 default gateway')).toHaveValue('2001:db8:acad:1::1');
+  });
+
+  it('renders IPv4 address, subnet mask, and default gateway as octet inputs', () => {
+    renderPanel({
+      activeDeviceId: 'PC-A',
+      openDeviceIds: ['PC-A'],
+      deviceKind: () => 'pc',
+      pcNetwork: () => ({
+        mode: 'static',
+        ip: '192.168.1.10',
+        mask: '255.255.255.0',
+        gateway: '192.168.1.1',
+        ipv6: null,
+        gateway6: null,
+      }),
+      onPcNetworkApply: vi.fn(),
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Network Adapter' }));
+
+    expect(screen.getByLabelText('IPv4 address octet 1')).toHaveValue('192');
+    expect(screen.getByLabelText('IPv4 address octet 4')).toHaveValue('10');
+    expect(screen.getByLabelText('Subnet mask octet 1')).toHaveValue('255');
+    expect(screen.getByLabelText('Subnet mask octet 4')).toHaveValue('0');
+    expect(screen.getByLabelText('Default gateway octet 1')).toHaveValue('192');
+    expect(screen.getByLabelText('Default gateway octet 4')).toHaveValue('1');
+    expect(screen.queryByLabelText('IPv4 address')).toBeNull();
+  });
+
+  it('renders preferred DNS server as IPv4 octet inputs and submits it with adapter settings', () => {
+    const onPcNetworkApply = vi.fn();
+    renderPanel({
+      activeDeviceId: 'PC-A',
+      openDeviceIds: ['PC-A'],
+      deviceKind: () => 'pc',
+      pcNetwork: () => ({
+        mode: 'static',
+        ip: '10.10.10.50',
+        mask: '255.255.255.0',
+        gateway: '10.10.10.1',
+        dnsServers: ['10.10.10.53'],
+        ipv6: null,
+        gateway6: null,
+      }),
+      onPcNetworkApply,
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Network Adapter' }));
+
+    expect(screen.getByLabelText('Preferred DNS server octet 1')).toHaveValue('10');
+    expect(screen.getByLabelText('Preferred DNS server octet 4')).toHaveValue('53');
+    fireEvent.change(screen.getByLabelText('Preferred DNS server octet 4'), { target: { value: '54' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply network adapter settings' }));
+
+    expect(onPcNetworkApply).toHaveBeenCalledWith('PC-A', expect.objectContaining({
+      dnsServers: ['10.10.10.54'],
+    }));
+  });
+
+  it('shows effective APIPA addressing when DHCP is selected without a lease', () => {
+    renderPanel({
+      activeDeviceId: 'PC-A',
+      openDeviceIds: ['PC-A'],
+      deviceKind: () => 'pc',
+      pcNetwork: () => ({
+        mode: 'dhcp',
+        ip: null,
+        mask: null,
+        gateway: null,
+        dnsServers: [],
+        effectiveIp: '169.254.0.42',
+        effectiveMask: '255.255.0.0',
+        effectiveGateway: null,
+        effectiveSource: 'apipa',
+        ipv6: null,
+        gateway6: null,
+      }),
+      onPcNetworkApply: vi.fn(),
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Network Adapter' }));
+
+    expect(screen.getByText('Current effective IPv4')).toBeInTheDocument();
+    expect(screen.getByText('169.254.0.42')).toBeInTheDocument();
+    expect(screen.getByText('255.255.0.0')).toBeInTheDocument();
+    expect(screen.getByText('APIPA fallback')).toBeInTheDocument();
+    expect(screen.getByText(/No DHCP lease was received/)).toBeInTheDocument();
+  });
+
+  it('submits PC network adapter GUI changes and shows applied feedback', () => {
+    const onPcNetworkApply = vi.fn();
+    renderPanel({
+      activeDeviceId: 'PC-A',
+      openDeviceIds: ['PC-A'],
+      deviceKind: () => 'pc',
+      pcNetwork: () => ({ mode: 'dhcp', ip: null, mask: null, gateway: null, ipv6: null, gateway6: null }),
+      onPcNetworkApply,
+    });
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Network Adapter' }));
+    expect(screen.getByText('TCP/IP Properties')).toBeInTheDocument();
+    expect(screen.getByText('DHCP is selected. Static fields are preserved in the form but ignored until static mode is applied.')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Use static addressing'));
+    fireEvent.change(screen.getByLabelText('IPv4 address octet 1'), { target: { value: '10' } });
+    fireEvent.change(screen.getByLabelText('IPv4 address octet 2'), { target: { value: '10' } });
+    fireEvent.change(screen.getByLabelText('IPv4 address octet 3'), { target: { value: '10' } });
+    fireEvent.change(screen.getByLabelText('IPv4 address octet 4'), { target: { value: '50' } });
+    fireEvent.change(screen.getByLabelText('Subnet mask octet 1'), { target: { value: '255' } });
+    fireEvent.change(screen.getByLabelText('Subnet mask octet 2'), { target: { value: '255' } });
+    fireEvent.change(screen.getByLabelText('Subnet mask octet 3'), { target: { value: '255' } });
+    fireEvent.change(screen.getByLabelText('Subnet mask octet 4'), { target: { value: '0' } });
+    fireEvent.change(screen.getByLabelText('Default gateway octet 1'), { target: { value: '10' } });
+    fireEvent.change(screen.getByLabelText('Default gateway octet 2'), { target: { value: '10' } });
+    fireEvent.change(screen.getByLabelText('Default gateway octet 3'), { target: { value: '10' } });
+    fireEvent.change(screen.getByLabelText('Default gateway octet 4'), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply network adapter settings' }));
+
+    expect(onPcNetworkApply).toHaveBeenCalledWith('PC-A', {
+      mode: 'static',
+      ip: '10.10.10.50',
+      mask: '255.255.255.0',
+      gateway: '10.10.10.1',
+      ipv6: null,
+      gateway6: null,
+    });
+    expect(screen.getByRole('status')).toHaveTextContent('Settings applied to PC-A');
+  });
+
   it('renders one tab per open device id with its platform label', () => {
     renderPanel({
       openDeviceIds: ['R1', 'PC-A'],
@@ -199,15 +477,16 @@ describe('FloatingTerminalPanel', () => {
     ).toBeNull();
   });
 
-  it('opens at the default size (740 wide, 420 tall)', () => {
+  it('opens at a larger default size for readable command output and PC workbench controls', () => {
     const { container } = renderPanel();
     const panel = container.querySelector(
       '[data-floating-terminal-panel]',
     ) as HTMLElement;
-    // 740px holds 80-column IOS tables without wrapping at the 14px default
-    // font (see DEFAULT_PANEL_WIDTH rationale in FloatingTerminalPanel.tsx).
-    expect(panel.style.width).toBe('740px');
-    expect(panel.style.height).toBe('420px');
+    // The default terminal window should feel closer to a real lab workspace:
+    // wide enough for 80-column IOS tables plus breathing room, and tall enough
+    // for the PC workbench without cramped controls on normal laptop displays.
+    expect(panel.style.width).toBe('900px');
+    expect(panel.style.height).toBe('620px');
   });
 
   it('minimized snap-bar uses 320px width and docks bottom-center via CSS transform', () => {

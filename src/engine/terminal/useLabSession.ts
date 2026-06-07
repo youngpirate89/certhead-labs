@@ -9,7 +9,9 @@ import {
   setActive,
   closeDevice,
   closeAllDevices,
+  updatePcNetwork,
   promptFor,
+  type PcNetworkConfig,
   type LabSession,
   type DeviceSession,
 } from '@/engine/lab-session';
@@ -33,6 +35,9 @@ export interface UseLabSession extends UseTerminal {
   /** Open/focus a device's CLI. Adds to openDeviceIds if not present and
    *  sets it active. */
   setActiveDevice: (id: string) => void;
+  deviceKind: (id: string) => DeviceSession['kind'] | undefined;
+  pcNetwork: (id: string) => PcNetworkConfig | undefined;
+  updatePcNetwork: (id: string, config: PcNetworkConfig) => void;
   /** Close a single tab in the shared terminal panel. If closing the active
    *  id, the neighbor on the left becomes active. Closing the last open
    *  tab empties openDeviceIds and the panel hides until a topology click
@@ -60,7 +65,14 @@ function routerBootBanner(platform: string): OutputLine[] {
 }
 
 /** PCs get a one-line shell-style header — no IOS boot. */
-function pcBootBanner(hostname: string): OutputLine[] {
+function pcBootBanner(hostname: string, platform: string): OutputLine[] {
+  if (/wireless lan controller/i.test(platform)) {
+    return [
+      { kind: 'system', text: `${hostname} — wireless LAN controller. Try \`show wlan summary\` or \`config wlan ...\`.` },
+      { kind: 'system', text: '' },
+    ];
+  }
+
   return [
     { kind: 'system', text: `${hostname} — workstation. Try \`ipconfig\` or \`ping <ip>\`.` },
     { kind: 'system', text: '' },
@@ -73,7 +85,7 @@ function bannerForDevice(d: LabDevice): OutputLine[] {
     case 'switch':
       return routerBootBanner(d.platform);
     case 'pc':
-      return pcBootBanner(d.id);
+      return pcBootBanner(d.id, d.platform);
   }
 }
 
@@ -195,6 +207,27 @@ export function useLabSession(lab: Lab): UseLabSession {
     setLabSession((cur) => setActive(cur, id));
   }, []);
 
+  const deviceKind = useCallback((id: string) => labRef.current.devices[id]?.kind, []);
+
+  const pcNetwork = useCallback((id: string): PcNetworkConfig | undefined => {
+    const s = labRef.current.devices[id];
+    if (!s || s.kind !== 'pc') return undefined;
+    return {
+      mode: s.dhcpMode ? 'dhcp' : 'static',
+      ip: s.ip,
+      mask: s.mask,
+      gateway: s.gateway,
+      dnsServers: s.dnsServers,
+      ...effectivePcIpv4(s),
+      ipv6: s.ipv6,
+      gateway6: s.gateway6,
+    };
+  }, []);
+
+  const updatePcNetworkCallback = useCallback((id: string, config: PcNetworkConfig) => {
+    setLabSession((cur) => updatePcNetwork(cur, id, config));
+  }, []);
+
   const closeDeviceCallback = useCallback((id: string) => {
     setLabSession((cur) => closeDevice(cur, id));
   }, []);
@@ -229,9 +262,59 @@ export function useLabSession(lab: Lab): UseLabSession {
     activeDeviceId: labSession.activeDeviceId,
     openDeviceIds: labSession.openDeviceIds,
     setActiveDevice,
+    deviceKind,
+    pcNetwork,
+    updatePcNetwork: updatePcNetworkCallback,
     closeDevice: closeDeviceCallback,
     closeAllDevices: closeAllDevicesCallback,
     reset,
     resetToken,
   };
+}
+
+function effectivePcIpv4(s: Extract<DeviceSession, { kind: 'pc' }>): Pick<
+  PcNetworkConfig,
+  'effectiveIp' | 'effectiveMask' | 'effectiveGateway' | 'effectiveSource'
+> {
+  if (!s.dhcpMode) {
+    return {
+      effectiveIp: s.ip,
+      effectiveMask: s.mask,
+      effectiveGateway: s.gateway,
+      effectiveSource: 'static',
+    };
+  }
+
+  if (s.ip) {
+    return {
+      effectiveIp: s.ip,
+      effectiveMask: s.mask,
+      effectiveGateway: s.gateway,
+      effectiveSource: 'dhcp',
+    };
+  }
+
+  if (s.nicUp) {
+    return {
+      effectiveIp: apipaAddressFor(s.id),
+      effectiveMask: '255.255.0.0',
+      effectiveGateway: null,
+      effectiveSource: 'apipa',
+    };
+  }
+
+  return {
+    effectiveIp: null,
+    effectiveMask: null,
+    effectiveGateway: null,
+    effectiveSource: 'pending',
+  };
+}
+
+function apipaAddressFor(id: string): string {
+  let hash = 0;
+  for (const char of id) hash = (hash + char.charCodeAt(0)) % 65024;
+  const third = Math.floor(hash / 254);
+  const fourth = (hash % 254) + 1;
+  return `169.254.${third}.${fourth}`;
 }

@@ -26,7 +26,9 @@ import type {
   Session as RouterSession,
 } from './adapters/ios/state';
 import type { SwitchSession } from './adapters/ios/switch-state';
+import { trunkAllowsVlan } from './adapters/ios/switch-state';
 import { recomputeOspf } from './adapters/ios/ospf';
+import { recomputeEtherchannel } from './adapters/ios/etherchannel';
 import {
   findPoolForIp,
   recomputeBindings,
@@ -118,9 +120,29 @@ export function initLabSession(lab: Lab): LabSession {
  *  run after DHCP). */
 function refreshDerivedState(lab: LabSession): LabSession {
   const linkUp = refreshNicUp(lab);
-  const ospf = refreshOspf(linkUp);
+  const etherchannel = refreshEtherchannel(linkUp);
+  const ospf = refreshOspf(etherchannel);
   const dhcp = refreshDhcp(ospf);
   return refreshNat(dhcp);
+}
+
+function refreshEtherchannel(lab: LabSession): LabSession {
+  const switches = new Map<string, SwitchSession>();
+  for (const [deviceId, session] of Object.entries(lab.devices)) {
+    if (session.kind === 'switch') switches.set(deviceId, session);
+  }
+  if (switches.size === 0) return lab;
+
+  const updated = recomputeEtherchannel(switches, lab.links);
+  let changed = false;
+  const devices: Record<string, DeviceSession> = { ...lab.devices };
+  for (const [deviceId, next] of updated) {
+    if (next !== lab.devices[deviceId]) {
+      devices[deviceId] = next;
+      changed = true;
+    }
+  }
+  return changed ? { ...lab, devices } : lab;
 }
 
 /** Apply a list of seed commands to one device with `record:false`. Router
@@ -280,6 +302,69 @@ export function replaceDevice(lab: LabSession, id: string, next: DeviceSession):
     throw new Error(`replaceDevice: unknown device id '${id}'`);
   }
   return { ...lab, devices: { ...lab.devices, [id]: next } };
+}
+
+export type PcNetworkMode = 'dhcp' | 'static';
+
+export interface PcNetworkConfig {
+  readonly mode: PcNetworkMode;
+  readonly ip?: string | null;
+  readonly mask?: string | null;
+  readonly gateway?: string | null;
+  readonly dnsServers?: readonly string[];
+  readonly effectiveIp?: string | null;
+  readonly effectiveMask?: string | null;
+  readonly effectiveGateway?: string | null;
+  readonly effectiveSource?: 'static' | 'dhcp' | 'apipa' | 'pending';
+  readonly ipv6?: string | null;
+  readonly gateway6?: string | null;
+}
+
+/** Apply Network Adapter GUI state to one PC session. This is the UI-backed
+ *  path for realistic endpoint configuration; terminal command history is not
+ *  touched because clicking Apply in a GUI is not a typed shell command. */
+export function updatePcNetwork(
+  lab: LabSession,
+  id: string,
+  config: PcNetworkConfig,
+): LabSession {
+  const cur = lab.devices[id];
+  if (!cur) throw new Error(`updatePcNetwork: unknown device id '${id}'`);
+  if (cur.kind !== 'pc') throw new Error(`updatePcNetwork: '${id}' is not a PC`);
+
+  const nextPc: PcSession = config.mode === 'dhcp'
+    ? {
+        ...cur,
+        ip: null,
+        mask: null,
+        gateway: null,
+        dnsServers: normalizeDnsServers(config.dnsServers),
+        dhcpMode: true,
+      }
+    : {
+        ...cur,
+        ip: emptyToNull(config.ip),
+        mask: emptyToNull(config.mask),
+        gateway: emptyToNull(config.gateway),
+        dnsServers: normalizeDnsServers(config.dnsServers),
+        ipv6: emptyToNull(config.ipv6),
+        gateway6: emptyToNull(config.gateway6),
+        dhcpMode: false,
+      };
+
+  return refreshDerivedState({
+    ...lab,
+    devices: { ...lab.devices, [id]: nextPc },
+  });
+}
+
+function emptyToNull(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? '';
+  return trimmed === '' ? null : trimmed;
+}
+
+function normalizeDnsServers(values: readonly string[] | undefined): string[] {
+  return (values ?? []).map((value) => value.trim()).filter(Boolean);
 }
 
 /** Build a fresh session for one device from its spec — used by reset(). */
@@ -589,7 +674,11 @@ function resolveDhcpClientPool(
     }
     if (!myIface || !peer) continue;
     const neighbor = lab.devices[peer.deviceId];
-    if (!neighbor || neighbor.kind !== 'router') return null;
+    if (!neighbor) return null;
+    if (neighbor.kind === 'switch') {
+      return resolveDhcpClientPoolThroughSwitch(lab, neighbor, peer.iface);
+    }
+    if (neighbor.kind !== 'router') return null;
     const iface = neighbor.device.interfaces[peer.iface];
     if (!iface || !iface.ip || !iface.mask) return null;
     // Lab 10 same-subnet path: a pool on the cabled router covering the
@@ -616,6 +705,67 @@ function resolveDhcpClientPool(
     }
     return null;
   }
+  return null;
+}
+
+function resolveDhcpClientPoolThroughSwitch(
+  lab: LabSession,
+  startSwitch: SwitchSession,
+  accessIface: string,
+): { routerId: string; poolName: string } | null {
+  const accessPort = startSwitch.device.switchports[accessIface];
+  if (!accessPort || accessPort.mode !== 'access' || !accessPort.protocolUp) return null;
+  const vlan = accessPort.accessVlan;
+  const visited = new Set<string>([startSwitch.device.id]);
+  const queue: string[] = [startSwitch.device.id];
+
+  while (queue.length > 0) {
+    const swId = queue.shift()!;
+    const sw = lab.devices[swId];
+    if (!sw || sw.kind !== 'switch') continue;
+
+    for (const link of lab.links) {
+      let myIface: string;
+      let peerEnd: { deviceId: string; iface: string };
+      if (link.a.deviceId === swId) {
+        myIface = link.a.iface;
+        peerEnd = link.b;
+      } else if (link.b.deviceId === swId) {
+        myIface = link.b.iface;
+        peerEnd = link.a;
+      } else {
+        continue;
+      }
+
+      const myPort = sw.device.switchports[myIface];
+      if (!myPort || !myPort.protocolUp || myPort.mode !== 'trunk') continue;
+      if (!trunkAllowsVlan(myPort.trunkAllowedVlans, vlan)) continue;
+
+      const peer = lab.devices[peerEnd.deviceId];
+      if (!peer) continue;
+      if (peer.kind === 'switch') {
+        if (visited.has(peer.device.id)) continue;
+        const peerPort = peer.device.switchports[peerEnd.iface];
+        if (!peerPort || !peerPort.protocolUp || peerPort.mode !== 'trunk') continue;
+        if (!trunkAllowsVlan(peerPort.trunkAllowedVlans, vlan)) continue;
+        visited.add(peer.device.id);
+        queue.push(peer.device.id);
+        continue;
+      }
+
+      if (peer.kind !== 'router') continue;
+      const parent = peer.device.interfaces[peerEnd.iface];
+      if (!parent || !parent.adminUp || !parent.protocolUp) continue;
+      for (const sub of Object.values(peer.device.subInterfaces)) {
+        if (sub.parentId !== peerEnd.iface) continue;
+        if (sub.dot1qVlan !== vlan) continue;
+        if (!sub.ip || !sub.mask || !sub.protocolUp) continue;
+        const pool = pickPoolForIfaceSubnet(peer.device.dhcpPools, sub.ip, sub.mask);
+        if (pool) return { routerId: peer.device.id, poolName: pool.name };
+      }
+    }
+  }
+
   return null;
 }
 
@@ -715,6 +865,7 @@ function ifaceProtocolUp(
   iface: string,
   adminUp: boolean,
 ): boolean {
+  if (iface.startsWith('Lo')) return adminUp;
   return peerLinkIsUp(lab, deviceId, iface, adminUp);
 }
 

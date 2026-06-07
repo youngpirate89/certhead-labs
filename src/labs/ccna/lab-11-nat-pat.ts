@@ -179,7 +179,7 @@ export const lab11NatPat: Lab = {
     {
       afterSeconds: 300,
       text:
-        'Apply PAT in global config: `ip nat inside source list 1 interface GigabitEthernet0/1 overload`. Then `end`, `show ip nat translations` to see the active entry, and re-run `ping 203.0.113.2` from PC-A.',
+        'Apply PAT in global config: `ip nat inside source list 1 interface GigabitEthernet0/1 overload`. Then re-run `ping 203.0.113.2` from PC-A, and use `show ip nat translations` on R1 to see the active entry.',
     },
   ],
   solution: {
@@ -213,13 +213,18 @@ export const lab11NatPat: Lab = {
       },
       {
         device: 'R1',
-        note: 'Verify the translation table:',
-        commands: ['end', 'show ip nat translations'],
+        note: 'Leave configuration mode so R1 is ready for verification:',
+        commands: ['end'],
       },
       {
         device: 'PC-A',
         note: 'Confirm end-to-end reachability:',
         commands: ['ping 203.0.113.2'],
+      },
+      {
+        device: 'R1',
+        note: 'Verify the translation table after traffic has crossed the NAT boundary:',
+        commands: ['show ip nat translations'],
       },
     ],
   },

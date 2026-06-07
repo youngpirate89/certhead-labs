@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Layout } from '@/components/Layout';
 import { LabBrief } from '@/components/LabBrief';
 import { TopologyPanel } from '@/components/TopologyPanel';
@@ -15,8 +15,16 @@ import type { Lab } from '@/engine/types';
  * open device's CLI lives inside one shared FloatingTerminalPanel — one
  * window, one tab per open device.
  */
-export function PilotMode({ lab }: { lab: Lab }) {
+export function PilotMode({ lab, onCompleted }: { lab: Lab; onCompleted?: () => void }) {
   const session = useLabSession(lab);
+  const completedRef = useRef(false);
+
+  useEffect(() => {
+    if (session.allMet && !completedRef.current) {
+      completedRef.current = true;
+      onCompleted?.();
+    }
+  }, [onCompleted, session.allMet]);
 
   const [briefDismissed, setBriefDismissed] = useState(false);
   const [labStartedAt, setLabStartedAt] = useState<number | null>(null);
@@ -29,6 +37,7 @@ export function PilotMode({ lab }: { lab: Lab }) {
   function resetLab() {
     session.reset();
     setLabStartedAt(Date.now());
+    completedRef.current = false;
   }
 
   // Per-lab topology positions: collected here from the lab spec so the
@@ -68,6 +77,7 @@ export function PilotMode({ lab }: { lab: Lab }) {
             activeDeviceId={session.activeDeviceId}
             onSelectDevice={handleSelectDevice}
             links={lab.topology.links}
+            decorations={lab.topology.decorations}
             positions={positions}
           />
         }
@@ -94,6 +104,9 @@ export function PilotMode({ lab }: { lab: Lab }) {
           activeDeviceId={session.activeDeviceId}
           forDevice={session.forDevice}
           platformLabel={platformLabel}
+          deviceKind={session.deviceKind}
+          pcNetwork={session.pcNetwork}
+          onPcNetworkApply={session.updatePcNetwork}
           onSelectDevice={session.setActiveDevice}
           onCloseDevice={session.closeDevice}
           onCloseAll={session.closeAllDevices}

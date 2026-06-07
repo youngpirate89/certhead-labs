@@ -62,6 +62,26 @@ describe('IOS interpreter — mode stack', () => {
     expect(after.device.interfaces['Gi0/0'].ip).toBe('192.168.1.1');
   });
 
+  it('creates loopback interfaces on first entry and shows them as up/up', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface loopback0',
+      'ip address 10.255.31.1 255.255.255.255',
+      'end',
+    ]);
+    expect(s.device.interfaces.Lo0).toMatchObject({
+      id: 'Lo0',
+      name: 'Loopback0',
+      ip: '10.255.31.1',
+      mask: '255.255.255.255',
+      adminUp: true,
+      protocolUp: true,
+    });
+    const text = applyCommand(s, 'show ip interface brief').output.map((o) => o.text).join('\n');
+    expect(text).toMatch(/Loopback0\s+10\.255\.31\.1\s+YES\s+manual\s+up\s+up/);
+  });
+
   it('after an interface hop, `exit` lands at (config)# — engine has no nested interface stack', () => {
     const s = run(fresh(), [
       'enable',
@@ -152,6 +172,64 @@ describe('IOS interpreter — resolution errors and show', () => {
     const before = structuredClone(s);
     applyCommand(s, 'configure terminal');
     expect(s).toEqual(before);
+  });
+
+  it('derives OSPF router ID from the highest loopback before physical interface IPs', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface gi0/0',
+      'ip address 172.16.31.1 255.255.255.252',
+      'no shutdown',
+      'interface loopback0',
+      'ip address 10.255.31.1 255.255.255.255',
+      'exit',
+      'router ospf 1',
+    ]);
+    expect(s.device.ospf.routerId).toBe('10.255.31.1');
+  });
+
+  it('supports explicit OSPF router-id under router configuration mode', () => {
+    const s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'router ospf 1',
+      'router-id 10.255.31.1',
+    ]);
+    expect(s.device.ospf.routerId).toBe('10.255.31.1');
+  });
+
+  it('defers an active OSPF router-id change until clear ip ospf process applies it', () => {
+    let s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface gi0/0',
+      'ip address 172.16.31.1 255.255.255.252',
+      'no shutdown',
+      'exit',
+      'router ospf 1',
+    ]);
+    expect(s.device.ospf.routerId).toBe('172.16.31.1');
+
+    const deferred = applyCommand(s, 'router-id 10.255.31.1');
+    expect(deferred.output.map((o) => o.text)).toEqual([
+      '% OSPF: Router-id changes will not take effect until the process is restarted.',
+      '% Use "clear ip ospf process" or reload to apply the new router-id.',
+    ]);
+    s = deferred.session;
+    expect(s.device.ospf.routerId).toBe('172.16.31.1');
+    expect(s.device.ospf.pendingRouterId).toBe('10.255.31.1');
+
+    s = applyCommand(s, 'end').session;
+    const cleared = applyCommand(s, 'clear ip ospf process');
+    expect(cleared.output.map((o) => o.text)).toEqual(['Reset ALL OSPF processes? [no]: yes']);
+    expect(cleared.session.device.ospf.routerId).toBe('10.255.31.1');
+    expect(cleared.session.device.ospf.pendingRouterId).toBeNull();
+  });
+
+  it('returns a clear error when clearing OSPF before the process exists', () => {
+    const out = applyCommand(applyCommand(fresh(), 'enable').session, 'clear ip ospf process').output;
+    expect(out.map((o) => o.text)).toEqual(['% OSPF process not running.']);
   });
 });
 

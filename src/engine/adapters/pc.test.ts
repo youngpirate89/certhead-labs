@@ -113,6 +113,44 @@ describe('pcAdapter — commands', () => {
     expect(text).toMatch(/Media State.*Media disconnected/);
   });
 
+  it('`ipconfig` shows an APIPA address when DHCP is enabled, link is up, and no lease was received', () => {
+    const s = { ...pcAdapter.buildDevice({ ...SPEC, pc: { dhcp: true } }), nicUp: true };
+    const text = pcAdapter
+      .applyCommand(s, 'ipconfig')
+      .output.map((o) => o.text)
+      .join('\n');
+
+    expect(text).toMatch(/IPv4 Address.*169\.254\./);
+    expect(text).toMatch(/Subnet Mask.*255\.255\.0\.0/);
+    expect(text).toMatch(/Default Gateway.*\(none\)/);
+    expect(text).not.toMatch(/DHCP request pending/);
+  });
+
+  it('`route print` renders the workstation IPv4 route table from the current adapter state', () => {
+    const s = { ...pcAdapter.buildDevice(SPEC_PRECONFIGURED), nicUp: true };
+    const text = pcAdapter
+      .applyCommand(s, 'route print')
+      .output.map((o) => o.text)
+      .join('\n');
+
+    expect(text).toMatch(/IPv4 Route Table/);
+    expect(text).toMatch(/0\.0\.0\.0\s+0\.0\.0\.0\s+192\.168\.1\.1\s+192\.168\.1\.10/);
+    expect(text).toMatch(/192\.168\.1\.0\s+255\.255\.255\.0\s+On-link\s+192\.168\.1\.10/);
+    expect(text).not.toMatch(/route isn't part of this lab/);
+  });
+
+  it('`route print` shows only loopback and on-link APIPA routes when DHCP has no lease', () => {
+    const s = { ...pcAdapter.buildDevice({ ...SPEC, pc: { dhcp: true } }), nicUp: true };
+    const text = pcAdapter
+      .applyCommand(s, 'route print')
+      .output.map((o) => o.text)
+      .join('\n');
+
+    expect(text).toMatch(/169\.254\.\d+\.\d+/);
+    expect(text).toMatch(/169\.254\.0\.0\s+255\.255\.0\.0\s+On-link/);
+    expect(text).not.toMatch(/0\.0\.0\.0\s+0\.0\.0\.0/);
+  });
+
   it('`ip <ip> <mask>` sets the NIC IP / mask', () => {
     const s = run(pcAdapter.buildDevice(SPEC), ['ip 10.0.0.42 255.255.255.0']);
     expect(s.ip).toBe('10.0.0.42');
@@ -129,6 +167,55 @@ describe('pcAdapter — commands', () => {
     expect(pcAdapter.applyCommand(s, 'ip bogus 255.255.255.0').output[0].kind).toBe('error');
     expect(pcAdapter.applyCommand(s, 'ip 10.0.0.1 255.255.0.255').output[0].kind).toBe('error');
     expect(pcAdapter.applyCommand(s, 'gateway not-an-ip').output[0].kind).toBe('error');
+  });
+
+  it('recognizes realistic SSH syntax as a scoped workstation command, not a redirect', () => {
+    const s = { ...pcAdapter.buildDevice(SPEC_PRECONFIGURED), nicUp: true };
+    const text = pcAdapter
+      .applyCommand(s, 'ssh admin@192.168.1.1')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/Connecting to 192\.168\.1\.1/);
+    expect(text).not.toMatch(/ssh isn't part of this lab/);
+  });
+
+  it('recognizes OpenSSH -l username form from the workstation terminal', () => {
+    const s = { ...pcAdapter.buildDevice(SPEC_PRECONFIGURED), nicUp: true };
+    const text = pcAdapter
+      .applyCommand(s, 'ssh 192.168.1.1 -l admin')
+      .output.map((o) => o.text)
+      .join('\n');
+    expect(text).toMatch(/Connecting to 192\.168\.1\.1/);
+  });
+
+  it('renders JSON device inventory from the scoped automation API endpoint', () => {
+    const s = { ...pcAdapter.buildDevice(SPEC_PRECONFIGURED), nicUp: true };
+    const result = pcAdapter.applyCommand(s, 'curl http://api.certhead.local/devices');
+    const text = result.output.map((o) => o.text).join('\n');
+
+    expect(text).toMatch(/"devices"/);
+    expect(text).toMatch(/"id": "PC-A"/);
+    expect(result.session.lastApiInventory).toBeGreaterThan(0);
+  });
+
+  it('renders JSON device detail from the scoped automation API endpoint', () => {
+    const s = { ...pcAdapter.buildDevice(SPEC_PRECONFIGURED), nicUp: true };
+    const result = pcAdapter.applyCommand(s, 'Invoke-RestMethod -Uri http://api.certhead.local/devices/PC-A');
+    const text = result.output.map((o) => o.text).join('\n');
+
+    expect(text).toMatch(/"id": "PC-A"/);
+    expect(text).toMatch(/"interfaces"/);
+    expect(result.session.lastApiDeviceDetail.get('PC-A')).toBeGreaterThan(0);
+  });
+
+  it('renders JSON for one selected interface and stamps that API selection', () => {
+    const s = { ...pcAdapter.buildDevice(SPEC_PRECONFIGURED), nicUp: true };
+    const result = pcAdapter.applyCommand(s, 'curl http://api.certhead.local/devices/PC-A/interfaces/Eth0');
+    const text = result.output.map((o) => o.text).join('\n');
+
+    expect(text).toMatch(/"deviceId": "PC-A"/);
+    expect(text).toMatch(/"name": "Eth0"/);
+    expect(result.session.lastApiInterfaceDetail.get('PC-A:Eth0')).toBeGreaterThan(0);
   });
 
   it('does not mutate the input session', () => {
@@ -288,11 +375,41 @@ describe('pcAdapter — ping (calls canReach)', () => {
     expect(out).toMatch(/Reply from 192\.168\.1\.1/);
   });
 
-  it('rejects a non-IPv4 ping target with a clear error', () => {
+  it('reports a Windows-style name-resolution failure when pinging an unknown hostname', () => {
     const ls = fullyConfigured();
     const out = pingFrom(ls, 'PC-A', 'google.com').output;
     expect(out[0].kind).toBe('error');
-    expect(out[0].text).toMatch(/not a valid IPv4/);
+    expect(out[0].text).toMatch(/Ping request could not find host google\.com/);
+  });
+
+
+  it('arp -a starts with no dynamic entries before traffic', () => {
+    const ls = fullyConfigured();
+    const out = applyToActive({ ...ls, activeDeviceId: 'PC-A' }, 'arp -a').output.map((o) => o.text).join('\n');
+    expect(out).toMatch(/Interface: 192\.168\.1\.10/);
+    expect(out).toMatch(/No ARP Entries Found/);
+  });
+
+  it('successful local-subnet ping learns the target in arp -a', () => {
+    let ls = fullyConfigured();
+    ls = pingFrom(ls, 'PC-A', '192.168.1.1').session;
+    const out = applyToActive({ ...ls, activeDeviceId: 'PC-A' }, 'arp -a').output.map((o) => o.text).join('\n');
+    expect(out).toMatch(/192\.168\.1\.1\s+[0-9a-f-]{17}\s+dynamic/);
+  });
+
+  it('successful off-subnet ping learns the default gateway, not the remote host', () => {
+    let ls = fullyConfigured();
+    ls = pingFrom(ls, 'PC-A', '192.168.2.10').session;
+    const out = applyToActive({ ...ls, activeDeviceId: 'PC-A' }, 'arp -a').output.map((o) => o.text).join('\n');
+    expect(out).toMatch(/192\.168\.1\.1\s+[0-9a-f-]{17}\s+dynamic/);
+    expect(out).not.toMatch(/192\.168\.2\.10\s+[0-9a-f-]{17}\s+dynamic/);
+  });
+
+  it('failed hostname resolution does not create ARP state', () => {
+    let ls = fullyConfigured();
+    ls = pingFrom(ls, 'PC-A', 'google.com').session;
+    const out = applyToActive({ ...ls, activeDeviceId: 'PC-A' }, 'arp -a').output.map((o) => o.text).join('\n');
+    expect(out).toMatch(/No ARP Entries Found/);
   });
 
   it('records lastPing.ok=true on a successful ping with the right target', () => {
@@ -316,6 +433,121 @@ describe('pcAdapter — ping (calls canReach)', () => {
     const after = pingFrom(ls, 'PC-A', 'google.com').session;
     const pc = after.devices['PC-A'] as PcSession;
     expect(pc.lastPing).toBeNull();
+  });
+});
+
+describe('pcAdapter — scoped DNS and hostname resolution', () => {
+  function dnsLab(): Lab {
+    return {
+      id: 'pc-dns-fixture',
+      title: 'DNS fixture',
+      exam: 'TEST',
+      difficulty: 1,
+      estimatedMinutes: 1,
+      isFree: false,
+      scenario: 'fixture',
+      topology: {
+        devices: [
+          {
+            id: 'PC-A',
+            kind: 'pc',
+            platform: 'Workstation',
+            interfaces: ['Eth0'],
+            pc: {
+              ip: '192.168.1.10',
+              mask: '255.255.255.0',
+              gateway: '192.168.1.1',
+              dnsServers: ['192.168.1.53'],
+              dnsRecords: { 'app.certhead.local': '192.168.2.10' },
+            },
+          },
+          { id: 'R1', kind: 'router', platform: 'ISR4321', interfaces: ['Gi0/0', 'Gi0/1'] },
+          { id: 'R2', kind: 'router', platform: 'ISR4321', interfaces: ['Gi0/0', 'Gi0/1'] },
+          {
+            id: 'PC-B',
+            kind: 'pc',
+            platform: 'Workstation',
+            interfaces: ['Eth0'],
+            pc: { ip: '192.168.2.10', mask: '255.255.255.0', gateway: '192.168.2.1' },
+          },
+        ],
+        links: [
+          { a: { deviceId: 'PC-A', iface: 'Eth0' }, b: { deviceId: 'R1', iface: 'Gi0/1' } },
+          { a: { deviceId: 'R1', iface: 'Gi0/0' }, b: { deviceId: 'R2', iface: 'Gi0/0' } },
+          { a: { deviceId: 'R2', iface: 'Gi0/1' }, b: { deviceId: 'PC-B', iface: 'Eth0' } },
+        ],
+      },
+      objectives: [],
+      hints: [],
+    };
+  }
+
+  function configure(ls: LabSession, id: string, lines: string[]): LabSession {
+    let cur: LabSession = { ...ls, activeDeviceId: id };
+    for (const line of lines) cur = applyToActive(cur, line).session;
+    return cur;
+  }
+
+  function fullyConfigured(): LabSession {
+    let ls = initLabSession(dnsLab());
+    ls = configure(ls, 'R1', [
+      'enable',
+      'configure terminal',
+      'interface gi0/1',
+      'ip address 192.168.1.1 255.255.255.0',
+      'no shutdown',
+      'exit',
+      'interface gi0/0',
+      'ip address 192.168.12.1 255.255.255.252',
+      'no shutdown',
+      'exit',
+      'ip route 192.168.2.0 255.255.255.0 192.168.12.2',
+    ]);
+    ls = configure(ls, 'R2', [
+      'enable',
+      'configure terminal',
+      'interface gi0/0',
+      'ip address 192.168.12.2 255.255.255.252',
+      'no shutdown',
+      'exit',
+      'interface gi0/1',
+      'ip address 192.168.2.1 255.255.255.0',
+      'no shutdown',
+      'exit',
+      'ip route 192.168.1.0 255.255.255.0 192.168.12.1',
+    ]);
+    return ls;
+  }
+
+  function runPc(ls: LabSession, line: string) {
+    return applyToActive({ ...ls, activeDeviceId: 'PC-A' }, line);
+  }
+
+  it('ipconfig /all shows configured DNS servers', () => {
+    const text = runPc(fullyConfigured(), 'ipconfig /all').output.map((o) => o.text).join('\n');
+    expect(text).toMatch(/DNS Servers.*192\.168\.1\.53/);
+  });
+
+  it('nslookup resolves lab-scoped host records', () => {
+    const text = runPc(fullyConfigured(), 'nslookup app.certhead.local').output.map((o) => o.text).join('\n');
+    expect(text).toMatch(/Server:\s+192\.168\.1\.53/);
+    expect(text).toMatch(/Name:\s+app\.certhead\.local/);
+    expect(text).toMatch(/Address:\s+192\.168\.2\.10/);
+    expect(text).not.toMatch(/nslookup isn't part of this lab/);
+  });
+
+  it('ping resolves a hostname through scoped DNS before testing reachability', () => {
+    const result = runPc(fullyConfigured(), 'ping app.certhead.local');
+    const text = result.output.map((o) => o.text).join('\n');
+    expect(text).toMatch(/Pinging app\.certhead\.local \[192\.168\.2\.10\] with 32 bytes of data:/);
+    expect(text).toMatch(/Reply from 192\.168\.2\.10/);
+    expect((result.session.devices['PC-A'] as PcSession).lastPing).toEqual({ target: 'app.certhead.local', ok: true });
+  });
+
+  it('nslookup reports a credible failure for hostnames outside the scoped lab zone', () => {
+    const out = runPc(fullyConfigured(), 'nslookup google.com').output;
+    expect(out.map((o) => o.text).join('\n')).toMatch(/Non-existent domain/);
+    expect(out.map((o) => o.text).join('\n')).toMatch(/google\.com/);
   });
 });
 
@@ -531,15 +763,10 @@ describe('pcAdapter — redirect tier (sensible-but-out-of-scope commands)', () 
   }
 
   it.each([
-    ['nslookup', /nslookup isn't part of this lab/i],
-    ['nslookup google.com', /nslookup isn't part of this lab/i],
-    ['arp -a', /arp isn't part of this lab/i],
     ['netstat -an', /netstat isn't part of this lab/i],
     ['telnet 192.168.2.1', /telnet isn't part of this lab/i],
-    ['ssh admin@192.168.2.1', /ssh isn't part of this lab/i],
     ['ftp 192.168.2.10', /ftp isn't part of this lab/i],
     ['getmac', /getmac isn't part of this lab/i],
-    ['route print', /route isn't part of this lab/i],
     ['nbtstat -n', /nbtstat isn't part of this lab/i],
   ])('`%s` → tailored system message, not a bare error', (line, expected) => {
     const out = pcAdapter.applyCommand(s(), line).output;
@@ -549,9 +776,9 @@ describe('pcAdapter — redirect tier (sensible-but-out-of-scope commands)', () 
   });
 
   it('redirects DO record to history (the command was recognized, just not implemented)', () => {
-    const after = pcAdapter.applyCommand(s(), 'nslookup google.com').session;
-    expect(after.history).toContain('nslookup google.com');
-    expect(after.resolvedHistory).toContain('nslookup google.com');
+    const after = pcAdapter.applyCommand(s(), 'netstat -an').session;
+    expect(after.history).toContain('netstat -an');
+    expect(after.resolvedHistory).toContain('netstat -an');
   });
 
   it('alias collapsing: `traceroute X` records canonical `tracert X` in resolvedHistory', () => {

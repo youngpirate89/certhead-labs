@@ -19,8 +19,12 @@
  * identities for routers whose state did not change, so the LabSession
  * refresh layer can skip a no-op replacement.
  */
-import type { Session, OspfNetwork, OspfNeighborState } from './state';
-import { OSPF_DEFAULT_HELLO_INTERVAL, OSPF_DEFAULT_DEAD_INTERVAL } from './state';
+import type { Session, OspfNetwork, OspfNeighborState, OspfNeighborRole } from './state';
+import {
+  OSPF_DEFAULT_HELLO_INTERVAL,
+  OSPF_DEFAULT_DEAD_INTERVAL,
+  ospfNetworkType,
+} from './state';
 import type { Link } from '@/engine/types';
 import { ipInSubnet, networkAddress, type Route } from './routing';
 
@@ -111,15 +115,37 @@ export function recomputeOspf(
     const aRid = aSession.device.ospf.routerId ?? a.ip;
     const bRid = bSession.device.ospf.routerId ?? b.ip;
 
+    // DR/BDR election. On a broadcast (Ethernet) segment IOS elects a DR and a
+    // BDR; on a point-to-point link it does not. We don't model OSPF priority
+    // (default 1 everywhere, so it never breaks the tie), so the election
+    // reduces to the router-id tiebreak: highest RID is DR, the other is BDR.
+    // Deterministic — the same topology always elects the same DR (guardrail
+    // #8). Roles are stored from each router's POV as the NEIGHBOR's role, so
+    // `show ip ospf neighbor` renders FULL/DR or FULL/BDR. [CONFIRMED-BY-SOURCE:
+    // networklessons "OSPF DR/BDR Election"; study-ccna — highest priority then
+    // highest router-id wins.]
+    let aRoleSeenByB: OspfNeighborRole | undefined;
+    let bRoleSeenByA: OspfNeighborRole | undefined;
+    if (
+      ospfNetworkType(a.ifaceId) === 'BROADCAST' &&
+      ospfNetworkType(b.ifaceId) === 'BROADCAST'
+    ) {
+      const aIsDr = toInt(aRid) > toInt(bRid);
+      aRoleSeenByB = aIsDr ? 'DR' : 'BDR';
+      bRoleSeenByA = aIsDr ? 'BDR' : 'DR';
+    }
+
     neighborsByDevice.get(a.deviceId)!.set(bRid, {
       state: 'FULL',
       address: b.ip,
       interface: a.ifaceId,
+      role: bRoleSeenByA,
     });
     neighborsByDevice.get(b.deviceId)!.set(aRid, {
       state: 'FULL',
       address: a.ip,
       interface: b.ifaceId,
+      role: aRoleSeenByB,
     });
 
     appendAdvertised(
@@ -138,6 +164,18 @@ export function recomputeOspf(
       bNet,
       b.mask,
     );
+
+    // default-information originate (Lab 21): a router that originates a
+    // default route injects 0.0.0.0/0 into every FULL neighbor as an external
+    // Type-2 route. The neighbor reaches it via the originator's IP on the
+    // shared link. Only the receiver installs it — the originator keeps its
+    // own (static/connected) default, not a self-learned OSPF copy.
+    if (originatesDefault(bSession)) {
+      appendDefault(ospfRoutesByDevice.get(a.deviceId)!, b.ip, a.ifaceId);
+    }
+    if (originatesDefault(aSession)) {
+      appendDefault(ospfRoutesByDevice.get(b.deviceId)!, a.ip, b.ifaceId);
+    }
   }
 
   const result = new Map<string, Session>();
@@ -241,6 +279,37 @@ function appendAdvertised(
   }
 }
 
+/** Whether this router currently originates a default route into OSPF.
+ *  `default-information originate` only advertises when the router actually
+ *  has a default (0.0.0.0/0) in its own RIB — modeled here as a static
+ *  default (the lab seeds one toward the ISP). The `always` keyword lifts
+ *  that condition and advertises unconditionally. [CONFIRMED-BY-SOURCE: Cisco
+ *  IOS "Configuring OSPF" — without `always`, the router originates the
+ *  default only if it has a default route; `always` removes that check.] */
+function originatesDefault(s: Session): boolean {
+  if (!s.device.ospf.defaultInfoOriginate) return false;
+  if (s.device.ospf.defaultInfoAlways) return true;
+  return s.staticRoutes.some((r) => r.prefix === '0.0.0.0' && r.mask === '0.0.0.0');
+}
+
+/** Push a 0.0.0.0/0 external default into `into`, reached via `nextHopIp` on
+ *  `egressIfaceId`. AD 110 / metric 1 is the IOS default for an
+ *  `O*E2` route from `default-information originate`. Deduped — a router with
+ *  more than one adjacency to the originator installs a single default. */
+function appendDefault(into: Route[], nextHopIp: string, egressIfaceId: string): void {
+  if (into.some((r) => r.prefix === '0.0.0.0' && r.mask === '0.0.0.0')) return;
+  into.push({
+    prefix: '0.0.0.0',
+    mask: '0.0.0.0',
+    nextHop: nextHopIp,
+    egressIface: egressIfaceId,
+    source: 'ospf',
+    adminDistance: 110,
+    metric: 1,
+    ospfExternal: true,
+  });
+}
+
 function neighborsEqual(
   a: ReadonlyMap<string, OspfNeighborState>,
   b: ReadonlyMap<string, OspfNeighborState>,
@@ -249,7 +318,12 @@ function neighborsEqual(
   for (const [k, va] of a) {
     const vb = b.get(k);
     if (!vb) return false;
-    if (vb.state !== va.state || vb.address !== va.address || vb.interface !== va.interface) {
+    if (
+      vb.state !== va.state ||
+      vb.address !== va.address ||
+      vb.interface !== va.interface ||
+      vb.role !== va.role
+    ) {
       return false;
     }
   }
@@ -268,7 +342,8 @@ function routesEqual(a: readonly Route[], b: readonly Route[]): boolean {
       x.egressIface !== y.egressIface ||
       x.source !== y.source ||
       x.adminDistance !== y.adminDistance ||
-      x.metric !== y.metric
+      x.metric !== y.metric ||
+      x.ospfExternal !== y.ospfExternal
     ) {
       return false;
     }

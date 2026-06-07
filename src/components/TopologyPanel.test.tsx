@@ -26,6 +26,16 @@ function deviceR2(): DeviceTopologyView {
   };
 }
 
+function windowsWorkstation(id = 'PC-A'): DeviceTopologyView {
+  return {
+    id,
+    kind: 'pc',
+    hostname: id,
+    platform: 'Windows Workstation',
+    interfaces: [{ id: 'Eth0', name: 'Eth0', status: 'admin-down', ip: null, mask: null, adminUp: false, protocolUp: false }],
+  };
+}
+
 /** Reusable two-router fixture for link/LED assertions — R1.Gi0/0 starts UP
  *  with an IP, R2.Gi0/0 is admin-down. Flip R2's status to drive LED tests. */
 function twoRoutersWithLink(opts: { r2Up: boolean }) {
@@ -76,6 +86,39 @@ describe('TopologyPanel', () => {
     );
     expect(screen.getByText('R1')).toBeInTheDocument();
     expect(screen.getByText('R2')).toBeInTheDocument();
+  });
+
+  it('uses a workstation icon and compact badge for Windows workstation PCs', () => {
+    const { container } = render(
+      <TopologyPanel devices={[windowsWorkstation()]} activeDeviceId="PC-A" />,
+    );
+
+    expect(container.querySelector('[data-device-icon-type="workstation"]')).not.toBeNull();
+    expect(container.querySelector('[data-device-platform-label="WORKSTATION"]')).not.toBeNull();
+    expect(screen.queryByText('WINDOWS WORKSTATION')).not.toBeInTheDocument();
+  });
+
+  it('renders passive WAN cloud decorations without creating console targets', () => {
+    const { container } = render(
+      <TopologyPanel
+        devices={[deviceR1(), deviceR2()]}
+        activeDeviceId="R1"
+        decorations={[
+          {
+            id: 'ISP-CLOUD',
+            kind: 'wan-cloud',
+            label: 'ISP Cloud',
+            variant: 'isp',
+            position: { x: 420, y: -90 },
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('ISP Cloud')).toBeInTheDocument();
+    expect(container.querySelector('[data-topology-decoration-kind="wan-cloud"]')).not.toBeNull();
+    expect(container.querySelector('[data-topology-decoration-variant="isp"]')).not.toBeNull();
+    expect(screen.queryByLabelText('Console for ISP-CLOUD')).not.toBeInTheDocument();
   });
 
   it('marks the active device with aria-pressed and leaves others not pressed', () => {

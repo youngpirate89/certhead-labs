@@ -73,6 +73,19 @@ export interface LabSolution {
   readonly steps: readonly SolutionStep[];
 }
 
+export type TopologyDecorationKind = 'wan-cloud';
+export type TopologyDecorationVariant = 'wan' | 'isp' | 'internet' | 'provider';
+
+/** Visual-only topology object. Decorations are passive diagram affordances:
+ *  no adapter, no session, no console, no command surface, and no grading role. */
+export interface TopologyDecoration {
+  readonly id: string;
+  readonly kind: TopologyDecorationKind;
+  readonly label: string;
+  readonly variant?: TopologyDecorationVariant;
+  readonly position: { readonly x: number; readonly y: number };
+}
+
 export interface LabDevice {
   readonly id: string;
   /** Device kind — selects the adapter (router/switch/pc). */
@@ -84,13 +97,16 @@ export interface LabDevice {
    *  are surfaced; routers/switches always render their kind's icon. Use
    *  this when a lab needs a PC-shaped node to render as a rack-unit
    *  server (e.g., Lab 12's BLOCK-ICMP target). */
-  readonly deviceClass?: 'workstation' | 'server';
+  readonly deviceClass?: 'workstation' | 'server' | 'access-point' | 'wireless-client';
   readonly interfaces: readonly string[];
   /** PC-only initial state. Routers/switches ignore this. */
   readonly pc?: {
     readonly ip?: string;
     readonly mask?: string;
     readonly gateway?: string;
+    /** Optional workstation DNS config for scoped name-resolution labs. */
+    readonly dnsServers?: readonly string[];
+    readonly dnsRecords?: Readonly<Record<string, string>>;
     /** Lab 10: this PC starts with no static IP and pulls its addressing
      *  from the connected router's DHCP server. `ip`/`mask`/`gateway`
      *  are ignored when `dhcp` is true — the values come from the matching
@@ -131,7 +147,11 @@ export interface Lab {
   /** Real-world framing shown on the lab brief screen before the terminal —
    *  one or two short paragraphs that explain WHY a tech would do this. */
   readonly scenario: string;
-  readonly topology: { devices: readonly LabDevice[]; links: readonly Link[] };
+  readonly topology: {
+    readonly devices: readonly LabDevice[];
+    readonly links: readonly Link[];
+    readonly decorations?: readonly TopologyDecoration[];
+  };
   /** Per-device IOS commands run through applyCommand at session init,
    *  BEFORE the learner gets control. Used to pre-configure a starting
    *  state (e.g. troubleshooting labs that start partly broken).

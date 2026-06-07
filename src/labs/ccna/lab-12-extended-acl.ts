@@ -204,7 +204,7 @@ export const lab12ExtendedAcl: Lab = {
         commands: [
           'interface GigabitEthernet0/0',
           ' ip access-group BLOCK-ICMP in',
-          'exit',
+          'end',
         ],
       },
       {

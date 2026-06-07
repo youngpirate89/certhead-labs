@@ -200,6 +200,15 @@ describe('Lab 12 — objective: verify', () => {
 });
 
 describe('Lab 12 — full solution', () => {
+  it('published solution exits config mode before show access-lists', () => {
+    const verifyStepIndex = lab12ExtendedAcl.solution?.steps.findIndex((step) =>
+      step.commands.includes('show access-lists'),
+    );
+    expect(verifyStepIndex).toBeGreaterThan(0);
+    const previousStep = lab12ExtendedAcl.solution?.steps[verifyStepIndex! - 1];
+    expect(previousStep?.commands.at(-1)).toBe('end');
+  });
+
   it('all 6 objectives pass after the full solution sequence', () => {
     const ls = applyFullSolution(initLabSession(lab12ExtendedAcl));
     expect(checkAll(ls)).toEqual([true, true, true, true, true, true]);

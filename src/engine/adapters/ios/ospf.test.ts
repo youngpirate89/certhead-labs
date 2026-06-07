@@ -664,7 +664,7 @@ describe('OSPF — show ip ospf interface', () => {
 });
 
 describe('OSPF — show ip ospf neighbor output', () => {
-  it('renders FULL/  - for a P2P neighbor and the iface long-form', () => {
+  it('renders FULL/DR for the elected broadcast neighbor and the iface long-form', () => {
     let ls = initLabSession(twoRouterLink());
     ls = runOn(ls, 'R1', [
       'enable',
@@ -682,7 +682,9 @@ describe('OSPF — show ip ospf neighbor output', () => {
     ]);
     const { lastOutput } = runOnWithOutput(ls, 'R1', ['enable', 'show ip ospf neighbor']);
     expect(lastOutput).toMatch(/Neighbor ID\s+Pri\s+State\s+Dead Time\s+Address\s+Interface/);
-    expect(lastOutput).toMatch(/FULL\/ {2}-/);
+    // R2's router-id (192.168.2.1) is higher than R1's (192.168.1.1), so R2 is
+    // the DR on the broadcast WAN segment — R1 sees the neighbor as FULL/DR.
+    expect(lastOutput).toMatch(/FULL\/DR/);
     expect(lastOutput).toMatch(/10\.0\.0\.2\s+GigabitEthernet0\/2/);
   });
 
@@ -693,5 +695,138 @@ describe('OSPF — show ip ospf neighbor output', () => {
     // tshoot) keys its learner's diagnosis off seeing the empty header.
     expect(lastOutput).toMatch(/Neighbor ID\s+Pri\s+State\s+Dead Time\s+Address\s+Interface/);
     expect(lastOutput).not.toMatch(/FULL/);
+  });
+});
+
+describe('OSPF — default-information originate (Lab 21)', () => {
+  // Both routers up + adjacent in area 0. R1 is the would-be originator.
+  function bothAdjacent(): LabSession {
+    let ls = initLabSession(twoRouterLink());
+    ls = runOn(ls, 'R1', [
+      'enable',
+      'configure terminal',
+      'router ospf 1',
+      'network 10.0.0.0 0.0.0.3 area 0',
+      'network 192.168.1.0 0.0.0.255 area 0',
+    ]);
+    ls = runOn(ls, 'R2', [
+      'enable',
+      'configure terminal',
+      'router ospf 1',
+      'network 10.0.0.0 0.0.0.3 area 0',
+      'network 192.168.2.0 0.0.0.255 area 0',
+    ]);
+    return ls;
+  }
+
+  function hasDefault(ls: LabSession, id: string): boolean {
+    const r = asRouter(ls.devices[id]);
+    return r.ospfRoutes.some((rt) => rt.prefix === '0.0.0.0' && rt.mask === '0.0.0.0');
+  }
+
+  it('`default-information originate` stores the flag in config-router', () => {
+    let s = configRouter(fresh2iface());
+    s = applyCommand(s, 'router ospf 1').session;
+    s = applyCommand(s, 'default-information originate').session;
+    expect(s.device.ospf.defaultInfoOriginate).toBe(true);
+    expect(s.device.ospf.defaultInfoAlways).toBe(false);
+  });
+
+  it('`default-information originate always` sets both flags', () => {
+    let s = configRouter(fresh2iface());
+    s = applyCommand(s, 'router ospf 1').session;
+    s = applyCommand(s, 'default-information originate always').session;
+    expect(s.device.ospf.defaultInfoOriginate).toBe(true);
+    expect(s.device.ospf.defaultInfoAlways).toBe(true);
+  });
+
+  it('`no default-information originate` clears both flags', () => {
+    let s = configRouter(fresh2iface());
+    s = applyCommand(s, 'router ospf 1').session;
+    s = applyCommand(s, 'default-information originate always').session;
+    s = applyCommand(s, 'no default-information originate').session;
+    expect(s.device.ospf.defaultInfoOriginate).toBe(false);
+    expect(s.device.ospf.defaultInfoAlways).toBe(false);
+  });
+
+  it('originate WITHOUT a default route in the RIB advertises nothing', () => {
+    let ls = bothAdjacent();
+    // R1 has no static default, so default-information originate (no `always`)
+    // must NOT inject a default into R2.
+    ls = runOn(ls, 'R1', [
+      'enable',
+      'configure terminal',
+      'router ospf 1',
+      'default-information originate',
+    ]);
+    expect(hasDefault(ls, 'R2')).toBe(false);
+  });
+
+  it('originate WITH a default route injects an O*E2 default into the neighbor', () => {
+    let ls = bothAdjacent();
+    ls = runOn(ls, 'R1', [
+      'enable',
+      'configure terminal',
+      'ip route 0.0.0.0 0.0.0.0 192.168.1.2',
+      'router ospf 1',
+      'default-information originate',
+    ]);
+    const r2 = asRouter(ls.devices.R2);
+    expect(r2.ospfRoutes).toContainEqual(
+      expect.objectContaining({
+        prefix: '0.0.0.0',
+        mask: '0.0.0.0',
+        nextHop: '10.0.0.1',
+        egressIface: 'Gi0/2',
+        source: 'ospf',
+        adminDistance: 110,
+        metric: 1,
+        ospfExternal: true,
+      }),
+    );
+    // The originator does NOT install a self-learned default.
+    expect(hasDefault(ls, 'R1')).toBe(false);
+  });
+
+  it('the `always` keyword originates the default even with no default route', () => {
+    let ls = bothAdjacent();
+    ls = runOn(ls, 'R1', [
+      'enable',
+      'configure terminal',
+      'router ospf 1',
+      'default-information originate always',
+    ]);
+    expect(hasDefault(ls, 'R2')).toBe(true);
+  });
+
+  it('removing the default route withdraws the originated default (no `always`)', () => {
+    let ls = bothAdjacent();
+    ls = runOn(ls, 'R1', [
+      'enable',
+      'configure terminal',
+      'ip route 0.0.0.0 0.0.0.0 192.168.1.2',
+      'router ospf 1',
+      'default-information originate',
+    ]);
+    expect(hasDefault(ls, 'R2')).toBe(true);
+    // Pull the static default — origination condition no longer holds.
+    ls = runOn(ls, 'R1', [
+      'enable',
+      'configure terminal',
+      'no ip route 0.0.0.0 0.0.0.0 192.168.1.2',
+    ]);
+    expect(hasDefault(ls, 'R2')).toBe(false);
+  });
+
+  it('show running-config emits the default-information originate line', () => {
+    let ls = bothAdjacent();
+    ls = runOn(ls, 'R1', [
+      'enable',
+      'configure terminal',
+      'router ospf 1',
+      'default-information originate',
+    ]);
+    const { lastOutput } = runOnWithOutput(ls, 'R1', ['enable', 'show running-config']);
+    expect(lastOutput).toMatch(/ default-information originate/);
   });
 });

@@ -1,40 +1,48 @@
+import { lazy, Suspense } from 'react';
 import { TryMode } from '@/modes/TryMode';
-import { PilotMode } from '@/modes/PilotMode';
-import { findPilot } from '@/labs/_pilots/registry';
-import { getLabById } from '@/labs/catalog';
+import { resolveDevLabSelection } from '@/routing/devLabSelection';
+
+const DevLabMode = import.meta.env.DEV
+  ? lazy(() => import('@/modes/DevLabMode').then((module) => ({ default: module.DevLabMode })))
+  : null;
+
+const EmbedMode = lazy(() => import('@/modes/EmbedMode').then((module) => ({ default: module.EmbedMode })));
 
 /**
  * Entry point. Default route renders the public free lab (the `/try` surface).
  *
- * Local-only escape hatch (DEV ONLY): `?pilot=<slug>` loads a registered pilot
- * lab in a minimal dev view (no analytics, no marketing CTA, no brief screen).
- * The branch is gated behind `import.meta.env.DEV`; Vite replaces that flag
- * with `false` at build time and tree-shakes the dead branch — including the
- * pilot registry, PilotMode, and every pilot lab they transitively pull in.
- * Production bundles cannot reach `?pilot=…`.
+ * Local-only escape hatches (DEV ONLY):
+ * - `?pilot=<slug>` loads a registered pilot lab.
+ * - `?lab=<id>` loads any catalog lab by id for Pro-lab cold-runs before the
+ *   `/embed` route exists.
  *
- * Local-only escape hatch (DEV ONLY): `?lab=<id>` loads any catalog lab by id
- * through the same minimal `PilotMode` host, so Pro-tier labs can be cold-run
- * locally before the `/embed` route exists. Same tree-shake guarantee: gated
- * behind `import.meta.env.DEV`, and `getLabById`/the catalog are side-effect
- * free, so the branch and its imports drop out of production builds.
+ * Production safety: App has no static imports of `PilotMode`, the pilot
+ * registry, or the full catalog. Those modules live behind a DEV-only dynamic
+ * import so the production `/try` bundle remains free-lab-only.
  *
- * The `/embed` Pro route (JWT auth + postMessage) is Ship Milestone 2, gated
- * on CertHead reaching 300+ paid subscribers — not built yet.
+ * `/embed/:labId?token=...` is the Pro iframe surface. It verifies the
+ * short-lived token with the CertHead API before importing the full catalog.
  */
 export default function App() {
-  if (import.meta.env.DEV && typeof window !== 'undefined') {
-    const params = new URLSearchParams(window.location.search);
+  if (typeof window !== 'undefined' && window.location.pathname.startsWith('/embed/')) {
+    return (
+      <Suspense fallback={null}>
+        <EmbedMode />
+      </Suspense>
+    );
+  }
 
-    const slug = params.get('pilot');
-    const pilot = findPilot(slug);
-    if (pilot) return <PilotMode lab={pilot} />;
+  if (typeof window !== 'undefined' && DevLabMode) {
+    const selection = resolveDevLabSelection(window.location.search, import.meta.env.DEV);
 
-    const labId = params.get('lab');
-    if (labId) {
-      const lab = getLabById(labId);
-      if (lab) return <PilotMode lab={lab} />;
+    if (selection) {
+      return (
+        <Suspense fallback={null}>
+          <DevLabMode pilotSlug={selection.pilotSlug} labId={selection.labId} />
+        </Suspense>
+      );
     }
   }
+
   return <TryMode />;
 }

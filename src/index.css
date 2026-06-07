@@ -26,6 +26,72 @@
   pointer-events: all !important;
 }
 
+/* Lab-wide light mode. Layout owns the theme root; floating terminals stay
+   outside that root so IOS/PC terminal themes remain independently controlled. */
+.lab-theme-light .bg-panel-bg,
+.lab-theme-light .bg-panel-header {
+  background-color: #ffffff !important;
+}
+
+.lab-theme-light .bg-panel-border {
+  background-color: #cbd5e1 !important;
+}
+
+.lab-theme-light .border-panel-border {
+  border-color: #cbd5e1 !important;
+}
+
+.lab-theme-light .text-terminal-fg,
+.lab-theme-light .text-terminal-fg\/80,
+.lab-theme-light .text-terminal-fg\/70 {
+  color: #172033 !important;
+}
+
+.lab-theme-light .text-terminal-dim,
+.lab-theme-light .text-terminal-dim\/70 {
+  color: #64748b !important;
+}
+
+.lab-theme-light .react-flow__pane,
+.lab-theme-light .react-flow__renderer,
+.lab-theme-light .react-flow__viewport {
+  background-color: #eef3f8 !important;
+}
+
+.lab-theme-light .react-flow__background pattern path {
+  stroke: #cbd5e1 !important;
+}
+
+.lab-theme-light .react-flow__node button.group {
+  background: linear-gradient(to bottom, #ffffff, #f8fafc) !important;
+  border-color: #94a3b8 !important;
+  color: #172033 !important;
+}
+
+.lab-theme-light .react-flow__node button.group:hover {
+  border-color: #0f766e !important;
+}
+
+.lab-theme-light .react-flow__node button.group .text-terminal-dim,
+.lab-theme-light .react-flow__node button.group .text-terminal-dim\/70 {
+  color: #64748b !important;
+}
+
+.lab-theme-light button[aria-label="Zoom in"],
+.lab-theme-light button[aria-label="Zoom out"],
+.lab-theme-light button[aria-label="Fit topology to view"] {
+  background-color: #ffffff !important;
+  border-color: #94a3b8 !important;
+  color: #334155 !important;
+}
+
+.lab-theme-light button[aria-label="Zoom in"]:hover,
+.lab-theme-light button[aria-label="Zoom out"]:hover,
+.lab-theme-light button[aria-label="Fit topology to view"]:hover {
+  border-color: #0f766e !important;
+  color: #0f172a !important;
+}
+
 @layer utilities {
   /* Plays once when an objective transitions to met — a brief teal flash that
      fades, plus a slight nudge. Coupled with check-pop on the check icon. */

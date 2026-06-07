@@ -44,6 +44,21 @@ const R1_DEFAULT: readonly string[] = [
 ];
 
 describe('Lab 15 — starting state', () => {
+  it('defines the ISP cloud as a passive visual decoration, not a commandable device', () => {
+    expect(lab15DefaultStaticRoute.topology.decorations).toEqual([
+      expect.objectContaining({
+        id: 'ISP-CLOUD',
+        kind: 'wan-cloud',
+        label: 'ISP Cloud',
+        variant: 'isp',
+      }),
+    ]);
+
+    const lab = fresh();
+    expect(lab.devices['ISP-CLOUD']).toBeUndefined();
+    expect(Object.keys(lab.devices)).toEqual(['PC-A', 'R1', 'R2', 'INET']);
+  });
+
   it('R1 has both interfaces up but no static routes', () => {
     const r1 = router(fresh(), 'R1');
     expect(r1.device.interfaces['Gi0/0'].ip).toBe('192.168.1.1');

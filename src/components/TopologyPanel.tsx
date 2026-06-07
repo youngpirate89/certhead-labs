@@ -40,7 +40,7 @@ import type {
   InterfaceTopologyView,
   InterfaceStatus,
 } from '@/engine/adapters/types';
-import type { Link } from '@/engine/types';
+import type { Link, TopologyDecoration } from '@/engine/types';
 import { maskLength, networkAddress } from '@/engine/adapters/ios/routing';
 import DeviceIcon from './topology/icons/DeviceIcon';
 export type { DeviceTopologyView, InterfaceTopologyView, InterfaceStatus };
@@ -51,6 +51,9 @@ interface TopologyPanelProps {
   readonly onSelectDevice?: (id: string) => void;
   /** Links between device interfaces — drawn as edges in the canvas. */
   readonly links?: readonly Link[];
+  /** Optional visual-only topology objects such as WAN/ISP clouds. These are
+   *  passive decorations: no adapter, no console, no command surface. */
+  readonly decorations?: readonly TopologyDecoration[];
   /** Optional per-device topology positions. When ALL devices in `devices`
    *  have a position entry here, the renderer uses these coordinates verbatim
    *  instead of the default left-to-right row layout — required for non-linear
@@ -86,8 +89,14 @@ interface DeviceNodeData extends Record<string, unknown> {
   portEdges: Map<string, 'left' | 'right' | 'top' | 'bottom'>;
 }
 
+interface DecorationNodeData extends Record<string, unknown> {
+  decoration: TopologyDecoration;
+}
+
 const NODE_WIDTH = 200;
 const NODE_GAP = 120;
+const DECORATION_WIDTH = 160;
+const DECORATION_HEIGHT = 86;
 
 /** Uniform card height across router / switch / workstation. Sized to fit the
  *  tallest current card content (PC: icon + hostname + centered IP + bottom
@@ -195,6 +204,21 @@ function layoutNodes(
       },
     };
   });
+}
+
+function layoutDecorationNodes(
+  decorations: readonly TopologyDecoration[],
+): Node<DecorationNodeData>[] {
+  return decorations.map((decoration) => ({
+    id: decoration.id,
+    type: 'decoration',
+    position: decoration.position,
+    draggable: false,
+    selectable: false,
+    initialWidth: DECORATION_WIDTH,
+    initialHeight: DECORATION_HEIGHT,
+    data: { decoration },
+  }));
 }
 
 // Cable + LED palette. LED colors mirror PortIndicator's "up" (terminal-prompt
@@ -817,6 +841,7 @@ export function TopologyPanel({
   activeDeviceId,
   onSelectDevice,
   links,
+  decorations = [],
   positions,
   zoomOnScroll = true,
 }: TopologyPanelProps) {
@@ -833,9 +858,19 @@ export function TopologyPanel({
     [devices, positions],
   );
 
-  const nodes = useMemo(
+  const deviceNodes = useMemo(
     () => layoutNodes(devices, links ?? [], positionMap, activeDeviceId, handleSelect),
     [devices, links, positionMap, activeDeviceId, handleSelect],
+  );
+
+  const decorationNodes = useMemo(
+    () => layoutDecorationNodes(decorations),
+    [decorations],
+  );
+
+  const nodes = useMemo(
+    () => [...deviceNodes, ...decorationNodes],
+    [deviceNodes, decorationNodes],
   );
 
   // Edges are drawn as an overlay SVG (see EdgeOverlay) inside the React Flow
@@ -870,11 +905,18 @@ export function TopologyPanel({
       if (p.y < minY) minY = p.y;
       if (p.y + NODE_HEIGHT > maxY) maxY = p.y + NODE_HEIGHT;
     }
+    for (const decoration of decorations) {
+      const p = decoration.position;
+      if (p.x < minX) minX = p.x;
+      if (p.x + DECORATION_WIDTH > maxX) maxX = p.x + DECORATION_WIDTH;
+      if (p.y < minY) minY = p.y;
+      if (p.y + DECORATION_HEIGHT > maxY) maxY = p.y + DECORATION_HEIGHT;
+    }
     return {
       contentWidth: Math.max(1, maxX - minX),
       contentHeight: Math.max(1, maxY - minY),
     };
-  }, [devices, positionMap]);
+  }, [devices, decorations, positionMap]);
 
   // Ref handed to CanvasAutoFit — observing this element catches both
   // viewport resizes AND the Layout divider drag (which changes the parent
@@ -967,10 +1009,56 @@ export function TopologyPanel({
   );
 }
 
-const NODE_TYPES = { device: DeviceNode };
+const NODE_TYPES = { device: DeviceNode, decoration: DecorationNode };
+
+function DecorationNode({ data }: NodeProps<Node<DecorationNodeData>>) {
+  const { decoration } = data;
+  const variant = decoration.variant ?? 'wan';
+  return (
+    <div
+      className="pointer-events-none flex flex-col items-center justify-center gap-1 rounded-full border border-sky-300/30 bg-gradient-to-b from-[#172435]/95 to-[#0d1724]/95 px-4 py-3 text-center shadow-[0_10px_24px_rgba(2,8,23,0.35),inset_0_1px_0_rgba(255,255,255,0.08)]"
+      style={{ width: DECORATION_WIDTH, height: DECORATION_HEIGHT }}
+      data-topology-decoration-kind={decoration.kind}
+      data-topology-decoration-variant={variant}
+      aria-label={`${decoration.label} visual decoration`}
+    >
+      <span data-device-icon-type={decoration.kind} aria-hidden>
+        <DeviceIcon type={decoration.kind} size={38} color="#7dd3fc" />
+      </span>
+      <span className="font-sans text-xs font-semibold tracking-tight text-sky-100">
+        {decoration.label}
+      </span>
+      <span className="font-mono text-[8px] uppercase tracking-[0.14em] text-sky-200/60">
+        {variant}
+      </span>
+    </div>
+  );
+}
+
+function deviceIconType(view: DeviceTopologyView): string {
+  // Visual role should come from adapter kind/class, not a free-form platform
+  // marketing string. `Windows Workstation` is a platform label, not an icon
+  // key; passing it through used to fall back to RouterIcon.
+  if (view.deviceClass) return view.deviceClass;
+  if (view.kind === 'pc') return 'workstation';
+  return view.kind;
+}
+
+function platformBadgeLabel(view: DeviceTopologyView): string {
+  // Keep long endpoint platform names from running across the card and
+  // colliding with the centered icon. Routers/switches keep their concrete
+  // platform (`ISR4321`, `C2960`); PCs use their compact visual class.
+  if (view.kind === 'pc') {
+    const label = view.deviceClass ?? 'workstation';
+    return label.replace('-', ' ').toUpperCase();
+  }
+  return view.platform.toUpperCase();
+}
 
 function DeviceNode({ data }: NodeProps<Node<DeviceNodeData>>) {
   const { view, active, onClick, portEdges } = data;
+  const iconType = deviceIconType(view);
+  const badgeLabel = platformBadgeLabel(view);
   // A PC's IP is part of its identity in the topology — students shouldn't
   // need to run `ipconfig` just to see what address their own machine has,
   // any more than they should `show ip int brief` to learn a router LAN
@@ -1030,7 +1118,9 @@ function DeviceNode({ data }: NodeProps<Node<DeviceNodeData>>) {
         }`}
       >
         <div className="flex flex-col items-center gap-0.5">
-          <DeviceIcon type={view.deviceClass ?? view.platform} size={40} color={active ? '#e2e8f0' : '#94a3b8'} />
+          <span data-device-icon-type={iconType} aria-hidden>
+            <DeviceIcon type={iconType} size={40} color={active ? '#e2e8f0' : '#94a3b8'} />
+          </span>
           <span className="font-sans text-sm font-semibold tracking-tight text-terminal-fg">
             {view.hostname}
           </span>
@@ -1043,8 +1133,12 @@ function DeviceNode({ data }: NodeProps<Node<DeviceNodeData>>) {
             </span>
           ) : null}
         </div>
-        <span className="pointer-events-none absolute right-2 top-1.5 font-mono text-[9px] uppercase tracking-[0.08em] text-[#9ca3af]">
-          {view.platform}
+        <span
+          className="pointer-events-none absolute right-2 top-1.5 max-w-[76px] truncate font-mono text-[9px] uppercase tracking-[0.08em] text-[#9ca3af]"
+          data-device-platform-label={badgeLabel}
+          title={view.platform}
+        >
+          {badgeLabel}
         </span>
 
         {unconnectedPorts.length > 0 ? (

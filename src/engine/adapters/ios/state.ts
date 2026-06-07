@@ -23,7 +23,8 @@ export type Mode =
   | 'config-subif'
   | 'config-router'
   | 'config-dhcp'
-  | 'config-ext-nacl';
+  | 'config-ext-nacl'
+  | 'config-line';
 
 /** A single `network <prefix> <wildcard> area <area-id>` statement. */
 export interface OspfNetwork {
@@ -34,6 +35,11 @@ export interface OspfNetwork {
   readonly area: number;
 }
 
+/** The neighbor's role on a broadcast segment, as elected. `undefined` on a
+ *  point-to-point link, where no DR/BDR election runs (the State column then
+ *  renders the IOS `/  -` placeholder). */
+export type OspfNeighborRole = 'DR' | 'BDR' | 'DROTHER';
+
 /** State of one OSPF adjacency from this router's point of view. */
 export interface OspfNeighborState {
   readonly state: 'FULL' | 'INIT' | 'DOWN';
@@ -41,12 +47,24 @@ export interface OspfNeighborState {
   readonly address: string;
   /** Local interface (canonical id, e.g. 'Gi0/2') the adjacency formed on. */
   readonly interface: string;
+  /** The NEIGHBOR's elected role on the segment — drives the `FULL/DR` etc.
+   *  suffix in `show ip ospf neighbor`. Set on broadcast links; undefined on
+   *  point-to-point (renders `/  -`). */
+  readonly role?: OspfNeighborRole;
 }
 
 /** Per-router OSPF state. The neighbor table is keyed by neighbor router-id. */
+export interface Ipv6StaticRoute {
+  readonly prefix: string;
+  readonly nextHop: string;
+  readonly configuredAt: number;
+}
+
 export interface OspfState {
   process: number | null;
   routerId: string | null;
+  /** Manual router-id configured while OSPF is already running; IOS applies it after clear/reload. */
+  pendingRouterId: string | null;
   networks: OspfNetwork[];
   /** Neighbors keyed by neighbor router-id. Kept as a Map so iteration order
    *  is insertion order — show output reads deterministically. */
@@ -59,6 +77,14 @@ export interface OspfState {
    *  insertion-stable (the show-output renderer reads it directly), and
    *  structuredClone handles it without extra plumbing. (Lab 17.) */
   passive: Set<string>;
+  /** `default-information originate` is configured — redistribute a default
+   *  route (0.0.0.0/0) into OSPF, advertised to neighbors as an external
+   *  Type-2 (`O*E2`) route. Without `always` the router only originates the
+   *  default when it actually has one in its own RIB (the IOS condition);
+   *  `defaultInfoAlways` advertises it unconditionally. Both reset on a
+   *  process-id change, like `passive`. (Lab 21.) */
+  defaultInfoOriginate: boolean;
+  defaultInfoAlways: boolean;
 }
 
 /** One ACE in a standard OR extended ACL.
@@ -168,6 +194,10 @@ export interface InterfaceState {
   ip: string | null;
   /** Dotted-quad subnet mask, or null if unassigned. */
   mask: string | null;
+  /** IPv6 unicast addresses configured on the interface, e.g. 2001:db8::1/64.
+   *  Lab 24 keeps IPv6 scoped to addressing/verification only; IPv6 routing
+   *  and neighbor discovery are intentionally out of scope. */
+  ipv6Addresses: string[];
   /** Interface description, or null. */
   description: string | null;
   /** true once `no shutdown` is applied. */
@@ -253,6 +283,53 @@ export interface SubInterface {
   protocolUp: boolean;
 }
 
+export interface SecurityUser {
+  readonly username: string;
+  readonly secret: string;
+}
+
+export interface SecurityState {
+  domainName: string | null;
+  enableSecret: string | null;
+  users: Map<string, SecurityUser>;
+  cryptoKeyModulus: number | null;
+  vtyLoginLocal: boolean;
+  vtyTransportInput: 'all' | 'ssh' | 'telnet' | 'none';
+  /** Standard ACL applied inbound to VTY lines with `access-class <acl> in`. */
+  vtyAccessClassIn: number | null;
+  motdBanner: string | null;
+}
+
+export interface NtpServer {
+  readonly server: string;
+  readonly configuredAt: number;
+}
+
+export interface NtpState {
+  servers: Map<string, NtpServer>;
+}
+
+export type SyslogTrapLevel =
+  | 'emergencies'
+  | 'alerts'
+  | 'critical'
+  | 'errors'
+  | 'warnings'
+  | 'notifications'
+  | 'informational'
+  | 'debugging';
+
+export interface SyslogHost {
+  readonly host: string;
+  readonly configuredAt: number;
+}
+
+export interface SyslogState {
+  hosts: Map<string, SyslogHost>;
+  trapLevel: SyslogTrapLevel | null;
+  serviceTimestampsLogDatetimeMsec: boolean;
+}
+
 export interface DeviceState {
   readonly id: string;
   hostname: string;
@@ -293,6 +370,12 @@ export interface DeviceState {
    *  or connected-PC IPs change. `show ip nat translations` renders this
    *  map verbatim. */
   natTranslations: Map<string, NatTranslation>;
+  /** Scoped management-plane hardening state for SSH/device-hardening labs. */
+  security: SecurityState;
+  /** Scoped NTP client state for management-services labs. */
+  ntp: NtpState;
+  /** Scoped syslog client state for management-services labs. */
+  syslog: SyslogState;
 }
 
 export interface Session {
@@ -312,6 +395,8 @@ export interface Session {
    *  Null outside config-ext-nacl — symmetric with the other "active object"
    *  fields above. `permit`/`deny`/`no <seq>` lines mutate this ACL. */
   activeAcl: string | null;
+  /** Active line configuration context. Lab 26 only models VTY 0 4. */
+  activeLine: 'vty' | null;
   /** Monotonic engine-seq stamp updated each time the learner runs `show
    *  access-lists` AND at least one ACL is defined. Lab 12's verify-style
    *  objective compares this against 0 to require the show command to have
@@ -361,6 +446,21 @@ export interface Session {
    *  state at query time via {@link routingTable}. Insertion order is preserved
    *  for the §5 deterministic tiebreak. */
   staticRoutes: Route[];
+  /** Scoped IPv6 static routes entered via `ipv6 route <prefix> <next-hop>`.
+   *  Lab 25 intentionally stores route intent and verification state only; it
+   *  does not add full IPv6 packet forwarding/NDP simulation. */
+  ipv6StaticRoutes: Ipv6StaticRoute[];
+  /** Monotonic stamp updated when `show ipv6 route` is run after at least one
+   *  IPv6 static route exists. Verify objectives compare this to route stamps. */
+  lastShowIpv6Route: number;
+  /** Monotonic stamp updated when `show running-config` is run after SSH hardening or management services exist. */
+  lastShowRunningConfig: number;
+  /** Monotonic stamp updated when `show ntp status` is run after at least one NTP server exists. */
+  lastShowNtpStatus: number;
+  /** Monotonic stamp updated when `show ntp associations` is run after at least one NTP server exists. */
+  lastShowNtpAssociations: number;
+  /** Monotonic stamp updated when `show logging` is run after syslog configuration exists. */
+  lastShowLogging: number;
   /** OSPF-learned routes (source:'ospf', adminDistance:110). Rewritten by the
    *  LabSession's OSPF recompute pass after any topology / config change.
    *  Insertion order matches the order in which adjacencies discovered their
@@ -371,6 +471,7 @@ export interface Session {
 const FULL_NAMES: Record<string, string> = {
   Gi: 'GigabitEthernet',
   Fa: 'FastEthernet',
+  Lo: 'Loopback',
 };
 
 /**
@@ -381,6 +482,8 @@ const FULL_NAMES: Record<string, string> = {
  * Returns null if the token is not a recognised interface spec.
  */
 export function normaliseInterface(token: string): string | null {
+  const loop = /^(loopback|lo)(\d+)$/i.exec(token);
+  if (loop) return `Lo${loop[2]}`;
   const m = /^(gigabitethernet|gig|gi|g|fastethernet|fa|f)(\d+\/\d+(?:\/\d+)?)(\.\d+)?$/i.exec(
     token,
   );
@@ -422,10 +525,36 @@ export function fullInterfaceName(id: string): string {
   return `${FULL_NAMES[m[1]] ?? m[1]}${m[2]}`;
 }
 
+/** Default OSPF network type for an interface, keyed off its hardware type.
+ *  Ethernet (GigabitEthernet/FastEthernet, i.e. `Gi`/`Fa` ids) defaults to
+ *  BROADCAST — a DR/BDR election runs on the segment. Serial would default to
+ *  POINT_TO_POINT, but no serial interfaces are modeled today, so every OSPF
+ *  segment we ship is broadcast. [CONFIRMED-BY-SOURCE: Cisco "What Does the
+ *  show ip ospf interface Command Reveal" (13689-17); networklessons "OSPF
+ *  Network Types" — Ethernet defaults to broadcast.] */
+export function ospfNetworkType(id: string): 'BROADCAST' | 'POINT_TO_POINT' {
+  return /^(Gi|Fa)/.test(id) ? 'BROADCAST' : 'POINT_TO_POINT';
+}
+
 const QUAD = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
 
 export function isValidIpv4(value: string): boolean {
   return QUAD.test(value);
+}
+
+export function isValidIpv6Prefix(value: string): boolean {
+  const slash = value.lastIndexOf('/');
+  if (slash <= 0) return false;
+  const address = value.slice(0, slash);
+  const prefixText = value.slice(slash + 1);
+  const prefix = Number.parseInt(prefixText, 10);
+  return (
+    String(prefix) === prefixText &&
+    prefix >= 1 &&
+    prefix <= 128 &&
+    address.includes(':') &&
+    /^[0-9a-f:]+$/i.test(address)
+  );
 }
 
 /** Common valid contiguous IPv4 subnet masks. */
@@ -453,6 +582,8 @@ const VALID_MASKS = new Set([
   '255.255.255.240',
   '255.255.255.248',
   '255.255.255.252',
+  '255.255.255.254',
+  '255.255.255.255',
 ]);
 
 export function isValidMask(value: string): boolean {
@@ -479,6 +610,7 @@ export function createSession(device: DeviceState): Session {
     activeSubIfId: null,
     activeDhcpPool: null,
     activeAcl: null,
+    activeLine: null,
     lastShowIpIntBrief: 0,
     lastShowDhcpBinding: 0,
     lastShowNatTranslations: 0,
@@ -489,6 +621,12 @@ export function createSession(device: DeviceState): Session {
     history: [],
     resolvedHistory: [],
     staticRoutes: [],
+    ipv6StaticRoutes: [],
+    lastShowIpv6Route: 0,
+    lastShowRunningConfig: 0,
+    lastShowNtpStatus: 0,
+    lastShowNtpAssociations: 0,
+    lastShowLogging: 0,
     ospfRoutes: [],
   };
 }
@@ -530,6 +668,7 @@ export function buildDevice(spec: {
       name: fullInterfaceName(id),
       ip: null,
       mask: null,
+      ipv6Addresses: [],
       description: null,
       adminUp: false,
       // Defaults true; the lab-session refresh pass overrides this to false
@@ -548,37 +687,80 @@ export function buildDevice(spec: {
     // No subinterfaces on a freshly-booted router — they're created lazily
     // by `interface gi0/0.<n>` from config mode.
     subInterfaces: {},
-    ospf: { process: null, routerId: null, networks: [], neighbors: new Map(), passive: new Set() },
+    ospf: {
+      process: null,
+      routerId: null,
+      pendingRouterId: null,
+      networks: [],
+      neighbors: new Map(),
+      passive: new Set(),
+      defaultInfoOriginate: false,
+      defaultInfoAlways: false,
+    },
     acls: new Map(),
     dhcpPools: new Map(),
     dhcpExcluded: [],
     dhcpBindings: new Map(),
     natStatements: [],
     natTranslations: new Map(),
+    security: {
+      domainName: null,
+      enableSecret: null,
+      users: new Map(),
+      cryptoKeyModulus: null,
+      vtyLoginLocal: false,
+      vtyTransportInput: 'all',
+      vtyAccessClassIn: null,
+      motdBanner: null,
+    },
+    ntp: {
+      servers: new Map(),
+    },
+    syslog: {
+      hosts: new Map(),
+      trapLevel: null,
+      serviceTimestampsLogDatetimeMsec: false,
+    },
   };
 }
 
 /**
- * Derive the OSPF router-id: highest interface IP (loopbacks would win in
- * real IOS but the engine doesn't model them, so this is the
- * highest-IP-across-all-up-or-down interfaces rule). Returns null if no
- * interface has an IP — process is created but adjacency cannot form.
+ * Derive the OSPF router-id: highest loopback IP wins, then highest non-loopback
+ * interface IP. Returns null if no interface has an IP — process is created but
+ * adjacency cannot form.
  */
 export function deriveRouterId(device: DeviceState): string | null {
-  let best: string | null = null;
-  let bestVal = -1;
-  for (const i of Object.values(device.interfaces)) {
-    if (!i.ip) continue;
-    const parts = i.ip.split('.').map(Number);
-    const n = ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
-    if (n > bestVal) {
-      bestVal = n;
-      best = i.ip;
+  const chooseHighest = (ifaces: InterfaceState[]): string | null => {
+    let best: string | null = null;
+    let bestVal = -1;
+    for (const i of ifaces) {
+      if (!i.ip) continue;
+      const parts = i.ip.split('.').map(Number);
+      const n = ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
+      if (n > bestVal) {
+        bestVal = n;
+        best = i.ip;
+      }
     }
-  }
-  return best;
+    return best;
+  };
+  const all = Object.values(device.interfaces);
+  return chooseHighest(all.filter((i) => i.id.startsWith('Lo'))) ?? chooseHighest(all);
 }
 
+export function createLoopbackInterface(id: string): InterfaceState {
+  return {
+    id,
+    name: fullInterfaceName(id),
+    ip: null,
+    mask: null,
+    ipv6Addresses: [],
+    description: null,
+    adminUp: true,
+    protocolUp: true,
+    accessGroups: { in: null, out: null },
+  };
+}
 /** The prompt string for the current mode, e.g. `R1(config-if)#`. */
 export function prompt(session: Session): string {
   const h = session.device.hostname;
@@ -599,5 +781,7 @@ export function prompt(session: Session): string {
       return `${h}(config-dhcp)#`;
     case 'config-ext-nacl':
       return `${h}(config-ext-nacl)#`;
+    case 'config-line':
+      return `${h}(config-line)#`;
   }
 }
