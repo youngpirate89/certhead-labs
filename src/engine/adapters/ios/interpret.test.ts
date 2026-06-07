@@ -198,6 +198,39 @@ describe('IOS interpreter — resolution errors and show', () => {
     ]);
     expect(s.device.ospf.routerId).toBe('10.255.31.1');
   });
+
+  it('defers an active OSPF router-id change until clear ip ospf process applies it', () => {
+    let s = run(fresh(), [
+      'enable',
+      'configure terminal',
+      'interface gi0/0',
+      'ip address 172.16.31.1 255.255.255.252',
+      'no shutdown',
+      'exit',
+      'router ospf 1',
+    ]);
+    expect(s.device.ospf.routerId).toBe('172.16.31.1');
+
+    const deferred = applyCommand(s, 'router-id 10.255.31.1');
+    expect(deferred.output.map((o) => o.text)).toEqual([
+      '% OSPF: Router-id changes will not take effect until the process is restarted.',
+      '% Use "clear ip ospf process" or reload to apply the new router-id.',
+    ]);
+    s = deferred.session;
+    expect(s.device.ospf.routerId).toBe('172.16.31.1');
+    expect(s.device.ospf.pendingRouterId).toBe('10.255.31.1');
+
+    s = applyCommand(s, 'end').session;
+    const cleared = applyCommand(s, 'clear ip ospf process');
+    expect(cleared.output.map((o) => o.text)).toEqual(['Reset ALL OSPF processes? [no]: yes']);
+    expect(cleared.session.device.ospf.routerId).toBe('10.255.31.1');
+    expect(cleared.session.device.ospf.pendingRouterId).toBeNull();
+  });
+
+  it('returns a clear error when clearing OSPF before the process exists', () => {
+    const out = applyCommand(applyCommand(fresh(), 'enable').session, 'clear ip ospf process').output;
+    expect(out.map((o) => o.text)).toEqual(['% OSPF process not running.']);
+  });
 });
 
 describe('IOS interpreter — `show interfaces <iface>`', () => {

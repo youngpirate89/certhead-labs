@@ -40,6 +40,7 @@ function applySolution(ls: LabSession): LabSession {
     'router-id 10.255.31.1',
     'network 10.255.31.1 0.0.0.0 area 0',
     'end',
+    'clear ip ospf process',
   ]);
   cur = runOn(cur, 'R2', [
     'enable',
@@ -51,6 +52,7 @@ function applySolution(ls: LabSession): LabSession {
     'router-id 10.255.31.2',
     'network 10.255.31.2 0.0.0.0 area 0',
     'end',
+    'clear ip ospf process',
   ]);
   cur = runOn(cur, 'R1', ['show ip ospf neighbor', 'show ip route', 'ping 10.255.31.2']);
   cur = runOn(cur, 'R2', ['show ip ospf neighbor', 'show ip route', 'ping 10.255.31.1']);
@@ -67,6 +69,34 @@ describe('Lab 31 - Loopback OSPF Router ID', () => {
     expect(r1.device.interfaces.Lo0).toBeUndefined();
     expect(r2.device.interfaces.Lo0).toBeUndefined();
     expect(checkAll(ls)).toEqual([false, false, false, false]);
+  });
+
+  it('defers an OSPF router-id change until the OSPF process is cleared', () => {
+    let ls = initLabSession(lab31LoopbackOspfRouterId);
+    const before = ls.devices.R1;
+    if (before.kind !== 'router') throw new Error('not router');
+    expect(before.device.ospf.routerId).toBe('172.16.31.1');
+
+    ls = runOn(ls, 'R1', [
+      'enable',
+      'configure terminal',
+      'interface loopback0',
+      'ip address 10.255.31.1 255.255.255.255',
+      'exit',
+      'router ospf 1',
+      'router-id 10.255.31.1',
+      'end',
+    ]);
+    const pending = ls.devices.R1;
+    if (pending.kind !== 'router') throw new Error('not router');
+    expect(pending.device.ospf.routerId).toBe('172.16.31.1');
+    expect(showOn(ls, 'R1', 'show ip ospf')).toMatch(/Routing Process "ospf 1" with ID 172\.16\.31\.1/);
+
+    ls = runOn(ls, 'R1', ['clear ip ospf process']);
+    const cleared = ls.devices.R1;
+    if (cleared.kind !== 'router') throw new Error('not router');
+    expect(cleared.device.ospf.routerId).toBe('10.255.31.1');
+    expect(showOn(ls, 'R1', 'show ip ospf')).toMatch(/Routing Process "ospf 1" with ID 10\.255\.31\.1/);
   });
 
   it('configures loopbacks, stable router IDs, OSPF advertisements, and reachability', () => {

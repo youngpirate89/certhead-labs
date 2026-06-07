@@ -134,6 +134,10 @@ const privMode: CommandNode = {
       argument: arg('target', done('Ping the destination')),
     },
     show: showSubtree,
+    clear: {
+      help: 'Reset functions',
+      children: { ip: { children: { ospf: { children: { process: done('Clear OSPF process') } } } } },
+    },
     write: { terminal: true, help: 'Write running config to memory', children: { memory: done('Write to memory') } },
   },
 };

@@ -707,7 +707,7 @@ function setSwitchportAdmin(s: SwitchSession, up: boolean): ApplyResult {
     port.portSecurity.violation = true;
     port.portSecurity.lastSourceAddress = port.portSecurity.lastSourceAddress ?? '00aa.bbbb.cccc';
   }
-  if (!up && port.bpduGuard) {
+  if (!up && port.bpduGuard && port.adminUp) {
     port.bpduGuardViolation = true;
     port.errDisabled = true;
   }
@@ -716,7 +716,10 @@ function setSwitchportAdmin(s: SwitchSession, up: boolean): ApplyResult {
     return { session: s, output: [] };
   }
   if (up && port.errDisabled) {
-    return { session: s, output: [] };
+    if (port.bpduGuardViolation) {
+      return { session: s, output: [] };
+    }
+    port.errDisabled = false;
   }
   port.adminUp = up;
   if (up && changed) {
@@ -748,7 +751,6 @@ function negate(
       if (port && command[2] === 'bpduguard' && command[3] === 'enable') {
         port.bpduGuard = false;
         port.bpduGuardViolation = false;
-        port.errDisabled = false;
         return { session: s, output: [] };
       }
       if (port && command[2] === 'portfast') {

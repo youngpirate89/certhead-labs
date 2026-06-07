@@ -39,6 +39,16 @@ function applyFix(ls: LabSession): LabSession {
   ]);
 }
 
+function applyBroaderValidFix(ls: LabSession): LabSession {
+  return runOn(ls, 'R2', [
+    'enable',
+    'configure terminal',
+    'router ospf 1',
+    'network 10.255.32.0 0.0.0.255 area 0',
+    'end',
+  ]);
+}
+
 function applyFullSolution(ls: LabSession): LabSession {
   let cur = runOn(ls, 'R1', ['enable', 'show ip ospf neighbor', 'show ip route', 'ping 10.255.32.2']);
   cur = applyFix(cur);
@@ -79,6 +89,29 @@ describe('Lab 32 - Troubleshoot loopback missing from OSPF', () => {
       source: 'ospf',
     }));
     expect(canReach(ls, 'R1', '10.255.32.2').ok).toBe(true);
+  });
+
+  it('accepts a broader valid OSPF network statement when it advertises the missing loopback route', () => {
+    let cur = runOn(initLabSession(lab32TshootLoopbackNotAdvertised), 'R1', [
+      'enable',
+      'show ip ospf neighbor',
+      'show ip route',
+      'ping 10.255.32.2',
+    ]);
+    cur = applyBroaderValidFix(cur);
+    cur = runOn(cur, 'R1', ['show ip route', 'ping 10.255.32.2']);
+
+    const r1 = cur.devices.R1;
+    if (r1.kind !== 'router') throw new Error('not router');
+    expect(r1.ospfRoutes).toContainEqual(expect.objectContaining({
+      prefix: '10.255.32.2',
+      mask: '255.255.255.255',
+      nextHop: '172.16.32.2',
+      egressIface: 'Gi0/0',
+      source: 'ospf',
+    }));
+    expect(canReach(cur, 'R1', '10.255.32.2').ok).toBe(true);
+    expect(checkAll(cur)).toEqual([true, true, true, true]);
   });
 
   it('requires diagnose, repair, and post-fix verification to complete all objectives', () => {

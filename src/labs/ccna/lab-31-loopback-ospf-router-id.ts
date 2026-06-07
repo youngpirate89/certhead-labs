@@ -9,7 +9,7 @@ export const lab31LoopbackOspfRouterId: Lab = {
   estimatedMinutes: 15,
   isFree: false,
   scenario:
-    'HQ has two routers already exchanging OSPF routes over a transit link. Configure Loopback0 on each router as a stable management identity, set each OSPF router ID to the loopback address, advertise both loopbacks into area 0, then verify OSPF and loopback reachability.\n\nLoopbacks are logical interfaces. They stay up as long as the router is running, which makes them useful for management reachability and stable protocol identifiers.',
+    'HQ has two routers already exchanging OSPF routes over a transit link. Configure Loopback0 on each router as a stable management identity, set each OSPF router ID to the loopback address, clear the OSPF process so the new router ID takes effect, advertise both loopbacks into area 0, then verify OSPF and loopback reachability.\n\nLoopbacks are logical interfaces. They stay up as long as the router is running, which makes them useful for management reachability and stable protocol identifiers. On IOS, changing an active OSPF router ID requires clearing the OSPF process or reloading before the operational ID changes.',
   topology: {
     devices: [
       { id: 'R1', kind: 'router', platform: 'ISR4321', interfaces: ['Gi0/0'] },
@@ -59,12 +59,14 @@ export const lab31LoopbackOspfRouterId: Lab = {
     },
     {
       id: 'router-ids-set',
-      text: 'Set OSPF router IDs to the loopback addresses on both routers',
-      check: (_state, _history, session) => {
+      text: 'Set OSPF router IDs to the loopback addresses on both routers and clear OSPF so the changes take effect',
+      check: (_state, history, session) => {
         const r1 = session.devices.R1;
         const r2 = session.devices.R2;
         if (r1?.kind !== 'router' || r2?.kind !== 'router') return false;
-        return r1.device.ospf.routerId === '10.255.31.1' && r2.device.ospf.routerId === '10.255.31.2';
+        const r1Cleared = history.R1?.resolved.some((cmd) => cmd === 'clear ip ospf process');
+        const r2Cleared = history.R2?.resolved.some((cmd) => cmd === 'clear ip ospf process');
+        return r1.device.ospf.routerId === '10.255.31.1' && r2.device.ospf.routerId === '10.255.31.2' && Boolean(r1Cleared && r2Cleared);
       },
     },
     {
@@ -103,7 +105,7 @@ export const lab31LoopbackOspfRouterId: Lab = {
     },
     {
       afterSeconds: 180,
-      text: 'Under router ospf 1, use router-id <loopback-ip> and a host wildcard such as network 10.255.31.1 0.0.0.0 area 0.',
+      text: 'Under router ospf 1, use router-id <loopback-ip> and a host wildcard such as network 10.255.31.1 0.0.0.0 area 0. Then use clear ip ospf process from privileged EXEC so the new router ID takes effect.',
     },
     {
       afterSeconds: 300,
@@ -125,6 +127,7 @@ export const lab31LoopbackOspfRouterId: Lab = {
           'router-id 10.255.31.1',
           'network 10.255.31.1 0.0.0.0 area 0',
           'end',
+          'clear ip ospf process',
           'show ip ospf neighbor',
           'show ip route',
           'ping 10.255.31.2',
@@ -143,6 +146,7 @@ export const lab31LoopbackOspfRouterId: Lab = {
           'router-id 10.255.31.2',
           'network 10.255.31.2 0.0.0.0 area 0',
           'end',
+          'clear ip ospf process',
           'show ip ospf neighbor',
           'show ip route',
           'ping 10.255.31.1',

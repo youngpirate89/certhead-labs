@@ -58,6 +58,27 @@ describe('Lab 36 - Troubleshoot BPDU Guard err-disabled access port', () => {
     expect(output).toMatch(/spanning-tree bpduguard enable/);
   });
 
+  it('does not auto-recover err-disable just because the BPDU Guard trigger is removed', () => {
+    const ls = runOn(initLabSession(lab36TshootBpduguardErrdisabled), 'SW1', [
+      'enable',
+      'configure terminal',
+      'interface fa0/5',
+      'no spanning-tree bpduguard enable',
+      'end',
+    ]);
+    const sw1 = ls.devices.SW1;
+    if (sw1.kind !== 'switch') throw new Error('shape');
+
+    expect(sw1.device.switchports['Fa0/5']).toMatchObject({
+      bpduGuard: false,
+      bpduGuardViolation: false,
+      errDisabled: true,
+      adminUp: false,
+    });
+    expect(outputOn(ls, 'SW1', 'show interfaces status')).toMatch(/Fa0\/5\s+err-disabled\s+60/);
+    expect(grade(lab36TshootBpduguardErrdisabled, ls).allMet).toBe(false);
+  });
+
   it('requires diagnosis, disabling the unsafe BPDU Guard condition, shut/no shut recovery, and post-fix verification', () => {
     const ls = applySolution(initLabSession(lab36TshootBpduguardErrdisabled));
     const sw1 = ls.devices.SW1;

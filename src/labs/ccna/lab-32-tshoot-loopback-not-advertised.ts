@@ -86,11 +86,20 @@ export const lab32TshootLoopbackNotAdvertised: Lab = {
         const r1 = session.devices.R1;
         const r2 = session.devices.R2;
         if (r1?.kind !== 'router' || r2?.kind !== 'router') return false;
-        const r2HasNetwork = r2.device.ospf.networks.some(
-          (n) => n.prefix === '10.255.32.2' && n.wildcard === '0.0.0.0' && n.area === 0,
-        );
         const r1LearnsRoute = r1.ospfRoutes.some((r) => r.prefix === '10.255.32.2' && r.mask === '255.255.255.255');
-        return r2HasNetwork && r1LearnsRoute;
+        const r2AdvertisesLoopback = r2.device.ospf.networks.some((n) => {
+          if (n.area !== 0) return false;
+          const [a, b, c, d] = n.prefix.split('.').map(Number);
+          const [wa, wb, wc, wd] = n.wildcard.split('.').map(Number);
+          const [ta, tb, tc, td] = '10.255.32.2'.split('.').map(Number);
+          return (
+            (ta & ~wa) === (a & ~wa) &&
+            (tb & ~wb) === (b & ~wb) &&
+            (tc & ~wc) === (c & ~wc) &&
+            (td & ~wd) === (d & ~wd)
+          );
+        });
+        return r2AdvertisesLoopback && r1LearnsRoute;
       },
     },
     {

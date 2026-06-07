@@ -551,6 +551,10 @@ function dispatch(
     case 'show':
       return show(s, command, args);
 
+    case 'clear':
+      if (command[1] === 'ip' && command[2] === 'ospf' && command[3] === 'process') return clearOspfProcess(s);
+      return { session: s, output: err('% Unknown command.') };
+
     case 'ping':
       return ping(s, args.target, ctx);
 
@@ -1255,6 +1259,7 @@ function enterRouterOspf(s: Session, pidArg: string, ec: ErrCtx): ApplyResult {
   if (s.device.ospf.process !== pid) {
     s.device.ospf.process = pid;
     s.device.ospf.routerId = deriveRouterId(s.device);
+    s.device.ospf.pendingRouterId = null;
     // Changing process id clears any prior network statements + neighbors —
     // real IOS would refuse to start a second process, but for the engine
     // we keep the model simple: only one OSPF process at a time.
@@ -1276,8 +1281,29 @@ function isValidWildcard(value: string): boolean {
 
 function setOspfRouterId(s: Session, routerId: string, ec: ErrCtx): ApplyResult {
   if (!isValidIpv4(routerId)) return { session: s, output: badInput(ec, 'routerId') };
+  if (s.device.ospf.process !== null && s.device.ospf.routerId !== null) {
+    s.device.ospf.pendingRouterId = routerId;
+    return {
+      session: s,
+      output: out(
+        '% OSPF: Router-id changes will not take effect until the process is restarted.',
+        '% Use "clear ip ospf process" or reload to apply the new router-id.',
+      ),
+    };
+  }
   s.device.ospf.routerId = routerId;
+  s.device.ospf.pendingRouterId = null;
   return { session: s, output: [] };
+}
+
+function clearOspfProcess(s: Session): ApplyResult {
+  if (s.device.ospf.process === null) {
+    return { session: s, output: err('% OSPF process not running.') };
+  }
+  s.device.ospf.routerId = s.device.ospf.pendingRouterId ?? deriveRouterId(s.device);
+  s.device.ospf.pendingRouterId = null;
+  s.device.ospf.neighbors = new Map();
+  return { session: s, output: out('Reset ALL OSPF processes? [no]: yes') };
 }
 
 function addOspfNetwork(

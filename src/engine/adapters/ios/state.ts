@@ -63,6 +63,8 @@ export interface Ipv6StaticRoute {
 export interface OspfState {
   process: number | null;
   routerId: string | null;
+  /** Manual router-id configured while OSPF is already running; IOS applies it after clear/reload. */
+  pendingRouterId: string | null;
   networks: OspfNetwork[];
   /** Neighbors keyed by neighbor router-id. Kept as a Map so iteration order
    *  is insertion order — show output reads deterministically. */
@@ -688,6 +690,7 @@ export function buildDevice(spec: {
     ospf: {
       process: null,
       routerId: null,
+      pendingRouterId: null,
       networks: [],
       neighbors: new Map(),
       passive: new Set(),
