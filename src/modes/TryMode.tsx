@@ -95,6 +95,14 @@ export function TryMode() {
       <Layout
         examLabel={lab.exam}
         labTitle={lab.title}
+        scenario={
+          <div>
+            <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-terminal-dim">
+              Scenario
+            </p>
+            <p>{lab.scenario}</p>
+          </div>
+        }
         topology={
           <TopologyPanel
             devices={session.devices}
@@ -120,6 +128,8 @@ export function TryMode() {
             solution={lab.solution}
           />
         }
+        hasHints={lab.hints.length > 0}
+        onMobileReset={briefDismissed ? resetLab : undefined}
         terminal={
           briefDismissed ? (
             <FloatingTerminalPanel

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { Layout } from './Layout';
 
@@ -120,5 +120,61 @@ describe('Layout', () => {
     expect(shell?.getAttribute('data-lab-theme')).toBe('light');
     expect(screen.getByRole('button', { name: /switch to dark theme/i })).toBeInTheDocument();
     expect(shell?.className).toContain('lab-theme-light');
+  });
+
+  it('provides a mobile tab workspace for scenario, topology, terminal, objectives, and hints', () => {
+    const { container } = render(
+      <Layout
+        examLabel="CCNA 200-301"
+        labTitle="Sample lab"
+        scenario={<p>Read the ticket and inspect the devices.</p>}
+        topology={<div data-testid="topology-content">topology here</div>}
+        objectives={<div data-testid="objectives-content">objectives here</div>}
+        terminal={<div data-testid="terminal-content">terminal here</div>}
+        hasHints
+      />,
+    );
+
+    const mobileWorkspace = container.querySelector('[data-region="mobile-workspace"]');
+    expect(mobileWorkspace?.className).toContain('md:hidden');
+
+    for (const name of ['Scenario', 'Topology', 'Terminal', 'Objectives', 'Hints']) {
+      expect(screen.getByRole('tab', { name })).toBeInTheDocument();
+    }
+
+    expect(container.querySelector('[data-mobile-panel="scenario"]')).not.toBeNull();
+    expect(container.querySelector('[data-mobile-panel="topology"]')).not.toBeNull();
+    expect(container.querySelector('[data-mobile-panel="terminal"]')).not.toBeNull();
+    expect(container.querySelector('[data-mobile-panel="objectives"]')).not.toBeNull();
+    expect(container.querySelector('[data-mobile-panel="hints"]')).not.toBeNull();
+  });
+
+  it('keeps mobile verify, reset, and hint actions sticky and wired to the mobile panels', () => {
+    const onReset = vi.fn();
+    const { container } = render(
+      <Layout
+        examLabel="CCNA 200-301"
+        labTitle="Sample lab"
+        scenario={<p>Read the ticket and inspect the devices.</p>}
+        topology={<div data-testid="topology-content">topology here</div>}
+        objectives={<div data-testid="objectives-content">objectives here</div>}
+        terminal={<div data-testid="terminal-content">terminal here</div>}
+        hasHints
+        onMobileReset={onReset}
+      />,
+    );
+
+    const actionBar = container.querySelector('[data-region="mobile-actions"]');
+    expect(actionBar?.className).toContain('sticky');
+    expect(actionBar?.className).toContain('bottom-0');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+    expect(onReset).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
+    expect(screen.getByRole('tab', { name: 'Objectives' })).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hint' }));
+    expect(screen.getByRole('tab', { name: 'Hints' })).toHaveAttribute('aria-selected', 'true');
   });
 });
