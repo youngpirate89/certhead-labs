@@ -83,7 +83,7 @@ export const lab39TshootNatOutsideRole: Lab = {
   objectives: [
     {
       id: 'confirm-client-symptom',
-      text: 'PC-BRANCH: confirm ping 203.0.113.39 fails before the repair.',
+      text: 'PC-BRANCH: run ping 203.0.113.39 to confirm the reported reachability symptom.',
       check: (_state, history) =>
         history['PC-BRANCH']?.raw.some((cmd) => /^ping\s+203\.0\.113\.39$/i.test(cmd)) ?? false,
     },
