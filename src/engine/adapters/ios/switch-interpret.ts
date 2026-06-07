@@ -707,8 +707,15 @@ function setSwitchportAdmin(s: SwitchSession, up: boolean): ApplyResult {
     port.portSecurity.violation = true;
     port.portSecurity.lastSourceAddress = port.portSecurity.lastSourceAddress ?? '00aa.bbbb.cccc';
   }
+  if (!up && port.bpduGuard) {
+    port.bpduGuardViolation = true;
+    port.errDisabled = true;
+  }
   if (up && port.portSecurity?.enabled && port.portSecurity.violation) {
     port.adminUp = false;
+    return { session: s, output: [] };
+  }
+  if (up && port.errDisabled) {
     return { session: s, output: [] };
   }
   port.adminUp = up;
@@ -736,6 +743,20 @@ function negate(
   switch (command[1]) {
     case 'shutdown':
       return setSwitchportAdmin(s, true);
+    case 'spanning-tree': {
+      const port = currentPhysicalSwitchport(s);
+      if (port && command[2] === 'bpduguard' && command[3] === 'enable') {
+        port.bpduGuard = false;
+        port.bpduGuardViolation = false;
+        port.errDisabled = false;
+        return { session: s, output: [] };
+      }
+      if (port && command[2] === 'portfast') {
+        port.stpPortfast = false;
+        return { session: s, output: [] };
+      }
+      return { session: s, output: [] };
+    }
     case 'channel-group': {
       // `no channel-group [<id>]` — remove the port from its EtherChannel
       // group. Clears the membership + LACP mode; the derived `bundled` flag
@@ -853,6 +874,9 @@ function show(
   if (what === 'interfaces') {
     // `show interfaces trunk` — keyword child, NOT a per-iface form.
     if (command[2] === 'status') {
+      if (opts?.record !== false) {
+        s.lastShowInterfacesStatus = snapshotInterfacesStatus(s);
+      }
       return { session: s, output: out(...showInterfacesStatus(s)) };
     }
     if (command[2] === 'trunk') {
@@ -1117,7 +1141,7 @@ function showInterfacesAll(s: SwitchSession): string[] {
 function showInterfacesStatus(s: SwitchSession): string[] {
   const lines = ['Port      Name               Status       Vlan       Duplex  Speed Type'];
   for (const port of Object.values(s.device.switchports)) {
-    const status = !port.adminUp && port.portSecurity?.violation ? 'err-disabled' : port.protocolUp ? 'connected' : 'notconnect';
+    const status = port.errDisabled || (!port.adminUp && port.portSecurity?.violation) ? 'err-disabled' : port.protocolUp ? 'connected' : 'notconnect';
     const vlan = port.mode === 'access' ? String(port.accessVlan) : 'trunk';
     lines.push(
       port.id.padEnd(10) +
@@ -1130,6 +1154,19 @@ function showInterfacesStatus(s: SwitchSession): string[] {
     );
   }
   return lines;
+}
+
+function snapshotInterfacesStatus(s: SwitchSession): SwitchSession['lastShowInterfacesStatus'] {
+  const connectedPortIds: string[] = [];
+  const errDisabledPortIds: string[] = [];
+  for (const port of Object.values(s.device.switchports)) {
+    if (port.errDisabled || (!port.adminUp && port.portSecurity?.violation)) {
+      errDisabledPortIds.push(port.id);
+    } else if (port.protocolUp) {
+      connectedPortIds.push(port.id);
+    }
+  }
+  return { connectedPortIds, errDisabledPortIds };
 }
 
 function showPortSecurityInterface(s: SwitchSession, ifaceToken: string): ApplyResult {

@@ -67,6 +67,10 @@ export interface Switchport {
   stpPortfast: boolean;
   /** Scoped CCNA BPDU Guard setting configured by `spanning-tree bpduguard enable`. */
   bpduGuard: boolean;
+  /** Scoped BPDU Guard err-disable trigger for learner-facing tshoot labs. */
+  bpduGuardViolation: boolean;
+  /** Derived/access-layer shutdown state rendered as err-disabled in show commands. */
+  errDisabled: boolean;
   /** Scoped CCNA port-security model for access-port err-disable labs. */
   portSecurity: PortSecurityState | null;
 }
@@ -135,6 +139,8 @@ export interface SwitchSession {
   lastShowEtherchannelSummary: { bundledGroups: readonly number[] } | null;
   /** Snapshot recorded by `show spanning-tree vlan <id>` at command-eval time. */
   lastShowSpanningTreeVlans: { vlanIds: readonly number[] } | null;
+  /** Snapshot recorded by `show interfaces status` for verify-after-repair gates. */
+  lastShowInterfacesStatus: { connectedPortIds: readonly string[]; errDisabledPortIds: readonly string[] } | null;
 }
 
 /** Reserved VLAN range — token ring/FDDI in real IOS. Creation is rejected
@@ -266,6 +272,8 @@ export function buildSwitchDevice(spec: {
       bundled: false,
       stpPortfast: false,
       bpduGuard: false,
+      bpduGuardViolation: false,
+      errDisabled: false,
       portSecurity: null,
     };
   }
@@ -296,6 +304,7 @@ export function createSwitchSession(device: SwitchDeviceState): SwitchSession {
     lastShowInterfacesTrunk: null,
     lastShowEtherchannelSummary: null,
     lastShowSpanningTreeVlans: null,
+    lastShowInterfacesStatus: null,
   };
 }
 
