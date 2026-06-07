@@ -1172,9 +1172,18 @@ function showSpanningTreeVlan(s: SwitchSession, vlanId: number): string[] {
     lines.push('No interfaces are forwarding for this VLAN.');
     return lines;
   }
-  for (const port of forwardingPorts) {
-    const role = stp.rootRole === 'secondary' && port === forwardingPorts[0] ? 'Root' : 'Desg';
-    lines.push(`${port.id.padEnd(19)} ${role.padEnd(4)} FWD 19        128.1    P2p`);
+  for (const [index, port] of forwardingPorts.entries()) {
+    let role = 'Desg';
+    let status = 'FWD';
+    if (stp.rootRole === 'secondary' && index === 0) {
+      role = 'Root';
+    } else if (stp.rootRole === null && index === 0) {
+      role = 'Root';
+    } else if (stp.rootRole === null && index > 0) {
+      role = 'Altn';
+      status = 'BLK';
+    }
+    lines.push(`${port.id.padEnd(19)} ${role.padEnd(4)} ${status} 19        128.1    P2p`);
   }
   return lines;
 }
