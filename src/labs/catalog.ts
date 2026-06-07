@@ -47,6 +47,7 @@ import { lab31LoopbackOspfRouterId } from './ccna/lab-31-loopback-ospf-router-id
 import { lab32TshootLoopbackNotAdvertised } from './ccna/lab-32-tshoot-loopback-not-advertised';
 import { lab33StpPortRoles } from './ccna/lab-33-stp-port-roles';
 import { lab34TshootStpWrongRoot } from './ccna/lab-34-tshoot-stp-wrong-root';
+import { lab35PortfastBpduguardAccess } from './ccna/lab-35-portfast-bpduguard-access';
 import { tshootReturnRoute } from './ccna/tshoot-return-route';
 import { tshootWrongNextHop } from './ccna/tshoot-wrong-next-hop';
 import { tshootWanSubnetMismatch } from './ccna/tshoot-wan-subnet-mismatch';
@@ -103,6 +104,7 @@ const CATALOG: readonly Lab[] = [
   lab32TshootLoopbackNotAdvertised,
   lab33StpPortRoles,
   lab34TshootStpWrongRoot,
+  lab35PortfastBpduguardAccess,
   tshootReturnRoute,
   tshootWrongNextHop,
   tshootWanSubnetMismatch,

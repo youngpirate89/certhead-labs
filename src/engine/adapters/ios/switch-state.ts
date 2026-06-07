@@ -63,6 +63,10 @@ export interface Switchport {
   lacpMode: LacpMode | null;
   /** Derived state: true when the member is bundled into its Port-channel. */
   bundled: boolean;
+  /** Scoped CCNA STP edge-port setting configured by `spanning-tree portfast`. */
+  stpPortfast: boolean;
+  /** Scoped CCNA BPDU Guard setting configured by `spanning-tree bpduguard enable`. */
+  bpduGuard: boolean;
   /** Scoped CCNA port-security model for access-port err-disable labs. */
   portSecurity: PortSecurityState | null;
 }
@@ -260,6 +264,8 @@ export function buildSwitchDevice(spec: {
       channelGroup: null,
       lacpMode: null,
       bundled: false,
+      stpPortfast: false,
+      bpduGuard: false,
       portSecurity: null,
     };
   }

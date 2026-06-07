@@ -298,10 +298,34 @@ const configIfMode: CommandNode = {
         },
       }),
     },
+    'spanning-tree': {
+      help: 'Configure interface Spanning Tree Protocol',
+      children: {
+        portfast: done('Enable PortFast on this access interface'),
+        bpduguard: {
+          help: 'Configure BPDU Guard on this interface',
+          children: {
+            enable: done('Enable BPDU Guard on this interface'),
+          },
+        },
+      },
+    },
     no: {
       help: 'Negate a command',
       children: {
         shutdown: done('Bring the interface up'),
+        'spanning-tree': {
+          help: 'Reset interface Spanning Tree Protocol settings',
+          children: {
+            portfast: done('Disable PortFast on this interface'),
+            bpduguard: {
+              help: 'Reset BPDU Guard on this interface',
+              children: {
+                enable: done('Disable BPDU Guard on this interface'),
+              },
+            },
+          },
+        },
         'channel-group': {
           help: 'Remove interface from an EtherChannel group',
           argument: arg('id', done('Remove channel-group membership')),

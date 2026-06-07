@@ -42,6 +42,7 @@ const CATALOG_IDS = [
   'ccna-lab32-tshoot-loopback-not-advertised',
   'ccna-lab33-stp-port-roles',
   'ccna-lab34-tshoot-stp-wrong-root',
+  'ccna-lab35-portfast-bpduguard-access',
   'ccna-tshoot-return-route',
   'ccna-tshoot-wrong-next-hop',
   'ccna-tshoot-wan-subnet-mismatch',
@@ -117,18 +118,18 @@ describe('lab catalog — getLabById', () => {
     expect(free[0]?.id).toBe('ccna-l01-interface-ip');
   });
 
-  it('keeps the private catalog contract at 54 total labs with one free public lab', () => {
+  it('keeps the private catalog contract at 55 total labs with one free public lab', () => {
     const labs = CATALOG_IDS.map((id) => getLabById(id));
-    expect(CATALOG_IDS).toHaveLength(54);
+    expect(CATALOG_IDS).toHaveLength(55);
     expect(labs.filter((lab) => lab?.isFree === true)).toHaveLength(1);
-    expect(labs.filter((lab) => lab?.isFree !== true)).toHaveLength(53);
+    expect(labs.filter((lab) => lab?.isFree !== true)).toHaveLength(54);
   });
 
-  it('keeps the private source catalog at exactly 54 labs with one public free lab', () => {
+  it('keeps the private source catalog at exactly 55 labs with one public free lab', () => {
     const labs = getCatalogLabs();
-    expect(labs).toHaveLength(54);
+    expect(labs).toHaveLength(55);
     expect(labs.filter((lab) => lab.isFree === true)).toHaveLength(1);
-    expect(labs.filter((lab) => lab.isFree !== true)).toHaveLength(53);
+    expect(labs.filter((lab) => lab.isFree !== true)).toHaveLength(54);
     expect(labs.find((lab) => lab.isFree === true)?.id).toBe('ccna-l01-interface-ip');
   });
 

@@ -281,6 +281,7 @@ function dispatch(
       return setChannelGroup(s, args.id, command[3] as LacpMode, ec);
 
     case 'spanning-tree':
+      if (s.mode === 'config-if') return setInterfaceSpanningTree(s, command);
       return setSpanningTree(s, command, args, ec);
 
     case 'ip':
@@ -398,6 +399,20 @@ function setChannelGroup(
   return { session: s, output: [] };
 }
 
+
+function setInterfaceSpanningTree(s: SwitchSession, command: string[]): ApplyResult {
+  const port = currentPhysicalSwitchport(s);
+  if (!port) return { session: s, output: [] };
+  if (command[1] === 'portfast') {
+    port.stpPortfast = true;
+    return { session: s, output: [] };
+  }
+  if (command[1] === 'bpduguard' && command[2] === 'enable') {
+    port.bpduGuard = true;
+    return { session: s, output: [] };
+  }
+  return { session: s, output: err('% Incomplete command.') };
+}
 
 function setSpanningTree(
   s: SwitchSession,
@@ -1239,6 +1254,8 @@ function showRunningConfig(s: SwitchSession): string[] {
         lines.push(` switchport trunk native vlan ${port.nativeVlan}`);
       }
     }
+    if (port.stpPortfast) lines.push(' spanning-tree portfast');
+    if (port.bpduGuard) lines.push(' spanning-tree bpduguard enable');
     if (!port.adminUp) lines.push(' shutdown');
     lines.push('!');
   }
@@ -1280,6 +1297,8 @@ function showRunningInterface(s: SwitchSession, ifaceToken: string): CommandOutp
     lines.push(` switchport trunk native vlan ${port.nativeVlan}`);
   }
   if (!port.adminUp) lines.push(' shutdown');
+  if (port.stpPortfast) lines.push(' spanning-tree portfast');
+  if (port.bpduGuard) lines.push(' spanning-tree bpduguard enable');
   lines.push('!');
   lines.push('end');
   return out(...lines);
