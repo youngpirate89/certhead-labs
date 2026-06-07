@@ -9,6 +9,7 @@ import { batchHTicketLabs } from './batch-h';
 import { batchITicketLabs } from './batch-i';
 import { batchJTicketLabs } from './batch-j';
 import { batchKNumberedLabs37To40 } from './batch-k';
+import { batchLNumberedLabs31To36 } from './batch-l';
 import type { LabSmokeCase } from './batch-d';
 
 export type LabSmokeBatch = {
@@ -72,6 +73,11 @@ const batches: Record<string, LabSmokeBatch> = {
     id: 'k',
     name: 'Batch K numbered labs 37–40',
     labs: batchKNumberedLabs37To40,
+  },
+  l: {
+    id: 'l',
+    name: 'Batch L numbered labs 31–36',
+    labs: batchLNumberedLabs31To36,
   },
 };
 

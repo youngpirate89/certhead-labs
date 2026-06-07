@@ -48,6 +48,18 @@ describe('Playwright lab smoke fixtures', () => {
     ]);
   });
 
+  it('includes the Batch L numbered Lab 31 through Lab 36 smoke fixtures', () => {
+    const batch = getAllLabSmokeBatches().find((candidate) => candidate.id === 'l');
+    expect(batch?.labs.map((smokeCase) => smokeCase.id)).toEqual([
+      'ccna-lab31-loopback-ospf-router-id',
+      'ccna-lab32-tshoot-loopback-not-advertised',
+      'ccna-lab33-stp-port-roles',
+      'ccna-lab34-tshoot-stp-wrong-root',
+      'ccna-lab35-portfast-bpduguard-access',
+      'ccna-lab36-tshoot-bpduguard-errdisabled',
+    ]);
+  });
+
   it('fails closed for unknown batches and unknown single-lab selections', () => {
     expect(() => getSelectedLabSmokeBatch('not-real')).toThrow(/Unknown lab smoke batch/);
 
