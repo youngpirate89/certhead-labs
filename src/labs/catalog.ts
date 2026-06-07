@@ -51,6 +51,7 @@ import { lab35PortfastBpduguardAccess } from './ccna/lab-35-portfast-bpduguard-a
 import { lab36TshootBpduguardErrdisabled } from './ccna/lab-36-tshoot-bpduguard-errdisabled';
 import { lab37TshootEtherchannelLacpMode } from './ccna/lab-37-tshoot-etherchannel-lacp-mode';
 import { lab38TshootIpv6StaticWrongNextHop } from './ccna/lab-38-tshoot-ipv6-static-wrong-next-hop';
+import { lab39TshootNatOutsideRole } from './ccna/lab-39-tshoot-nat-outside-role';
 import { tshootReturnRoute } from './ccna/tshoot-return-route';
 import { tshootWrongNextHop } from './ccna/tshoot-wrong-next-hop';
 import { tshootWanSubnetMismatch } from './ccna/tshoot-wan-subnet-mismatch';
@@ -111,6 +112,7 @@ const CATALOG: readonly Lab[] = [
   lab36TshootBpduguardErrdisabled,
   lab37TshootEtherchannelLacpMode,
   lab38TshootIpv6StaticWrongNextHop,
+  lab39TshootNatOutsideRole,
   tshootReturnRoute,
   tshootWrongNextHop,
   tshootWanSubnetMismatch,
