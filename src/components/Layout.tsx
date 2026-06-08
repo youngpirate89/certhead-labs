@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
 /**
  * Topology-first lab shell: a full-height topology canvas on the left and a
@@ -25,8 +25,10 @@ interface LayoutProps {
   objectives: ReactNode;
   terminal?: ReactNode;
   scenario?: ReactNode;
+  hints?: ReactNode;
   hasHints?: boolean;
   onMobileReset?: () => void;
+  mobileTerminalSignal?: number;
   labTitle: string;
   examLabel: string;
 }
@@ -52,8 +54,10 @@ export function Layout({
   objectives,
   terminal,
   scenario,
+  hints,
   hasHints = false,
   onMobileReset,
+  mobileTerminalSignal = 0,
   labTitle,
   examLabel,
 }: LayoutProps) {
@@ -64,6 +68,12 @@ export function Layout({
     () => ['scenario', 'topology', 'terminal', 'objectives', ...(hasHints ? (['hints'] as const) : [])],
     [hasHints],
   );
+
+  useEffect(() => {
+    if (mobileTerminalSignal > 0) {
+      setActiveMobileTab('terminal');
+    }
+  }, [mobileTerminalSignal]);
 
   return (
     <div
@@ -182,7 +192,7 @@ export function Layout({
               hidden={activeMobileTab !== 'hints'}
               className={`min-h-0 flex-1 overflow-hidden ${isLight ? 'bg-white' : 'bg-panel-bg'}`}
             >
-              {activeMobileTab === 'hints' ? objectives : null}
+              {activeMobileTab === 'hints' ? hints : null}
             </section>
           )}
 

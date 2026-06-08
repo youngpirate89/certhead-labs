@@ -159,6 +159,7 @@ describe('Layout', () => {
         topology={<div data-testid="topology-content">topology here</div>}
         objectives={<div data-testid="objectives-content">objectives here</div>}
         terminal={<div data-testid="terminal-content">terminal here</div>}
+        hints={<div data-testid="hints-content">hint guidance only</div>}
         hasHints
         onMobileReset={onReset}
       />,
@@ -176,5 +177,58 @@ describe('Layout', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Hint' }));
     expect(screen.getByRole('tab', { name: 'Hints' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('renders focused mobile hint content without duplicating the objectives panel', () => {
+    render(
+      <Layout
+        examLabel="CCNA 200-301"
+        labTitle="Sample lab"
+        scenario={<p>Read the ticket and inspect the devices.</p>}
+        topology={<div data-testid="topology-content">topology here</div>}
+        objectives={<div data-testid="objectives-content">objectives here</div>}
+        terminal={<div data-testid="terminal-content">terminal here</div>}
+        hints={<div data-testid="hints-content">Use interface configuration mode.</div>}
+        hasHints
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hint' }));
+
+    const hintPanel = document.querySelector('[data-mobile-panel="hints"]') as HTMLElement;
+    expect(screen.getByTestId('hints-content')).toBeInTheDocument();
+    expect(hintPanel.querySelector('[data-testid="objectives-content"]')).toBeNull();
+  });
+
+  it('switches the mobile workspace to terminal after a device is selected from topology', () => {
+    const { rerender } = render(
+      <Layout
+        examLabel="CCNA 200-301"
+        labTitle="Sample lab"
+        scenario={<p>Read the ticket and inspect the devices.</p>}
+        topology={<div data-testid="topology-content">topology here</div>}
+        objectives={<div data-testid="objectives-content">objectives here</div>}
+        terminal={<div data-testid="terminal-content">terminal here</div>}
+        mobileTerminalSignal={0}
+      />,
+    );
+
+    expect(screen.getByRole('tab', { name: 'Scenario' })).toHaveAttribute('aria-selected', 'true');
+
+    rerender(
+      <Layout
+        examLabel="CCNA 200-301"
+        labTitle="Sample lab"
+        scenario={<p>Read the ticket and inspect the devices.</p>}
+        topology={<div data-testid="topology-content">topology here</div>}
+        objectives={<div data-testid="objectives-content">objectives here</div>}
+        terminal={<div data-testid="terminal-content">terminal here</div>}
+        mobileTerminalSignal={1}
+      />,
+    );
+
+    const terminalPanel = document.querySelector('[data-mobile-panel="terminal"]') as HTMLElement;
+    expect(screen.getByRole('tab', { name: 'Terminal' })).toHaveAttribute('aria-selected', 'true');
+    expect(terminalPanel.querySelector('[data-testid="terminal-content"]')).not.toBeNull();
   });
 });

@@ -55,6 +55,7 @@ export function TryMode() {
 
   const [briefDismissed, setBriefDismissed] = useState(false);
   const [labStartedAt, setLabStartedAt] = useState<number | null>(null);
+  const [mobileTerminalSignal, setMobileTerminalSignal] = useState(0);
 
   function startLab() {
     setBriefDismissed(true);
@@ -79,6 +80,7 @@ export function TryMode() {
   const handleSelectDevice = useCallback(
     (id: string) => {
       session.setActiveDevice(id);
+      setMobileTerminalSignal((value) => value + 1);
     },
     [session],
   );
@@ -128,8 +130,10 @@ export function TryMode() {
             solution={lab.solution}
           />
         }
+        hints={<MobileHintsPanel hints={lab.hints.map((h) => h.text)} />}
         hasHints={lab.hints.length > 0}
         onMobileReset={briefDismissed ? resetLab : undefined}
+        mobileTerminalSignal={mobileTerminalSignal}
         terminal={
           briefDismissed ? (
             <FloatingTerminalPanel
@@ -164,6 +168,29 @@ export function TryMode() {
       )}
       {completed && <CompletionBanner labId={lab.id} />}
     </>
+  );
+}
+
+export function MobileHintsPanel({ hints }: { hints: readonly string[] }) {
+  return (
+    <div className="h-full overflow-y-auto p-4 font-sans text-sm text-terminal-fg">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-terminal-dim">
+        Hints
+      </p>
+      <p className="mb-4 text-terminal-dim">
+        Try the next small step before opening a hint. These are ordered from light nudge to direct guidance.
+      </p>
+      <ol className="space-y-3">
+        {hints.map((hint, index) => (
+          <li key={`${index}-${hint}`} className="rounded-lg border border-panel-border bg-[#0d1117] p-3">
+            <p className="mb-1 text-xs font-semibold uppercase tracking-[0.16em] text-terminal-prompt">
+              Hint {index + 1}
+            </p>
+            <p className="leading-6">{hint}</p>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 
