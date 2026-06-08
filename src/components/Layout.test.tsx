@@ -231,4 +231,27 @@ describe('Layout', () => {
     expect(screen.getByRole('tab', { name: 'Terminal' })).toHaveAttribute('aria-selected', 'true');
     expect(terminalPanel.querySelector('[data-testid="terminal-content"]')).not.toBeNull();
   });
+
+  it('shows mobile topology touch guidance and triggers fit-to-view when the topology tab opens', () => {
+    const onMobileTopologyOpen = vi.fn();
+    const { container } = render(
+      <Layout
+        examLabel="CCNA 200-301"
+        labTitle="Sample lab"
+        scenario={<p>Read the ticket and inspect the devices.</p>}
+        topology={<div data-testid="topology-content">topology here</div>}
+        objectives={<div data-testid="objectives-content">objectives here</div>}
+        terminal={<div data-testid="terminal-content">terminal here</div>}
+        onMobileTopologyOpen={onMobileTopologyOpen}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Topology' }));
+
+    const guidance = container.querySelector('[data-mobile-topology-guidance]');
+    expect(guidance).not.toBeNull();
+    expect(guidance?.textContent).toMatch(/pinch or drag/i);
+    expect(guidance?.textContent).toMatch(/fit/i);
+    expect(onMobileTopologyOpen).toHaveBeenCalledTimes(1);
+  });
 });

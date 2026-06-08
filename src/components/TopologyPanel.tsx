@@ -68,6 +68,9 @@ interface TopologyPanelProps {
    *  Ctrl/Cmd-modifier handler of its own. Touchpad pinch + the on-canvas
    *  zoom buttons stay available regardless of this prop. */
   readonly zoomOnScroll?: boolean;
+  /** Monotonic signal that asks the canvas to re-fit after a hidden/mobile
+   *  topology panel becomes visible. */
+  readonly fitViewSignal?: number;
 }
 
 /** Zoom bounds — see `CanvasControls` and the React Flow setup below.
@@ -812,19 +815,21 @@ function CanvasAutoFit({
   containerRef,
   contentWidth,
   contentHeight,
+  fitViewSignal = 0,
 }: {
   readonly containerRef: React.RefObject<HTMLDivElement>;
   readonly contentWidth: number;
   readonly contentHeight: number;
+  readonly fitViewSignal?: number;
 }) {
   const { setViewport } = useReactFlow();
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
-    function fit() {
+    function fit(options?: { duration?: number }) {
       if (!el) return;
-      applyFit(el, contentWidth, contentHeight, setViewport);
+      applyFit(el, contentWidth, contentHeight, setViewport, options);
     }
 
     fit();
@@ -833,6 +838,14 @@ function CanvasAutoFit({
     ro.observe(el);
     return () => ro.disconnect();
   }, [containerRef, contentWidth, contentHeight, setViewport]);
+
+  useEffect(() => {
+    if (fitViewSignal <= 0) return;
+    const el = containerRef.current;
+    if (!el) return;
+    applyFit(el, contentWidth, contentHeight, setViewport, { duration: 120 });
+  }, [containerRef, contentWidth, contentHeight, fitViewSignal, setViewport]);
+
   return null;
 }
 
@@ -844,6 +857,7 @@ export function TopologyPanel({
   decorations = [],
   positions,
   zoomOnScroll = true,
+  fitViewSignal = 0,
 }: TopologyPanelProps) {
   const handleSelect = useMemo(
     () => (id: string) => onSelectDevice?.(id),
@@ -1002,6 +1016,7 @@ export function TopologyPanel({
             containerRef={canvasWrapperRef}
             contentWidth={contentWidth}
             contentHeight={contentHeight}
+            fitViewSignal={fitViewSignal}
           />
         </div>
       </div>

@@ -56,6 +56,7 @@ export function TryMode() {
   const [briefDismissed, setBriefDismissed] = useState(false);
   const [labStartedAt, setLabStartedAt] = useState<number | null>(null);
   const [mobileTerminalSignal, setMobileTerminalSignal] = useState(0);
+  const [mobileTopologyFitSignal, setMobileTopologyFitSignal] = useState(0);
 
   function startLab() {
     setBriefDismissed(true);
@@ -85,6 +86,10 @@ export function TryMode() {
     [session],
   );
 
+  const handleMobileTopologyOpen = useCallback(() => {
+    setMobileTopologyFitSignal((value) => value + 1);
+  }, []);
+
   const platformById = useMemo(() => {
     const m = new Map<string, string>();
     for (const d of lab.topology.devices) m.set(d.id, d.platform);
@@ -112,6 +117,7 @@ export function TryMode() {
             onSelectDevice={handleSelectDevice}
             links={lab.topology.links}
             decorations={lab.topology.decorations}
+            fitViewSignal={mobileTopologyFitSignal}
           />
         }
         objectives={
@@ -133,6 +139,7 @@ export function TryMode() {
         hints={<MobileHintsPanel hints={lab.hints.map((h) => h.text)} />}
         hasHints={lab.hints.length > 0}
         onMobileReset={briefDismissed ? resetLab : undefined}
+        onMobileTopologyOpen={handleMobileTopologyOpen}
         mobileTerminalSignal={mobileTerminalSignal}
         terminal={
           briefDismissed ? (

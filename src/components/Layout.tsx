@@ -28,6 +28,7 @@ interface LayoutProps {
   hints?: ReactNode;
   hasHints?: boolean;
   onMobileReset?: () => void;
+  onMobileTopologyOpen?: () => void;
   mobileTerminalSignal?: number;
   labTitle: string;
   examLabel: string;
@@ -57,6 +58,7 @@ export function Layout({
   hints,
   hasHints = false,
   onMobileReset,
+  onMobileTopologyOpen,
   mobileTerminalSignal = 0,
   labTitle,
   examLabel,
@@ -74,6 +76,13 @@ export function Layout({
       setActiveMobileTab('terminal');
     }
   }, [mobileTerminalSignal]);
+
+  function selectMobileTab(tab: MobileTab) {
+    setActiveMobileTab(tab);
+    if (tab === 'topology') {
+      onMobileTopologyOpen?.();
+    }
+  }
 
   return (
     <div
@@ -126,7 +135,7 @@ export function Layout({
                 role="tab"
                 aria-selected={activeMobileTab === tab}
                 aria-controls={`mobile-panel-${tab}`}
-                onClick={() => setActiveMobileTab(tab)}
+                onClick={() => selectMobileTab(tab)}
                 className={`shrink-0 rounded-full border px-3 py-1.5 font-sans text-xs font-semibold transition ${
                   activeMobileTab === tab
                     ? 'border-terminal-prompt bg-terminal-prompt text-[#06231d]'
@@ -156,9 +165,23 @@ export function Layout({
             role="tabpanel"
             data-mobile-panel="topology"
             hidden={activeMobileTab !== 'topology'}
-            className={`min-h-0 flex-1 overflow-hidden ${isLight ? 'bg-[#eef3f8]' : 'bg-panel-bg'}`}
+            className={`relative min-h-0 flex-1 overflow-hidden ${isLight ? 'bg-[#eef3f8]' : 'bg-panel-bg'}`}
           >
-            {activeMobileTab === 'topology' ? topology : null}
+            {activeMobileTab === 'topology' ? (
+              <>
+                <div
+                  data-mobile-topology-guidance
+                  className={`pointer-events-none absolute left-3 right-3 top-3 z-20 rounded-lg border px-3 py-2 font-sans text-xs leading-5 shadow-lg ${
+                    isLight
+                      ? 'border-[#cbd5e1] bg-white/90 text-[#334155]'
+                      : 'border-panel-border bg-panel-header/90 text-terminal-dim'
+                  }`}
+                >
+                  Pinch or drag to inspect the topology. Use Fit if anything looks off-screen.
+                </div>
+                {topology}
+              </>
+            ) : null}
           </section>
           <section
             id="mobile-panel-terminal"
