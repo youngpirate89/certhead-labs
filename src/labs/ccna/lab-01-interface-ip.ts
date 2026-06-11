@@ -51,10 +51,14 @@ export const lab01InterfaceIp: Lab = {
       // peer with no commands), so match on R1's history. Accept the command
       // from priv mode OR via `do` from config-family modes; both forms appear
       // in resolvedHistory as canonical strings.
-      check: (_state, history) =>
-        history.R1?.resolved.some((cmd) =>
+      check: (state, history) =>
+        state.R1.interfaces['Gi0/0'].ip === '192.168.1.1' &&
+        state.R1.interfaces['Gi0/0'].mask === '255.255.255.0' &&
+        state.R1.interfaces['Gi0/0'].adminUp === true &&
+        state.R1.interfaces['Gi0/0'].protocolUp === true &&
+        (history.R1?.resolved.some((cmd) =>
           /^(do\s+)?show ip interface brief$/.test(cmd),
-        ) ?? false,
+        ) ?? false),
     },
   ],
   hints: [

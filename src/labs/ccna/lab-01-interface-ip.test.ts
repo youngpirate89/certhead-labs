@@ -88,6 +88,15 @@ describe('free lab — pilot validation', () => {
     expect(result.allMet).toBe(false);
   });
 
+  it('does not satisfy verify when show ip interface brief still shows Gi0/0 down', () => {
+    const s = run(start(), ['enable', 'show ip interface brief']);
+    const result = grade(lab, s);
+    expect(result.objectives.find((o) => o.id === 'ip')?.met).toBe(false);
+    expect(result.objectives.find((o) => o.id === 'noshut')?.met).toBe(false);
+    expect(result.objectives.find((o) => o.id === 'verify')?.met).toBe(false);
+    expect(result.allMet).toBe(false);
+  });
+
   it('does not mark the IP objective complete for the wrong address on Gi0/0', () => {
     const s = run(start(), [
       'enable',
@@ -101,7 +110,7 @@ describe('free lab — pilot validation', () => {
     const result = grade(lab, s);
     expect(result.objectives.find((o) => o.id === 'ip')?.met).toBe(false);
     expect(result.objectives.find((o) => o.id === 'noshut')?.met).toBe(true);
-    expect(result.objectives.find((o) => o.id === 'verify')?.met).toBe(true);
+    expect(result.objectives.find((o) => o.id === 'verify')?.met).toBe(false);
     expect(result.allMet).toBe(false);
   });
 });
