@@ -22,8 +22,21 @@ describe('TryMode public lab selection', () => {
 });
 
 describe('TryMode completion CTA', () => {
-  it('opens the CertHead registration upsell outside the embedded lab iframe', () => {
-    render(<CompletionBanner labId="ccna-l01-interface-ip" />);
+  it('continues starter labs 1 through 9 to the next free starter lab in the same window', () => {
+    render(<CompletionBanner labId="ccna-lab07-vlan-access-ports" />);
+
+    expect(screen.getByText(/Next:/)).toHaveTextContent('Next: Starter 7, VLAN Trunking: Span One VLAN Across Two Switches.');
+
+    const cta = screen.getByRole('link', { name: /Continue to next free lab/i });
+    expect(cta.getAttribute('href')).toBe('/try?lab=ccna-lab08-vlan-trunking');
+    expect(cta.getAttribute('target')).toBeNull();
+    expect(cta.getAttribute('rel')).toBeNull();
+  });
+
+  it('sends the final free starter lab to the Pro unlock CTA outside the embedded lab iframe', () => {
+    render(<CompletionBanner labId="ccna-lab15-default-static-route" />);
+
+    expect(screen.getByText(/Next:/)).toHaveTextContent('Next: full CCNA lab track (Pro). Pro includes the full 50-lab CCNA library.');
 
     const cta = screen.getByRole('link', { name: /Unlock with CertHead Pro/i });
     expect(cta.getAttribute('href')).toBe(FREE_LAB_REGISTER_URL);

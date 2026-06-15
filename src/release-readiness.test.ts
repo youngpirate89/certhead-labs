@@ -7,12 +7,10 @@ const EM_DASH = '\u2014';
 describe('release readiness: public free-lab surface', () => {
   it('keeps the public CTA aligned to the Pro bundle and current 50-lab catalog', () => {
     expect(FREE_LAB_REGISTER_URL).toBe('https://certhead.com/register?source=free-lab');
-    expect(FREE_LAB_UPSELL_COPY.nextLab).toBe('Lab 04: Static Routing');
     expect(FREE_LAB_UPSELL_COPY.proLibrary).toBe('Pro includes the full 50-lab CCNA library.');
     expect(FREE_LAB_UPSELL_COPY.cta).toBe('Unlock with CertHead Pro');
     expect(FREE_LAB_UPSELL_COPY.proLibrary).not.toMatch(/20\+|25\+|30\+|40\+/);
     expect(FREE_LAB_UPSELL_COPY.proLibrary).not.toMatch(/\$4\.99|question-only|exam-only/i);
-    expect(FREE_LAB_UPSELL_COPY.nextLab).not.toContain(EM_DASH);
     expect(FREE_LAB_UPSELL_COPY.proLibrary).not.toContain(EM_DASH);
     expect(FREE_LAB_UPSELL_COPY.cta).not.toContain(EM_DASH);
   });
@@ -29,7 +27,7 @@ describe('release readiness: public free-lab surface', () => {
   it('keeps TryMode hardwired to the public CCNA starter list without importing the Pro catalog', () => {
     const tryModeSource = readFileSync(`${process.cwd()}/src/modes/TryMode.tsx`, 'utf8');
 
-    expect(tryModeSource).toContain("import { getFreeCcnaStarterLabById, getFreeCcnaStarterLabs } from '@/labs/free-starter';");
+    expect(tryModeSource).toContain("import { FREE_CCNA_STARTER_LAB_IDS, getFreeCcnaStarterLabById, getFreeCcnaStarterLabs } from '@/labs/free-starter';");
     expect(tryModeSource).toContain("import { DEFAULT_FREE_CCNA_STARTER_LAB_ID, resolveTryModeLabId } from '@/routing/tryLabSelection';");
     expect(tryModeSource).not.toMatch(/from ['"]@\/labs\/catalog['"]/);
     expect(tryModeSource).not.toContain('getLabById');

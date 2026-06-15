@@ -5,14 +5,45 @@ import { TopologyPanel } from '@/components/TopologyPanel';
 import { ObjectivesPanel } from '@/components/ObjectivesPanel';
 import { FloatingTerminalPanel } from '@/components/terminal/FloatingTerminalPanel';
 import { useLabSession } from '@/engine/terminal/useLabSession';
-import { getFreeCcnaStarterLabById, getFreeCcnaStarterLabs } from '@/labs/free-starter';
+import { FREE_CCNA_STARTER_LAB_IDS, getFreeCcnaStarterLabById, getFreeCcnaStarterLabs } from '@/labs/free-starter';
 import { DEFAULT_FREE_CCNA_STARTER_LAB_ID, resolveTryModeLabId } from '@/routing/tryLabSelection';
 import { initAnalytics, track } from '@/analytics/posthog';
 
 export const FREE_LAB_REGISTER_URL = 'https://certhead.com/register?source=free-lab';
 
+interface CompletionCta {
+  readonly href: string;
+  readonly label: string;
+  readonly target?: '_blank';
+  readonly rel?: 'noopener noreferrer';
+  readonly nextCopy: string;
+  readonly proCopy?: string;
+}
+
+function getCompletionCta(labId: string): CompletionCta {
+  const currentIndex = FREE_CCNA_STARTER_LAB_IDS.findIndex((id) => id === labId);
+  const nextId = currentIndex >= 0 ? FREE_CCNA_STARTER_LAB_IDS[currentIndex + 1] : undefined;
+  const nextLab = nextId ? getFreeCcnaStarterLabById(nextId) : null;
+
+  if (nextLab) {
+    return {
+      href: `/try?lab=${encodeURIComponent(nextLab.id)}`,
+      label: 'Continue to next free lab',
+      nextCopy: `Starter ${currentIndex + 2}, ${nextLab.title}.`,
+    };
+  }
+
+  return {
+    href: FREE_LAB_REGISTER_URL,
+    label: FREE_LAB_UPSELL_COPY.cta,
+    target: '_blank',
+    rel: 'noopener noreferrer',
+    nextCopy: 'full CCNA lab track (Pro).',
+    proCopy: FREE_LAB_UPSELL_COPY.proLibrary,
+  };
+}
+
 export const FREE_LAB_UPSELL_COPY = {
-  nextLab: 'Lab 04: Static Routing',
   proLibrary: 'Pro includes the full 50-lab CCNA library.',
   cta: 'Unlock with CertHead Pro',
 } as const;
@@ -222,6 +253,8 @@ export function MobileHintsPanel({ hints }: { hints: readonly string[] }) {
  *  Renders as a fixed-position strip at the bottom of the viewport so it works
  *  regardless of which (or how many) floating panels are open. */
 export function CompletionBanner({ labId }: { labId: string }) {
+  const cta = getCompletionCta(labId);
+
   return (
     <div className="animate-slide-up fixed inset-x-0 bottom-0 z-30 border-t border-terminal-prompt/40 bg-panel-header/95 p-5 backdrop-blur">
       <div className="animate-celebrate mx-auto flex max-w-2xl items-center gap-4 rounded-md p-1 sm:flex-row">
@@ -233,18 +266,18 @@ export function CompletionBanner({ labId }: { labId: string }) {
             Starter lab complete.
           </p>
           <p className="mt-0.5 font-sans text-sm text-terminal-fg/80">
-            Next: <span className="text-terminal-fg">{FREE_LAB_UPSELL_COPY.nextLab}</span>{' '}
-            <span className="text-terminal-dim">(Pro)</span>. {FREE_LAB_UPSELL_COPY.proLibrary}
+            Next: <span className="text-terminal-fg">{cta.nextCopy}</span>{' '}
+            {cta.proCopy && <span className="text-terminal-dim">{cta.proCopy}</span>}
           </p>
         </div>
         <a
-          href={FREE_LAB_REGISTER_URL}
-          target="_blank"
-          rel="noopener noreferrer"
+          href={cta.href}
+          target={cta.target}
+          rel={cta.rel}
           onClick={() => track('cta_clicked', { labId })}
           className="shrink-0 rounded-md bg-terminal-prompt px-4 py-2 text-center font-sans text-sm font-semibold text-[#06231d] transition hover:brightness-110"
         >
-          {FREE_LAB_UPSELL_COPY.cta}
+          {cta.label}
         </a>
       </div>
     </div>
