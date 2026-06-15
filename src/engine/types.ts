@@ -142,7 +142,7 @@ export interface Lab {
   /** 1 (intro) .. 5 (expert). */
   readonly difficulty: 1 | 2 | 3 | 4 | 5;
   readonly estimatedMinutes: number;
-  /** Exactly one lab in the catalog has this set: the public free lab. */
+  /** Free labs are public starter experiences. Pro labs remain JWT-gated. */
   readonly isFree: boolean;
   /** Real-world framing shown on the lab brief screen before the terminal —
    *  one or two short paragraphs that explain WHY a tech would do this. */

@@ -32,10 +32,10 @@ function configureR1Roas(ls: LabSession): LabSession {
 }
 
 describe('lab-09-intervlan-routing — starting state', () => {
-  it('topology shape: 4 devices (2 PCs, 1 switch, 1 router), 3 links, isFree:false', () => {
+  it('topology shape: 4 devices (2 PCs, 1 switch, 1 router), 3 links, isFree:true', () => {
     expect(lab.topology.devices).toHaveLength(4);
     expect(lab.topology.links).toHaveLength(3);
-    expect(lab.isFree).toBe(false);
+    expect(lab.isFree).toBe(true);
     const kinds = lab.topology.devices.map((d) => d.kind).sort();
     expect(kinds).toEqual(['pc', 'pc', 'router', 'switch']);
   });

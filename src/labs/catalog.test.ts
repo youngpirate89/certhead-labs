@@ -117,25 +117,38 @@ describe('lab catalog — getLabById', () => {
     expect(lab?.id).toBe('ccna-l01-interface-ip');
   });
 
-  it('the free lab is the only catalog member with isFree: true', () => {
-    const free = CATALOG_IDS.map((id) => getLabById(id)).filter((l) => l?.isFree === true);
-    expect(free).toHaveLength(1);
-    expect(free[0]?.id).toBe('ccna-l01-interface-ip');
+  it('marks the ten CCNA starter labs as free catalog members', () => {
+    const freeIds = CATALOG_IDS.map((id) => getLabById(id))
+      .filter((lab) => lab?.isFree === true)
+      .map((lab) => lab!.id);
+
+    expect(freeIds).toEqual([
+      'ccna-l01-interface-ip',
+      'ccna-lab02-network-discovery',
+      'ccna-lab03-ipv4-subnetting-routed-interfaces',
+      'ccna-lab04-static-route-fundamentals',
+      'ccna-lab05-ospf-single-area',
+      'ccna-lab07-vlan-access-ports',
+      'ccna-lab08-vlan-trunking',
+      'ccna-lab09-intervlan-routing',
+      'ccna-lab10-dhcp-server',
+      'ccna-lab15-default-static-route',
+    ]);
   });
 
-  it('keeps the private catalog contract at 60 total labs with one free public lab', () => {
+  it('keeps the private catalog contract at 60 total labs with ten free public starter labs', () => {
     const labs = CATALOG_IDS.map((id) => getLabById(id));
     expect(CATALOG_IDS).toHaveLength(60);
-    expect(labs.filter((lab) => lab?.isFree === true)).toHaveLength(1);
-    expect(labs.filter((lab) => lab?.isFree !== true)).toHaveLength(59);
+    expect(labs.filter((lab) => lab?.isFree === true)).toHaveLength(10);
+    expect(labs.filter((lab) => lab?.isFree !== true)).toHaveLength(50);
   });
 
-  it('keeps the private source catalog at exactly 60 labs with one public free lab', () => {
+  it('keeps the private source catalog at exactly 60 labs with ten public free starter labs', () => {
     const labs = getCatalogLabs();
     expect(labs).toHaveLength(60);
-    expect(labs.filter((lab) => lab.isFree === true)).toHaveLength(1);
-    expect(labs.filter((lab) => lab.isFree !== true)).toHaveLength(59);
-    expect(labs.find((lab) => lab.isFree === true)?.id).toBe('ccna-l01-interface-ip');
+    expect(labs.filter((lab) => lab.isFree === true)).toHaveLength(10);
+    expect(labs.filter((lab) => lab.isFree !== true)).toHaveLength(50);
+    expect(labs.filter((lab) => lab.isFree).map((lab) => lab.id)).toContain('ccna-l01-interface-ip');
   });
 
   it.each(CATALOG_IDS)('published solution for %s completes all objectives', (id) => {

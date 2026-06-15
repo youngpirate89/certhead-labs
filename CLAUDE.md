@@ -347,7 +347,7 @@ Labs follow question banks. Linux+ labs only get built after Linux+ question ban
 
 3. **Accuracy is per-lab, not global.** We target 98%+ fidelity within each lab's command surface. We do not target broad command-surface accuracy across the platform.
 
-4. **The free lab is permanent and unconstrained.** No time limits, no feature gates within the lab, no nag screens during the experience. Constraint by quantity only (one lab), never by quality.
+4. **The free starter path is permanent and unconstrained.** No time limits, no feature gates within a free lab, no nag screens during the experience. Constraint by quantity only (the curated starter set), never by quality.
 
 5. **No persistence in prototype phase.** Lab state is ephemeral. The moment we add backend persistence, this becomes a Real Product with deploy obligations. Even the free lab uses local storage only — no user accounts, no completion history.
 

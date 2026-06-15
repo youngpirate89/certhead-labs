@@ -4,15 +4,15 @@ Purpose: track validation that must happen in the main CertHead app or API, the 
 
 ## Scope rules
 
-- Public route: keep `labs.certhead.com/try` limited to the single free lab, `ccna-l01-interface-ip`.
-- Private catalog: keep the remaining 49 labs gated for the $9.99 CertHead Pro bundle.
+- Public route: keep `labs.certhead.com/try` limited to the 10 free CCNA starter labs.
+- Private catalog: keep the remaining 50 labs gated for the $9.99 CertHead Pro bundle.
 - Do not expose private labs through the question and exam tier.
 - Do not add server auth in this repo unless the main CertHead app or API integration contract is already defined.
 
 ## Main CertHead app or API
 
 - [ ] Add the landing or pricing page link to `https://labs.certhead.com/try`.
-- [ ] Confirm the link copy frames the lab as one free hands-on lab, not a free lab tier.
+- [ ] Confirm the link copy frames the path as 10 free hands-on CCNA starter labs, not unlimited free lab access.
 - [ ] Confirm Pro labs remain part of the $9.99 CertHead Pro bundle.
 - [ ] For future `/embed`, define token minting, token validation, entitlement checks, replay controls, and completion persistence in the main app or API.
 - [ ] For future `/embed`, define the allowed iframe parent origin and postMessage target origin. The target origin must never be `*`.

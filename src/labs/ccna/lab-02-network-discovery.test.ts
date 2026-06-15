@@ -44,9 +44,9 @@ function runDiscoveryWalkthrough(lab: LabSession = fresh()): LabSession {
 }
 
 describe('Lab 02 — starting network discovery state', () => {
-  it('is a Pro lab between Lab 01 and Lab 05 in difficulty/sequence', () => {
+  it('is a free starter lab between Lab 01 and Lab 05 in difficulty/sequence', () => {
     expect(lab02NetworkDiscovery.id).toBe('ccna-lab02-network-discovery');
-    expect(lab02NetworkDiscovery.isFree).toBe(false);
+    expect(lab02NetworkDiscovery.isFree).toBe(true);
     expect(lab02NetworkDiscovery.difficulty).toBe(1);
   });
 

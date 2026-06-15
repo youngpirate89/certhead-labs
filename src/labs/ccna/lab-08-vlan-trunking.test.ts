@@ -11,10 +11,10 @@ function runOn(ls: LabSession, id: string, lines: string[]): LabSession {
 }
 
 describe('lab-08-vlan-trunking — starting state', () => {
-  it('topology shape: 4 devices (2 PCs, 2 switches), 3 links, isFree:false', () => {
+  it('topology shape: 4 devices (2 PCs, 2 switches), 3 links, isFree:true', () => {
     expect(lab.topology.devices).toHaveLength(4);
     expect(lab.topology.links).toHaveLength(3);
-    expect(lab.isFree).toBe(false);
+    expect(lab.isFree).toBe(true);
     const kinds = lab.topology.devices.map((d) => d.kind).sort();
     expect(kinds).toEqual(['pc', 'pc', 'switch', 'switch']);
   });

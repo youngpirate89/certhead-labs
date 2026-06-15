@@ -2,11 +2,24 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CompletionBanner, FREE_LAB_REGISTER_URL } from './TryMode';
+import { resolveTryModeLabId } from '@/routing/tryLabSelection';
 
 vi.mock('@/analytics/posthog', () => ({
   initAnalytics: vi.fn(),
   track: vi.fn(),
 }));
+
+describe('TryMode public lab selection', () => {
+  it('defaults to the first starter lab when no public lab query is present', () => {
+    expect(resolveTryModeLabId('')).toBe('ccna-l01-interface-ip');
+    expect(resolveTryModeLabId('?foo=ccna-lab07-vlan-access-ports')).toBe('ccna-l01-interface-ip');
+  });
+
+  it('allows only CCNA starter lab ids on the public try route', () => {
+    expect(resolveTryModeLabId('?lab=ccna-lab07-vlan-access-ports')).toBe('ccna-lab07-vlan-access-ports');
+    expect(resolveTryModeLabId('?lab=ccna-lab11-nat-pat')).toBe('ccna-l01-interface-ip');
+  });
+});
 
 describe('TryMode completion CTA', () => {
   it('opens the CertHead registration upsell outside the embedded lab iframe', () => {

@@ -2,10 +2,10 @@
  * Lab catalog — the source of truth for every deployed lab and the lookup
  * the `/embed` Pro route uses to resolve a token's `labId` claim.
  *
- * The catalog includes the free lab AND every Pro-tier lab. The split between
+ * The catalog includes the free starter labs AND every Pro-tier lab. The split between
  * `/try` (free, public) and `/embed` (Pro, JWT-gated) is enforced at the
  * route entry points, not by partitioning the catalog: `TryMode` imports the
- * free lab directly so the `/try` bundle stays free-lab-only, while `/embed`
+ * free starter list directly so the `/try` bundle stays free-labs-only, while `/embed`
  * (Phase A2 of the Pro-labs integration) will route through `getLabById`.
  *
  * Because nothing on the `/try` code path imports this module today, the

@@ -14,7 +14,7 @@ export const lab02NetworkDiscovery: Lab = {
   exam: 'CCNA 200-301',
   difficulty: 1,
   estimatedMinutes: 7,
-  isFree: false,
+  isFree: true,
   scenario:
     "You're taking over a small branch network from another technician. The branch is already cabled and configured, but before making any changes you need to build a quick operational picture: which router interfaces are up, what VLAN/port state the access switch shows, what IP settings the workstation has, and whether the workstation can reach its default gateway.\n\nThis lab is about disciplined discovery. Do not configure anything. Use show commands on R1 and SW1, then use the PC to confirm its IP settings and gateway reachability.",
   topology: {

@@ -26,11 +26,11 @@ describe('release readiness: public free-lab surface', () => {
     expect(appSource).not.toMatch(/from ['"]@\/modes\/PilotMode['"]/);
   });
 
-  it('keeps TryMode hardwired to the single public free lab', () => {
+  it('keeps TryMode hardwired to the public CCNA starter list without importing the Pro catalog', () => {
     const tryModeSource = readFileSync(`${process.cwd()}/src/modes/TryMode.tsx`, 'utf8');
 
-    expect(tryModeSource).toContain("import { lab01InterfaceIp } from '@/labs/ccna/lab-01-interface-ip';");
-    expect(tryModeSource).toContain('const lab = lab01InterfaceIp;');
+    expect(tryModeSource).toContain("import { getFreeCcnaStarterLabById } from '@/labs/free-starter';");
+    expect(tryModeSource).toContain("import { DEFAULT_FREE_CCNA_STARTER_LAB_ID, resolveTryModeLabId } from '@/routing/tryLabSelection';");
     expect(tryModeSource).not.toMatch(/from ['"]@\/labs\/catalog['"]/);
     expect(tryModeSource).not.toContain('getLabById');
     expect(tryModeSource).not.toContain(`Lab complete ${EM_DASH}`);
@@ -49,8 +49,8 @@ describe('release readiness: public free-lab surface', () => {
     expect(contract).toContain('value: pro');
     expect(contract).toContain('getLabById(labId)');
     expect(contract).toContain('unknown, missing, expired, or non-Pro tokens fail closed');
-    expect(contract).toContain('only `ccna-l01-interface-ip` is free');
-    expect(contract).toContain('49 catalog labs require Pro');
+    expect(contract).toContain('ten free CCNA starter labs');
+    expect(contract).toContain('50 catalog labs require Pro');
     expect(contract).toContain('completion message');
     expect(contract).toContain('window.parent.postMessage');
     expect(contract).toContain('The targetOrigin must not be `*`.');
@@ -98,7 +98,7 @@ describe('release readiness: public free-lab surface', () => {
     expect(checklist).toContain('Hosting provider');
     expect(checklist).toContain('labs.certhead.com/try');
     expect(checklist).toContain('VITE_POSTHOG_KEY');
-    expect(checklist).toContain('single free lab');
+    expect(checklist).toContain('10 free CCNA starter labs');
     expect(checklist).toContain('$9.99 CertHead Pro bundle');
     expect(checklist).not.toContain('$4.99');
     expect(checklist).not.toContain(EM_DASH);

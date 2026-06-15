@@ -5,7 +5,8 @@ import { TopologyPanel } from '@/components/TopologyPanel';
 import { ObjectivesPanel } from '@/components/ObjectivesPanel';
 import { FloatingTerminalPanel } from '@/components/terminal/FloatingTerminalPanel';
 import { useLabSession } from '@/engine/terminal/useLabSession';
-import { lab01InterfaceIp } from '@/labs/ccna/lab-01-interface-ip';
+import { getFreeCcnaStarterLabById } from '@/labs/free-starter';
+import { DEFAULT_FREE_CCNA_STARTER_LAB_ID, resolveTryModeLabId } from '@/routing/tryLabSelection';
 import { initAnalytics, track } from '@/analytics/posthog';
 
 export const FREE_LAB_REGISTER_URL = 'https://certhead.com/register?source=free-lab';
@@ -17,7 +18,7 @@ export const FREE_LAB_UPSELL_COPY = {
 } as const;
 
 /**
- * Public free-lab route (`/try`). No auth, hardcoded to the single free lab.
+ * Public free-lab route (`/try`). No auth, scoped to the free CCNA starter labs.
  * On completion, shows the upgrade CTA — AFTER completion, never during
  * (CLAUDE.md free-lab design principle). No CertHead API calls. Anonymous
  * PostHog funnel events only: viewed -> started -> completed -> cta_clicked.
@@ -27,7 +28,8 @@ export const FREE_LAB_UPSELL_COPY = {
  * shared FloatingTerminalPanel — one window, one tab per open device.
  */
 export function TryMode() {
-  const lab = lab01InterfaceIp;
+  const labId = typeof window === 'undefined' ? DEFAULT_FREE_CCNA_STARTER_LAB_ID : resolveTryModeLabId(window.location.search);
+  const lab = getFreeCcnaStarterLabById(labId) ?? getFreeCcnaStarterLabById(DEFAULT_FREE_CCNA_STARTER_LAB_ID)!;
   const session = useLabSession(lab);
 
   useEffect(() => {
@@ -213,7 +215,7 @@ export function CompletionBanner({ labId }: { labId: string }) {
         </div>
         <div className="flex-1">
           <p className="font-sans text-sm font-semibold text-terminal-prompt">
-            Lab complete: interface is up.
+            Starter lab complete.
           </p>
           <p className="mt-0.5 font-sans text-sm text-terminal-fg/80">
             Next: <span className="text-terminal-fg">{FREE_LAB_UPSELL_COPY.nextLab}</span>{' '}
