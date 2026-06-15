@@ -34,7 +34,7 @@ export const lab10Dhcp: Lab = {
   exam: 'CCNA 200-301',
   difficulty: 2,
   estimatedMinutes: 10,
-  isFree: true,
+  isFree: false,
   scenario:
     "Your branch router R1 needs to hand out IP addresses to the LAN devices on the 192.168.1.0/24 subnet. R1's LAN interface (Gi0/1) is already configured with 192.168.1.1/24 and is up; PC-A is connected to that LAN, currently waiting for a DHCP lease.\n\nConfigure R1 as the DHCP server: exclude the first ten host addresses (so future printers and infrastructure won't collide with the dynamic range), create a pool named LAN, set its network, default gateway, and DNS server, then verify that PC-A receives an address with `show ip dhcp binding`.",
   topology: {

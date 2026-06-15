@@ -19,20 +19,20 @@ describe('LabBrief free starter path selector', () => {
         {...baseProps}
         starterLabs={[
           {
-            id: 'ccna-l01-interface-ip',
+            id: 'ccna-starter-01-interface-ip',
             title: 'Configure Interface IP & Bring Link Up',
             estimatedMinutes: 5,
             difficulty: 1,
-            href: '/try?lab=ccna-l01-interface-ip',
+            href: '/try?lab=ccna-starter-01-interface-ip',
             isActive: true,
             sequenceNumber: 1,
           },
           {
-            id: 'ccna-lab07-vlan-access-ports',
+            id: 'ccna-starter-06-vlan-access-port',
             title: 'VLANs: Segment Two Teams onto Access Ports',
             estimatedMinutes: 8,
             difficulty: 1,
-            href: '/try?lab=ccna-lab07-vlan-access-ports',
+            href: '/try?lab=ccna-starter-06-vlan-access-port',
             isActive: false,
             sequenceNumber: 7,
           },
@@ -47,6 +47,6 @@ describe('LabBrief free starter path selector', () => {
     const vlanLink = screen.getByRole('link', {
       name: /Starter 7 VLANs: Segment Two Teams onto Access Ports/i,
     });
-    expect(vlanLink).toHaveAttribute('href', '/try?lab=ccna-lab07-vlan-access-ports');
+    expect(vlanLink).toHaveAttribute('href', '/try?lab=ccna-starter-06-vlan-access-port');
   });
 });

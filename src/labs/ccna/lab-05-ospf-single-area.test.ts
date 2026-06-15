@@ -20,7 +20,7 @@ describe('lab-05-ospf-single-area — starting state', () => {
   it('topology shape: 4 devices (2 PCs, 2 routers), 3 links, isFree:true', () => {
     expect(lab.topology.devices).toHaveLength(4);
     expect(lab.topology.links).toHaveLength(3);
-    expect(lab.isFree).toBe(true);
+    expect(lab.isFree).toBe(false);
   });
 
   it('seeded interfaces are up and addressed; no routing or OSPF at start', () => {

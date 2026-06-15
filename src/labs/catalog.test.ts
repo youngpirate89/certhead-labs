@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { grade } from '@/engine/grading';
 import { applyToActive, initLabSession, type DeviceSession, type LabSession } from '@/engine/lab-session';
 import { getCatalogLabs, getLabById } from './catalog';
-import { lab01InterfaceIp } from './ccna/lab-01-interface-ip';
 
 // Stable, permanent ids the embed/JWT contract will encode. Adding a lab to
 // the catalog requires adding its id here — that's the point: the test is the
@@ -110,45 +109,18 @@ describe('lab catalog — getLabById', () => {
     expect(getLabById('')).toBeNull();
   });
 
-  it('still resolves the free lab — same object, isFree intact, id unchanged', () => {
-    const lab = getLabById('ccna-l01-interface-ip');
-    expect(lab).toBe(lab01InterfaceIp);
-    expect(lab?.isFree).toBe(true);
-    expect(lab?.id).toBe('ccna-l01-interface-ip');
-  });
-
-  it('marks the ten CCNA starter labs as free catalog members', () => {
-    const freeIds = CATALOG_IDS.map((id) => getLabById(id))
-      .filter((lab) => lab?.isFree === true)
-      .map((lab) => lab!.id);
-
-    expect(freeIds).toEqual([
-      'ccna-l01-interface-ip',
-      'ccna-lab02-network-discovery',
-      'ccna-lab03-ipv4-subnetting-routed-interfaces',
-      'ccna-lab04-static-route-fundamentals',
-      'ccna-lab05-ospf-single-area',
-      'ccna-lab07-vlan-access-ports',
-      'ccna-lab08-vlan-trunking',
-      'ccna-lab09-intervlan-routing',
-      'ccna-lab10-dhcp-server',
-      'ccna-lab15-default-static-route',
-    ]);
-  });
-
-  it('keeps the private catalog contract at 60 total labs with ten free public starter labs', () => {
+  it('keeps every private catalog lab Pro-only; public starters live outside the paid catalog', () => {
     const labs = CATALOG_IDS.map((id) => getLabById(id));
     expect(CATALOG_IDS).toHaveLength(60);
-    expect(labs.filter((lab) => lab?.isFree === true)).toHaveLength(10);
-    expect(labs.filter((lab) => lab?.isFree !== true)).toHaveLength(50);
+    expect(labs.filter((lab) => lab?.isFree === true)).toHaveLength(0);
+    expect(labs.filter((lab) => lab?.isFree !== true)).toHaveLength(60);
   });
 
-  it('keeps the private source catalog at exactly 60 labs with ten public free starter labs', () => {
+  it('keeps the private source catalog at exactly 60 Pro labs', () => {
     const labs = getCatalogLabs();
     expect(labs).toHaveLength(60);
-    expect(labs.filter((lab) => lab.isFree === true)).toHaveLength(10);
-    expect(labs.filter((lab) => lab.isFree !== true)).toHaveLength(50);
-    expect(labs.filter((lab) => lab.isFree).map((lab) => lab.id)).toContain('ccna-l01-interface-ip');
+    expect(labs.filter((lab) => lab.isFree === true)).toHaveLength(0);
+    expect(labs.filter((lab) => lab.isFree !== true)).toHaveLength(60);
   });
 
   it.each(CATALOG_IDS)('published solution for %s completes all objectives', (id) => {

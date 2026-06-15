@@ -30,6 +30,10 @@ interface LabBriefProps {
   readonly onStart: () => void;
 }
 
+function starterTitleWithoutPrefix(title: string): string {
+  return title.replace(/^Starter\s+\d+:\s*/, '');
+}
+
 export function LabBrief({
   title,
   examLabel,
@@ -125,7 +129,7 @@ export function LabBrief({
                     <span className="flex items-start justify-between gap-2">
                       <span>
                         <span className="font-semibold">Starter {starterLab.sequenceNumber}</span>{' '}
-                        {starterLab.title}
+                        {starterTitleWithoutPrefix(starterLab.title)}
                       </span>
                       {starterLab.isActive && (
                         <span className="shrink-0 rounded-full bg-terminal-prompt/20 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-terminal-prompt">

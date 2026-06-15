@@ -418,7 +418,7 @@ Each item is a discrete weekend's work. Don't start item N+1 until N is done and
 - Soft-launch to existing Pro subscribers
 - ~25 CCNA labs total in the catalog
 
-**Output after both milestones: free lab driving top-of-funnel + 25 Pro labs as retention/differentiation moat.**
+**Current product split: separate public starter labs drive top-of-funnel; the private catalog remains Pro-only.**
 
 ---
 
@@ -433,7 +433,7 @@ export const lab01: Lab = {
   exam: 'CCNA-200-301',
   difficulty: 1, // 1-5
   estimatedMinutes: 5,
-  isFree: true,  // The free lab. Exactly one lab has this set across the catalog.
+  isFree: false, // Pro catalog lab. Public starters use separate ccna-starter-* ids.
   topology: {
     devices: [
       { id: 'R1', platform: 'isr-4321', interfaces: ['Gi0/0', 'Gi0/1', 'Gi0/2'] }

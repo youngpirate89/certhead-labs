@@ -62,7 +62,7 @@ function configureRouters(lab: LabSession = fresh()): LabSession {
 describe('Lab 03 — starting IPv4 subnetting state', () => {
   it('is a Pro guided lab that fills the numbered Lab 03 gap', () => {
     expect(lab03Ipv4SubnettingRoutedInterfaces.id).toBe('ccna-lab03-ipv4-subnetting-routed-interfaces');
-    expect(lab03Ipv4SubnettingRoutedInterfaces.isFree).toBe(true);
+    expect(lab03Ipv4SubnettingRoutedInterfaces.isFree).toBe(false);
     expect(lab03Ipv4SubnettingRoutedInterfaces.difficulty).toBe(1);
   });
 

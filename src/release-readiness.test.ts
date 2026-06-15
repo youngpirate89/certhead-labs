@@ -5,9 +5,9 @@ import { FREE_LAB_REGISTER_URL, FREE_LAB_UPSELL_COPY } from '@/modes/TryMode';
 const EM_DASH = '\u2014';
 
 describe('release readiness: public free-lab surface', () => {
-  it('keeps the public CTA aligned to the Pro bundle and current 50-lab catalog', () => {
+  it('keeps the public CTA aligned to the Pro bundle and current 60-lab catalog', () => {
     expect(FREE_LAB_REGISTER_URL).toBe('https://certhead.com/register?source=free-lab');
-    expect(FREE_LAB_UPSELL_COPY.proLibrary).toBe('Pro includes the full 50-lab CCNA library.');
+    expect(FREE_LAB_UPSELL_COPY.proLibrary).toBe('Pro includes the full 60-lab CCNA library.');
     expect(FREE_LAB_UPSELL_COPY.cta).toBe('Unlock with CertHead Pro');
     expect(FREE_LAB_UPSELL_COPY.proLibrary).not.toMatch(/20\+|25\+|30\+|40\+/);
     expect(FREE_LAB_UPSELL_COPY.proLibrary).not.toMatch(/\$4\.99|question-only|exam-only/i);
@@ -48,7 +48,7 @@ describe('release readiness: public free-lab surface', () => {
     expect(contract).toContain('getLabById(labId)');
     expect(contract).toContain('unknown, missing, expired, or non-Pro tokens fail closed');
     expect(contract).toContain('ten free CCNA starter labs');
-    expect(contract).toContain('50 catalog labs require Pro');
+    expect(contract).toContain('60 catalog labs require Pro');
     expect(contract).toContain('completion message');
     expect(contract).toContain('window.parent.postMessage');
     expect(contract).toContain('The targetOrigin must not be `*`.');

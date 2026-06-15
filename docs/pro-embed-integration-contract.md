@@ -7,7 +7,7 @@ Purpose: define the boundary this Labs repo owns for JWT/token, Pro entitlement,
 - Maintain the private 60-lab catalog in `src/labs/catalog.ts`.
 - Keep `getLabById(labId)` as the catalog lookup used by the future embed route.
 - Preserve the public free route as ten free CCNA starter labs.
-- Preserve the Pro split: 50 catalog labs require Pro.
+- Preserve the Pro split: 60 catalog labs require Pro.
 - Keep `/try` independent from the full catalog so public users cannot load Pro labs through the free route.
 - Provide UI and simulator state that can report a completion message when every lab objective is met.
 
@@ -37,7 +37,7 @@ Safe failure behavior: unknown, missing, expired, or non-Pro tokens fail closed.
 ## Free and Pro split
 
 - Public `/try`: ten free CCNA starter labs.
-- Pro embed: JWT-gated access to the remaining 50 catalog labs.
+- Pro embed: JWT-gated access to the 60 catalog labs.
 - The private catalog remains part of the $9.99 CertHead Pro bundle.
 - The question and exam tier must not expose private labs.
 

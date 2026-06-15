@@ -34,7 +34,7 @@ export const lab15DefaultStaticRoute: Lab = {
   exam: 'CCNA 200-301',
   difficulty: 1,
   estimatedMinutes: 8,
-  isFree: true,
+  isFree: false,
   scenario:
     "PC-A on the branch LAN (192.168.1.0/24) needs to reach an upstream host at 8.8.8.2. R1 is the branch gateway with a /30 WAN link to R2, which in turn connects to the internet at 8.8.8.0/30. R2 already knows how to return traffic to the LAN, and the upstream INET host already has its default route home - but R1 itself has no path to anything outside its directly-connected subnets. Pinging 8.8.8.2 from PC-A fails today because R1 drops the packet with no matching route.\n\nConfigure a default static route on R1 pointing at R2's WAN address (203.0.113.2). A default route matches every destination with no more-specific entry, so R1 will forward unknown traffic upstream and connectivity comes back end-to-end. Verify with `show ip route` on R1 and confirm with a ping from PC-A.",
   topology: {

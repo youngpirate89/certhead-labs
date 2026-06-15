@@ -15,7 +15,7 @@ export const lab03Ipv4SubnettingRoutedInterfaces: Lab = {
   exam: 'CCNA 200-301',
   difficulty: 1,
   estimatedMinutes: 9,
-  isFree: true,
+  isFree: false,
   scenario:
     "A small company is splitting 172.16.10.0/24 into right-sized branch subnets. The Sales LAN needs up to 50 hosts, so it uses 172.16.10.0/26. The Support LAN needs up to 25 hosts, so it uses 172.16.10.64/27. The point-to-point router link uses 10.10.10.0/30.\n\nPC-A and PC-B are already addressed by the desktop team. Your job is to configure the router interfaces with the correct subnet masks, bring the links up, verify the interface table, then prove each PC can reach its local default gateway. Do not add static routes yet - routing between the two LANs comes in the next lab.",
   topology: {

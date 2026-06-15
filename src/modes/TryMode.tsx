@@ -20,6 +20,10 @@ interface CompletionCta {
   readonly proCopy?: string;
 }
 
+function starterTitleWithoutPrefix(title: string): string {
+  return title.replace(/^Starter\s+\d+:\s*/, '');
+}
+
 function getCompletionCta(labId: string): CompletionCta {
   const currentIndex = FREE_CCNA_STARTER_LAB_IDS.findIndex((id) => id === labId);
   const nextId = currentIndex >= 0 ? FREE_CCNA_STARTER_LAB_IDS[currentIndex + 1] : undefined;
@@ -29,7 +33,7 @@ function getCompletionCta(labId: string): CompletionCta {
     return {
       href: `/try?lab=${encodeURIComponent(nextLab.id)}`,
       label: 'Continue to next free lab',
-      nextCopy: `Starter ${currentIndex + 2}, ${nextLab.title}.`,
+      nextCopy: `Starter ${currentIndex + 2}, ${starterTitleWithoutPrefix(nextLab.title)}.`,
     };
   }
 
@@ -44,7 +48,7 @@ function getCompletionCta(labId: string): CompletionCta {
 }
 
 export const FREE_LAB_UPSELL_COPY = {
-  proLibrary: 'Pro includes the full 50-lab CCNA library.',
+  proLibrary: 'Pro includes the full 60-lab CCNA library.',
   cta: 'Unlock with CertHead Pro',
 } as const;
 

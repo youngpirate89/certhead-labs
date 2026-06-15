@@ -13,9 +13,9 @@ function run(s: Session, lines: string[]): Session {
   return lines.reduce((acc, line) => applyCommand(acc, line).session, s);
 }
 
-describe('free lab — pilot validation', () => {
-  it('declares exactly one free lab via isFree', () => {
-    expect(lab.isFree).toBe(true);
+describe('Lab 01 — interface IP validation', () => {
+  it('remains Pro-only in the private catalog; free starter copy has a separate id', () => {
+    expect(lab.isFree).toBe(false);
   });
 
   it('starts with no objectives met', () => {
@@ -120,7 +120,7 @@ describe('free lab — pilot validation', () => {
  * on Gi0/0 so `no shutdown` brings the line protocol genuinely up. The peer
  * carries no objectives and no setup — it exists only as a link partner.
  */
-describe('free lab — Gi0/0 reaches genuine up/up via the upstream switch peer', () => {
+describe('Lab 01 — Gi0/0 reaches genuine up/up via the upstream switch peer', () => {
   function r1Gi0(ls: LabSession) {
     const r1 = ls.devices.R1;
     if (r1.kind !== 'router') throw new Error('R1 is not a router');

@@ -5,7 +5,7 @@ Purpose: track validation that must happen in the main CertHead app or API, the 
 ## Scope rules
 
 - Public route: keep `labs.certhead.com/try` limited to the 10 free CCNA starter labs.
-- Private catalog: keep the remaining 50 labs gated for the $9.99 CertHead Pro bundle.
+- Private catalog: keep the 60 catalog labs gated for the $9.99 CertHead Pro bundle.
 - Do not expose private labs through the question and exam tier.
 - Do not add server auth in this repo unless the main CertHead app or API integration contract is already defined.
 

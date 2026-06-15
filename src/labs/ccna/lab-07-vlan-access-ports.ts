@@ -40,7 +40,7 @@ export const lab07VlanAccessPorts: Lab = {
   exam: 'CCNA 200-301',
   difficulty: 1,
   estimatedMinutes: 8,
-  isFree: true,
+  isFree: false,
   scenario:
     "The network team is segmenting the office into departments. PC-A belongs to the Sales team (VLAN 10, subnet 192.168.10.0/24) and PC-B belongs to the Engineering team (VLAN 20, subnet 192.168.20.0/24). Your task: create both VLANs on SW1, name them, assign each PC's port to the correct VLAN, then verify the segmentation - PC-A and PC-B should not be able to reach each other without inter-VLAN routing.\n\nBoth PCs have been pre-configured with static IP addresses by the network admin - PC-A is 192.168.10.10 and PC-B is 192.168.20.10. You do not need to change anything on the PCs. VLAN assignment happens on the switch; the PCs are unaware of which VLAN they are in.",
   topology: {

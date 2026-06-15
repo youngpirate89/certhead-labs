@@ -28,7 +28,7 @@ export const lab05OspfSingleArea: Lab = {
   exam: 'CCNA 200-301',
   difficulty: 2,
   estimatedMinutes: 12,
-  isFree: true,
+  isFree: false,
   scenario:
     "You're connecting a branch office to HQ. R1 serves the HQ LAN (192.168.1.0/24) and R2 serves the branch LAN (192.168.2.0/24). Interfaces are already configured and up. Your task: configure OSPF area 0 on both routers so routes are exchanged dynamically, verify the neighbor relationship formed, then confirm PC-A can reach PC-B.",
   topology: {

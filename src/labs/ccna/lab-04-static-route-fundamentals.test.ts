@@ -38,9 +38,9 @@ function configureRoutes(lab: LabSession = fresh()): LabSession {
 }
 
 describe('Lab 04 — static route fundamentals starting state', () => {
-  it('is a free starter lab that fills the numbered Lab 04 gap', () => {
+  it('is a Pro catalog lab that can inspire a distinct free starter version', () => {
     expect(lab04StaticRouteFundamentals.id).toBe('ccna-lab04-static-route-fundamentals');
-    expect(lab04StaticRouteFundamentals.isFree).toBe(true);
+    expect(lab04StaticRouteFundamentals.isFree).toBe(false);
     expect(lab04StaticRouteFundamentals.difficulty).toBe(2);
   });
 

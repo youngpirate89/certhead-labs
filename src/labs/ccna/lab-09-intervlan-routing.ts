@@ -43,7 +43,7 @@ export const lab09IntervlanRouting: Lab = {
   exam: 'CCNA 200-301',
   difficulty: 3,
   estimatedMinutes: 15,
-  isFree: true,
+  isFree: false,
   scenario:
     "The Sales team (VLAN 10, 192.168.10.0/24) and the Engineering team (VLAN 20, 192.168.20.0/24) sit on the same switch SW1 but on different VLANs. The two teams need to talk to each other. SW1 is already trunking to R1 on Gi0/0 (allowed VLANs 1,10,20) and the access ports are assigned correctly - but R1 has no IP configuration yet.\n\nYour task: configure router-on-a-stick on R1. Bring up Gi0/0 (no IP - the physical is the trunk carrier), create two subinterfaces Gi0/0.10 and Gi0/0.20, set dot1Q encapsulation matching each VLAN, assign the gateway IPs (192.168.10.1 and 192.168.20.1) - the subinterfaces come up off the physical, so you don't `no shutdown` them individually - verify with `show ip interface brief`, then prove the cross-VLAN path with a ping from PC-A to PC-B.",
   topology: {

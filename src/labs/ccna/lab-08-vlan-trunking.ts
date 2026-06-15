@@ -36,7 +36,7 @@ export const lab08VlanTrunking: Lab = {
   exam: 'CCNA 200-301',
   difficulty: 2,
   estimatedMinutes: 10,
-  isFree: true,
+  isFree: false,
   scenario:
     'The Sales team (VLAN 10) spans two switches. PC-A is connected to SW1 and PC-B is connected to SW2. Both switches have VLAN 10 configured and the correct access ports assigned. However, PC-A cannot reach PC-B. Your task: identify why, configure the link between SW1 and SW2 as a trunk, verify VLAN 10 passes across it, then confirm PC-A can reach PC-B.\n\nBoth PCs are statically configured with IPs in the 192.168.10.0/24 subnet - PC-A is 192.168.10.10 and PC-B is 192.168.10.20. Because both PCs sit in the same VLAN and same subnet they only need Layer 2 switching between them; no routing required, one VLAN equals one subnet.',
   topology: {

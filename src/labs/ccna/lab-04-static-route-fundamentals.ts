@@ -14,7 +14,7 @@ export const lab04StaticRouteFundamentals: Lab = {
   exam: 'CCNA 200-301',
   difficulty: 2,
   estimatedMinutes: 10,
-  isFree: true,
+  isFree: false,
   scenario:
     "The branch addressing plan from the previous lab is now installed: Sales uses 172.16.10.0/26 behind R1, Support uses 172.16.10.64/27 behind R2, and the routers share the 10.10.10.0/30 transit link. Local gateway pings work, but PC-A still cannot reach PC-B because neither router has a route to the remote LAN.\n\nConfigure one static route on each router, verify the routing tables, then prove PC-A can reach PC-B. This lab focuses on the core static-route pattern: destination network, subnet mask, and next-hop IP address.",
   topology: {

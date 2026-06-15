@@ -14,7 +14,7 @@ describe('lab-07-vlan-access-ports — starting state', () => {
   it('topology shape: 3 devices (2 PCs, 1 switch), 2 links, isFree:true', () => {
     expect(lab.topology.devices).toHaveLength(3);
     expect(lab.topology.links).toHaveLength(2);
-    expect(lab.isFree).toBe(true);
+    expect(lab.isFree).toBe(false);
     const kinds = lab.topology.devices.map((d) => d.kind).sort();
     expect(kinds).toEqual(['pc', 'pc', 'switch']);
   });
