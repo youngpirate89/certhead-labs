@@ -29,7 +29,7 @@ describe('release readiness: public free-lab surface', () => {
   it('keeps TryMode hardwired to the public CCNA starter list without importing the Pro catalog', () => {
     const tryModeSource = readFileSync(`${process.cwd()}/src/modes/TryMode.tsx`, 'utf8');
 
-    expect(tryModeSource).toContain("import { getFreeCcnaStarterLabById } from '@/labs/free-starter';");
+    expect(tryModeSource).toContain("import { getFreeCcnaStarterLabById, getFreeCcnaStarterLabs } from '@/labs/free-starter';");
     expect(tryModeSource).toContain("import { DEFAULT_FREE_CCNA_STARTER_LAB_ID, resolveTryModeLabId } from '@/routing/tryLabSelection';");
     expect(tryModeSource).not.toMatch(/from ['"]@\/labs\/catalog['"]/);
     expect(tryModeSource).not.toContain('getLabById');

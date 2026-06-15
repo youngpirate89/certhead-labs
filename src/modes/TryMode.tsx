@@ -5,7 +5,7 @@ import { TopologyPanel } from '@/components/TopologyPanel';
 import { ObjectivesPanel } from '@/components/ObjectivesPanel';
 import { FloatingTerminalPanel } from '@/components/terminal/FloatingTerminalPanel';
 import { useLabSession } from '@/engine/terminal/useLabSession';
-import { getFreeCcnaStarterLabById } from '@/labs/free-starter';
+import { getFreeCcnaStarterLabById, getFreeCcnaStarterLabs } from '@/labs/free-starter';
 import { DEFAULT_FREE_CCNA_STARTER_LAB_ID, resolveTryModeLabId } from '@/routing/tryLabSelection';
 import { initAnalytics, track } from '@/analytics/posthog';
 
@@ -99,6 +99,20 @@ export function TryMode() {
   }, [lab]);
   const platformLabel = useCallback((id: string) => platformById.get(id), [platformById]);
 
+  const starterLabLinks = useMemo(
+    () =>
+      getFreeCcnaStarterLabs().map((starterLab, index) => ({
+        id: starterLab.id,
+        title: starterLab.title,
+        estimatedMinutes: starterLab.estimatedMinutes,
+        difficulty: starterLab.difficulty,
+        href: `/try?lab=${encodeURIComponent(starterLab.id)}`,
+        isActive: starterLab.id === lab.id,
+        sequenceNumber: index + 1,
+      })),
+    [lab.id],
+  );
+
   return (
     <>
       <Layout
@@ -171,6 +185,7 @@ export function TryMode() {
             estimatedMinutes={lab.estimatedMinutes}
             scenario={lab.scenario}
             objectives={lab.objectives.map((o) => ({ id: o.id, text: o.text }))}
+            starterLabs={starterLabLinks}
             onStart={startLab}
           />
         </div>
