@@ -92,20 +92,226 @@
   color: #0f172a !important;
 }
 
+/* The docked/mobile terminal lives inside the lab theme root, but its chrome
+   and terminal content intentionally keep their independent dark palette. */
+.lab-theme-light .terminal-theme-isolation {
+  background-color: #0d1117 !important;
+  border-color: #30363d !important;
+  color: #e5e7eb !important;
+}
+
+.lab-theme-light .terminal-theme-isolation .bg-panel-bg {
+  background-color: #0d1117 !important;
+}
+
+.lab-theme-light .terminal-theme-isolation [class*='bg-panel-header'] {
+  background-color: #161b22 !important;
+}
+
+.lab-theme-light .terminal-theme-isolation .border-panel-border {
+  border-color: #30363d !important;
+}
+
+.lab-theme-light .terminal-theme-isolation .text-terminal-fg,
+.lab-theme-light .terminal-theme-isolation .text-terminal-fg\/80,
+.lab-theme-light .terminal-theme-isolation .text-terminal-fg\/70 {
+  color: #e5e7eb !important;
+}
+
+.lab-theme-light .terminal-theme-isolation .text-terminal-dim,
+.lab-theme-light .terminal-theme-isolation .text-terminal-dim\/70 {
+  color: #94a3b8 !important;
+}
+
+/* Topology labels and device artwork need dark-on-light contrast. */
+.lab-theme-light .react-flow__node button.group [data-device-icon-type] svg,
+.lab-theme-light .react-flow__node button.group [data-device-icon-type] svg [stroke] {
+  color: #64748b !important;
+  stroke: #64748b !important;
+}
+
+.lab-theme-light .react-flow__node button.group [data-device-icon-type] svg [fill]:not([fill='none']) {
+  fill: #64748b !important;
+}
+
+.lab-theme-light .react-flow__node button.group[aria-pressed='true'] [data-device-icon-type] svg,
+.lab-theme-light .react-flow__node button.group[aria-pressed='true'] [data-device-icon-type] svg [stroke] {
+  color: #0f766e !important;
+  stroke: #0f766e !important;
+}
+
+.lab-theme-light .react-flow__node button.group[aria-pressed='true'] [data-device-icon-type] svg [fill]:not([fill='none']) {
+  fill: #0f766e !important;
+}
+
+.lab-theme-light [data-device-platform-label] {
+  color: #475569 !important;
+}
+
+.lab-theme-light [data-iface-label],
+.lab-theme-light [data-link-network] {
+  fill: #475569 !important;
+}
+
+/* Active-workspace hierarchy. These surfaces add depth without changing any
+   region dimensions or intercepting topology/terminal interactions. */
+.product-header {
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.025), 0 8px 24px rgba(0, 0, 0, 0.18);
+  position: relative;
+  z-index: 30;
+}
+
+.workspace-surface {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+.topology-surface {
+  box-shadow: inset -12px 0 24px -24px rgba(0, 0, 0, 0.95);
+}
+
+.objectives-rail {
+  border-left-width: 1px;
+  box-shadow: -10px 0 28px -22px rgba(0, 0, 0, 0.9);
+  position: relative;
+  z-index: 10;
+}
+
+.terminal-dock-surface {
+  border-top-color: rgba(94, 234, 212, 0.24);
+  box-shadow: 0 -8px 24px -20px rgba(0, 0, 0, 0.95);
+  position: relative;
+  z-index: 20;
+}
+
+.objectives-header {
+  background: rgba(13, 17, 23, 0.72);
+}
+
+.objective-card,
+.help-section,
+.reset-control {
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+.lab-theme-light .product-header {
+  box-shadow: 0 1px 0 #ffffff, 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+.lab-theme-light .workspace-surface {
+  box-shadow: inset 0 1px 0 #ffffff;
+}
+
+.lab-theme-light .topology-surface {
+  box-shadow: inset -12px 0 24px -24px rgba(15, 23, 42, 0.28);
+}
+
+.lab-theme-light .objectives-rail {
+  background-color: #f8fafc !important;
+  box-shadow: -10px 0 28px -22px rgba(15, 23, 42, 0.3);
+}
+
+.lab-theme-light .objectives-panel {
+  background-color: #f8fafc !important;
+}
+
+.lab-theme-light .objectives-header {
+  background-color: #ffffff;
+}
+
+.lab-theme-light .objective-card {
+  background-color: #ffffff !important;
+  border-color: #d7e0ea !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.lab-theme-light .objective-card[data-objective-state='completed'] {
+  background-color: #f0fdfa !important;
+  border-color: #99d8ce !important;
+}
+
+.lab-theme-light .objective-card[data-objective-state='completed'] .objective-number {
+  background-color: #ccfbf1 !important;
+  border-color: #5bb8aa !important;
+  color: #0f766e !important;
+}
+
+.lab-theme-light .objective-number {
+  background-color: #f1f5f9 !important;
+  border-color: #94a3b8 !important;
+  color: #334155 !important;
+}
+
+.lab-theme-light .objective-progress-track {
+  background-color: #dbe3ee !important;
+}
+
+.lab-theme-light .objective-progress-fill {
+  background-color: #0f766e !important;
+}
+
+.lab-theme-light .exam-badge,
+.lab-theme-light .objective-progress-summary,
+.lab-theme-light .objective-heading[data-objective-complete='true'] {
+  color: #115e59 !important;
+}
+
+.lab-theme-light .exam-badge {
+  border-color: #5b9f98 !important;
+  background-color: #f0fdfa !important;
+}
+
+.lab-theme-light .objective-card[data-objective-state='completed'] .objective-text,
+.lab-theme-light .objective-card[data-objective-state='completed'] .objective-state-label,
+.lab-theme-light .objective-card[data-objective-state='completed'] .objective-status-icon {
+  color: #115e59 !important;
+}
+
+.lab-theme-light .objective-card[data-objective-state='completed'] .objective-status-icon {
+  border-color: #5b9f98 !important;
+  background-color: #ccfbf1 !important;
+}
+
+.lab-theme-light .help-section {
+  background-color: #ffffff !important;
+  border-color: #d7e0ea !important;
+}
+
+.lab-theme-light .reset-control {
+  background-color: #ffffff;
+  border-color: #cbd5e1 !important;
+  color: #475569 !important;
+}
+
+.lab-theme-light .completion-banner {
+  background-color: #ecfdf5 !important;
+  border-color: #5b9f98 !important;
+}
+
+.lab-theme-light .completion-banner .completion-title,
+.lab-theme-light .completion-banner .completion-status-icon {
+  color: #115e59 !important;
+}
+
+.lab-theme-light .completion-banner .completion-status-icon {
+  border-color: #5b9f98 !important;
+  background-color: #ccfbf1 !important;
+}
+
+.lab-theme-light .completion-banner button {
+  color: #115e59 !important;
+  border-color: #5b9f98 !important;
+}
+
 @layer utilities {
-  /* Plays once when an objective transitions to met — a brief teal flash that
-     fades, plus a slight nudge. Coupled with check-pop on the check icon. */
+  /* Plays once when an objective transitions to met — a brief, layout-stable
+     teal surface flash coupled with check-pop on the check icon. */
   @keyframes objective-flash {
     0% {
       background-color: rgba(94, 234, 212, 0.18);
-      transform: translateX(0);
-    }
-    20% {
-      transform: translateX(2px);
+      box-shadow: 0 0 0 1px rgba(94, 234, 212, 0.45);
     }
     100% {
-      background-color: transparent;
-      transform: translateX(0);
+      box-shadow: 0 0 0 1px rgba(94, 234, 212, 0);
     }
   }
   .animate-objective-flash {
