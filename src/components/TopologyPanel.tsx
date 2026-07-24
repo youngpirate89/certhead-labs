@@ -1126,7 +1126,7 @@ function DeviceNode({ data }: NodeProps<Node<DeviceNodeData>>) {
         aria-pressed={active}
         aria-label={`Console for ${view.hostname}`}
         style={{ width: NODE_WIDTH, height: NODE_HEIGHT }}
-        className={`group relative flex flex-col justify-between gap-2 rounded-md border bg-gradient-to-b from-[#1b2531] to-[#0e141b] px-3 py-2.5 text-left transition-colors ${
+        className={`group relative flex flex-col justify-between gap-1 rounded-md border bg-gradient-to-b from-[#1b2531] to-[#0e141b] px-3 py-2 text-left transition-colors ${
           active
             ? 'border-terminal-prompt shadow-[0_0_0_1px_rgba(94,234,212,0.25),inset_0_1px_0_rgba(255,255,255,0.06)]'
             : 'border-panel-border hover:border-terminal-dim/70'
@@ -1134,7 +1134,7 @@ function DeviceNode({ data }: NodeProps<Node<DeviceNodeData>>) {
       >
         <div className="flex flex-col items-center gap-0.5">
           <span data-device-icon-type={iconType} aria-hidden>
-            <DeviceIcon type={iconType} size={40} color={active ? '#e2e8f0' : '#94a3b8'} />
+            <DeviceIcon type={iconType} size={46} color={active ? '#e2e8f0' : '#94a3b8'} />
           </span>
           <span className="font-sans text-sm font-semibold tracking-tight text-terminal-fg">
             {view.hostname}

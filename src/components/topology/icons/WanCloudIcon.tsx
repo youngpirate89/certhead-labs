@@ -6,29 +6,33 @@ interface WanCloudIconProps {
 export default function WanCloudIcon({ size = 40, color }: WanCloudIconProps) {
   return (
     <svg
+      data-network-icon="wan-cloud"
       width={size}
       height={size}
-      viewBox="0 0 40 40"
+      viewBox="0 0 48 48"
       fill="none"
       color={color}
       style={{ color }}
+      focusable="false"
+      aria-hidden="true"
       xmlns="http://www.w3.org/2000/svg"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
     >
       <path
-        d="M13.2 29.5h15.7c4 0 7.1-2.9 7.1-6.6 0-3.5-2.8-6.3-6.4-6.6C28.5 11.7 24.5 8.5 20 8.5c-5 0-9.2 3.7-9.8 8.5-3.6.9-6.2 3.8-6.2 7 0 3.1 2.4 5.5 5.6 5.5h3.6Z"
-        stroke={color}
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+        d="M13 38h23c5 0 9-3.8 9-8.5 0-4.4-3.5-8-8-8.5C35.5 14.6 30.4 10 24 10c-7 0-12.8 5.2-13.7 12C6 22.8 3 26.2 3 30.3 3 34.6 6.7 38 11.3 38H13Z"
+        fill="currentColor"
+        opacity="0.08"
       />
-      <path
-        d="M12 23.3h16M15.5 19.5h12M17.5 26.9h8"
-        stroke={color}
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        opacity="0.75"
-      />
-      <circle cx="30.5" cy="23.3" r="1.5" fill={color} opacity="0.9" />
+      <path d="M13 38h23c5 0 9-3.8 9-8.5 0-4.4-3.5-8-8-8.5C35.5 14.6 30.4 10 24 10c-7 0-12.8 5.2-13.7 12C6 22.8 3 26.2 3 30.3 3 34.6 6.7 38 11.3 38H13Z" />
+      <path d="m15 29 7-5 7 4 6-5" opacity="0.65" />
+      <path d="M22 24v8m7-4v5m-14-4v4m20-10v10" opacity="0.42" />
+      <circle cx="15" cy="29" r="1.7" fill="currentColor" stroke="none" />
+      <circle cx="22" cy="24" r="1.7" fill="currentColor" stroke="none" />
+      <circle cx="29" cy="28" r="1.7" fill="currentColor" stroke="none" />
+      <circle cx="35" cy="23" r="1.7" fill="currentColor" stroke="none" />
     </svg>
   );
 }

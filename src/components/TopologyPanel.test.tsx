@@ -94,6 +94,10 @@ describe('TopologyPanel', () => {
     );
 
     expect(container.querySelector('[data-device-icon-type="workstation"]')).not.toBeNull();
+    expect(container.querySelector('svg[data-network-icon="workstation"]')).toHaveAttribute(
+      'width',
+      '46',
+    );
     expect(container.querySelector('[data-device-platform-label="WORKSTATION"]')).not.toBeNull();
     expect(screen.queryByText('WINDOWS WORKSTATION')).not.toBeInTheDocument();
   });
