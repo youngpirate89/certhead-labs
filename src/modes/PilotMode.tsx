@@ -65,6 +65,12 @@ export function PilotMode({ lab, onCompleted }: { lab: Lab; onCompleted?: () => 
     return m;
   }, [lab]);
   const platformLabel = useCallback((id: string) => platformById.get(id), [platformById]);
+  const deviceClassById = useMemo(() => {
+    const m = new Map<string, Lab['topology']['devices'][number]['deviceClass']>();
+    for (const d of lab.topology.devices) m.set(d.id, d.deviceClass);
+    return m;
+  }, [lab]);
+  const deviceClass = useCallback((id: string) => deviceClassById.get(id), [deviceClassById]);
 
   return (
     <>
@@ -105,6 +111,7 @@ export function PilotMode({ lab, onCompleted }: { lab: Lab; onCompleted?: () => 
           forDevice={session.forDevice}
           platformLabel={platformLabel}
           deviceKind={session.deviceKind}
+          deviceClass={deviceClass}
           pcNetwork={session.pcNetwork}
           onPcNetworkApply={session.updatePcNetwork}
           onSelectDevice={session.setActiveDevice}

@@ -5,6 +5,7 @@ import { TopologyPanel } from '@/components/TopologyPanel';
 import { ObjectivesPanel } from '@/components/ObjectivesPanel';
 import { FloatingTerminalPanel } from '@/components/terminal/FloatingTerminalPanel';
 import { useLabSession } from '@/engine/terminal/useLabSession';
+import type { Lab } from '@/engine/types';
 import { FREE_CCNA_STARTER_LAB_IDS, getFreeCcnaStarterLabById, getFreeCcnaStarterLabs } from '@/labs/free-starter';
 import { DEFAULT_FREE_CCNA_STARTER_LAB_ID, resolveTryModeLabId } from '@/routing/tryLabSelection';
 import { initAnalytics, track } from '@/analytics/posthog';
@@ -133,6 +134,12 @@ export function TryMode() {
     return m;
   }, [lab]);
   const platformLabel = useCallback((id: string) => platformById.get(id), [platformById]);
+  const deviceClassById = useMemo(() => {
+    const m = new Map<string, Lab['topology']['devices'][number]['deviceClass']>();
+    for (const d of lab.topology.devices) m.set(d.id, d.deviceClass);
+    return m;
+  }, [lab]);
+  const deviceClass = useCallback((id: string) => deviceClassById.get(id), [deviceClassById]);
 
   const starterLabLinks = useMemo(
     () =>
@@ -201,6 +208,7 @@ export function TryMode() {
               forDevice={session.forDevice}
               platformLabel={platformLabel}
               deviceKind={session.deviceKind}
+              deviceClass={deviceClass}
               pcNetwork={session.pcNetwork}
               onPcNetworkApply={session.updatePcNetwork}
               onSelectDevice={session.setActiveDevice}

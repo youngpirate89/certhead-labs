@@ -7,8 +7,9 @@
  * internals. Adding new device kinds (3b/3c) means adding their icon to
  * DeviceNode; nothing in this file changes.
  *
- * Read-only: nodes don't drag, no drag-to-connect. Clicking a node calls
- * onSelectDevice — the seam useLabSession uses to switch the active console.
+ * Device nodes can be repositioned locally to untangle a dense topology;
+ * drag-to-connect remains disabled. Clicking a node calls onSelectDevice —
+ * the seam useLabSession uses to switch the active console.
  *
  * N=1 still works: a single node with no edges renders fine.
  */
@@ -24,9 +25,11 @@ import {
 import type { Node, NodeProps, Viewport } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
+  useState,
   type MouseEvent,
   type PointerEvent,
   type ReactNode,
@@ -192,7 +195,7 @@ function layoutNodes(
       position: pos,
       sourcePosition: Position.Right,
       targetPosition: Position.Left,
-      draggable: false,
+      draggable: true,
       selectable: false,
       // Explicit dimensions so React Flow can position edges without waiting
       // for ResizeObserver — `isNodeInitialized` accepts `initialWidth` as a
@@ -668,6 +671,8 @@ function PortLed({
  */
 function applyFit(
   el: HTMLElement,
+  contentMinX: number,
+  contentMinY: number,
   contentWidth: number,
   contentHeight: number,
   setViewport: (viewport: Viewport, options?: { duration?: number }) => void,
@@ -697,8 +702,9 @@ function applyFit(
   // handle the right overflow — PC-A clipped on the left is jarring and breaks
   // the diagnostic mental model.
   const fitsHorizontally = scaledW <= cw - 2 * padX;
-  const x = fitsHorizontally ? (cw - scaledW) / 2 : padX;
-  const y = (ch - scaledH) / 2;
+  const xAnchor = fitsHorizontally ? (cw - scaledW) / 2 : padX;
+  const x = xAnchor - contentMinX * zoom;
+  const y = (ch - scaledH) / 2 - contentMinY * zoom;
 
   setViewport({ x, y, zoom }, options);
 }
@@ -721,10 +727,14 @@ function applyFit(
  */
 function CanvasControls({
   containerRef,
+  contentMinX,
+  contentMinY,
   contentWidth,
   contentHeight,
 }: {
   readonly containerRef: React.RefObject<HTMLDivElement>;
+  readonly contentMinX: number;
+  readonly contentMinY: number;
   readonly contentWidth: number;
   readonly contentHeight: number;
 }) {
@@ -734,7 +744,7 @@ function CanvasControls({
   const stop = (e: MouseEvent | PointerEvent) => e.stopPropagation();
   const handleFit = () => {
     const el = containerRef.current;
-    if (el) applyFit(el, contentWidth, contentHeight, setViewport, { duration: 200 });
+    if (el) applyFit(el, contentMinX, contentMinY, contentWidth, contentHeight, setViewport, { duration: 200 });
   };
   return (
     <div
@@ -813,23 +823,40 @@ function CanvasButton({
  */
 function CanvasAutoFit({
   containerRef,
+  topologyIdentity,
+  contentMinX,
+  contentMinY,
   contentWidth,
   contentHeight,
   fitViewSignal = 0,
 }: {
   readonly containerRef: React.RefObject<HTMLDivElement>;
+  readonly topologyIdentity: string;
+  readonly contentMinX: number;
+  readonly contentMinY: number;
   readonly contentWidth: number;
   readonly contentHeight: number;
   readonly fitViewSignal?: number;
 }) {
   const { setViewport } = useReactFlow();
+  const boundsRef = useRef({ contentMinX, contentMinY, contentWidth, contentHeight });
+  boundsRef.current = { contentMinX, contentMinY, contentWidth, contentHeight };
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
     function fit(options?: { duration?: number }) {
       if (!el) return;
-      applyFit(el, contentWidth, contentHeight, setViewport, options);
+      const bounds = boundsRef.current;
+      applyFit(
+        el,
+        bounds.contentMinX,
+        bounds.contentMinY,
+        bounds.contentWidth,
+        bounds.contentHeight,
+        setViewport,
+        options,
+      );
     }
 
     fit();
@@ -837,14 +864,23 @@ function CanvasAutoFit({
     const ro = new ResizeObserver(() => fit());
     ro.observe(el);
     return () => ro.disconnect();
-  }, [containerRef, contentWidth, contentHeight, setViewport]);
+  }, [containerRef, setViewport, topologyIdentity]);
 
   useEffect(() => {
     if (fitViewSignal <= 0) return;
     const el = containerRef.current;
     if (!el) return;
-    applyFit(el, contentWidth, contentHeight, setViewport, { duration: 120 });
-  }, [containerRef, contentWidth, contentHeight, fitViewSignal, setViewport]);
+    const bounds = boundsRef.current;
+    applyFit(
+      el,
+      bounds.contentMinX,
+      bounds.contentMinY,
+      bounds.contentWidth,
+      bounds.contentHeight,
+      setViewport,
+      { duration: 120 },
+    );
+  }, [containerRef, fitViewSignal, setViewport]);
 
   return null;
 }
@@ -859,18 +895,44 @@ export function TopologyPanel({
   zoomOnScroll = true,
   fitViewSignal = 0,
 }: TopologyPanelProps) {
+  const [draggedPositions, setDraggedPositions] = useState<
+    ReadonlyMap<string, { readonly x: number; readonly y: number }>
+  >(() => new Map());
   const handleSelect = useMemo(
     () => (id: string) => onSelectDevice?.(id),
     [onSelectDevice],
   );
 
-  // Single source of truth for per-device canvas-space positions. layoutNodes
-  // and EdgeOverlay both read these — keeps the cable geometry and the node
-  // placement in lockstep.
-  const positionMap = useMemo(
+  // Authored/default positions are the reset baseline. A learner can drag
+  // individual devices without altering the lab artifact itself.
+  const basePositionMap = useMemo(
     () => computePositions(devices, positions),
     [devices, positions],
   );
+  const positionMap = useMemo(() => {
+    const merged = new Map(basePositionMap);
+    for (const [id, position] of draggedPositions) {
+      if (merged.has(id)) merged.set(id, position);
+    }
+    return merged;
+  }, [basePositionMap, draggedPositions]);
+
+  const topologyIdentity = useMemo(
+    () => devices.map((device) => device.id).sort().join('|'),
+    [devices],
+  );
+  useEffect(() => {
+    setDraggedPositions(new Map());
+  }, [topologyIdentity, positions]);
+
+  const handleNodeDrag = useCallback((_event: unknown, node: Node) => {
+    if (node.type !== 'device') return;
+    setDraggedPositions((current) => {
+      const next = new Map(current);
+      next.set(node.id, { x: node.position.x, y: node.position.y });
+      return next;
+    });
+  }, []);
 
   const deviceNodes = useMemo(
     () => layoutNodes(devices, links ?? [], positionMap, activeDeviceId, handleSelect),
@@ -904,9 +966,9 @@ export function TopologyPanel({
   // Bounding box of the layout — for CanvasAutoFit's zoom-to-fit calculation.
   // For the default linear row this collapses to the original (rowWidth,
   // NODE_HEIGHT); for T-shapes / hub-spokes (Lab 09) it captures both axes.
-  const { contentWidth, contentHeight } = useMemo(() => {
+  const { contentMinX, contentMinY, contentWidth, contentHeight } = useMemo(() => {
     if (devices.length === 0) {
-      return { contentWidth: NODE_WIDTH, contentHeight: NODE_HEIGHT };
+      return { contentMinX: 0, contentMinY: 0, contentWidth: NODE_WIDTH, contentHeight: NODE_HEIGHT };
     }
     let minX = Infinity;
     let maxX = -Infinity;
@@ -927,6 +989,8 @@ export function TopologyPanel({
       if (p.y + DECORATION_HEIGHT > maxY) maxY = p.y + DECORATION_HEIGHT;
     }
     return {
+      contentMinX: minX,
+      contentMinY: minY,
       contentWidth: Math.max(1, maxX - minX),
       contentHeight: Math.max(1, maxY - minY),
     };
@@ -970,7 +1034,8 @@ export function TopologyPanel({
             minZoom={MIN_ZOOM}
             maxZoom={MAX_ZOOM}
             proOptions={{ hideAttribution: true }}
-            nodesDraggable={false}
+            nodesDraggable={true}
+            onNodeDrag={handleNodeDrag}
             nodesConnectable={false}
             // Stays false — enabling React Flow's selection caused its internal
             // click handler to stopPropagation on node clicks, killing both our
@@ -1009,11 +1074,16 @@ export function TopologyPanel({
           </ReactFlow>
           <CanvasControls
             containerRef={canvasWrapperRef}
+            contentMinX={contentMinX}
+            contentMinY={contentMinY}
             contentWidth={contentWidth}
             contentHeight={contentHeight}
           />
           <CanvasAutoFit
             containerRef={canvasWrapperRef}
+            topologyIdentity={topologyIdentity}
+            contentMinX={contentMinX}
+            contentMinY={contentMinY}
             contentWidth={contentWidth}
             contentHeight={contentHeight}
             fitViewSignal={fitViewSignal}
@@ -1064,9 +1134,14 @@ function platformBadgeLabel(view: DeviceTopologyView): string {
   // colliding with the centered icon. Routers/switches keep their concrete
   // platform (`ISR4321`, `C2960`); PCs use their compact visual class.
   if (view.kind === 'pc') {
+    if (view.deviceClass === 'wireless-client') return 'WLAN CLIENT';
+    if (view.deviceClass === 'access-point') return 'LIGHTWEIGHT AP';
+    if (/wireless lan controller/i.test(view.platform)) return 'WLC';
     const label = view.deviceClass ?? 'workstation';
     return label.replace('-', ' ').toUpperCase();
   }
+  const catalyst = /^Catalyst\s+(.+)$/i.exec(view.platform);
+  if (catalyst) return `C${catalyst[1].replace(/\s+/g, '')}`.toUpperCase();
   return view.platform.toUpperCase();
 }
 
@@ -1125,6 +1200,7 @@ function DeviceNode({ data }: NodeProps<Node<DeviceNodeData>>) {
         onClick={onClick}
         aria-pressed={active}
         aria-label={`Console for ${view.hostname}`}
+        data-device-draggable="true"
         style={{ width: NODE_WIDTH, height: NODE_HEIGHT }}
         className={`group relative flex flex-col justify-between gap-1 rounded-md border bg-gradient-to-b from-[#1b2531] to-[#0e141b] px-3 py-2 text-left transition-colors ${
           active
@@ -1149,7 +1225,7 @@ function DeviceNode({ data }: NodeProps<Node<DeviceNodeData>>) {
           ) : null}
         </div>
         <span
-          className="pointer-events-none absolute right-2 top-1.5 max-w-[76px] truncate font-mono text-[9px] uppercase tracking-[0.08em] text-[#9ca3af]"
+          className="pointer-events-none absolute right-2 top-1.5 whitespace-nowrap font-mono text-[9px] uppercase tracking-[0.08em] text-[#9ca3af]"
           data-device-platform-label={badgeLabel}
           title={view.platform}
         >

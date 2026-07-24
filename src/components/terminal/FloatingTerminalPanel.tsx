@@ -51,6 +51,9 @@ export interface FloatingTerminalPanelProps {
   /** Optional platform label per device (e.g. `router`, `pc`). */
   readonly platformLabel?: (id: string) => string | undefined;
   readonly deviceKind?: (id: string) => DeviceKind | undefined;
+  readonly deviceClass?: (
+    id: string,
+  ) => 'workstation' | 'server' | 'access-point' | 'wireless-client' | undefined;
   readonly pcNetwork?: (id: string) => PcNetworkConfig | undefined;
   readonly onPcNetworkApply?: (id: string, config: PcNetworkConfig) => void;
   /** Topology click / tab click. Adds the id to openDeviceIds if absent and
@@ -133,6 +136,7 @@ export function FloatingTerminalPanel({
   forDevice,
   platformLabel,
   deviceKind,
+  deviceClass,
   pcNetwork,
   onPcNetworkApply,
   onSelectDevice,
@@ -274,6 +278,7 @@ export function FloatingTerminalPanel({
     : openDeviceIds[0];
   const term = forDevice(visibleDeviceId);
   const visibleDeviceIsPc = deviceKind?.(visibleDeviceId) === 'pc';
+  const visibleDeviceClass = deviceClass?.(visibleDeviceId);
   const visiblePcNetwork = visibleDeviceIsPc ? pcNetwork?.(visibleDeviceId) : undefined;
 
   // Minimized snap-bar: docked bottom-center of the viewport, fixed width,
@@ -388,7 +393,10 @@ export function FloatingTerminalPanel({
             onCloseDevice={onCloseDevice}
           />
           <div className="min-h-0 flex-1 overflow-hidden">
-            {visibleDeviceIsPc && visiblePcNetwork && onPcNetworkApply ? (
+            {visibleDeviceIsPc &&
+            visibleDeviceClass !== 'access-point' &&
+            visiblePcNetwork &&
+            onPcNetworkApply ? (
               <PcWorkbench
                 deviceId={visibleDeviceId}
                 term={term}

@@ -141,6 +141,30 @@ describe('FloatingTerminalPanel', () => {
     expect(screen.queryByText('WLC1 Workstation')).toBeNull();
   });
 
+  it('renders a lightweight access point as a CLI-only appliance, not a workstation', () => {
+    renderPanel({
+      activeDeviceId: 'AP-1',
+      openDeviceIds: ['AP-1'],
+      deviceKind: () => 'pc',
+      deviceClass: () => 'access-point',
+      platformLabel: () => 'Catalyst 9115AXI Lightweight AP',
+      pcNetwork: () => ({
+        mode: 'static',
+        ip: '10.170.30.60',
+        mask: '255.255.255.0',
+        gateway: '10.170.30.1',
+        ipv6: null,
+        gateway6: null,
+      }),
+      onPcNetworkApply: vi.fn(),
+    });
+
+    expect(screen.getByLabelText('Terminal input')).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Desktop' })).toBeNull();
+    expect(screen.queryByRole('tab', { name: 'Network Adapter' })).toBeNull();
+    expect(screen.queryByText('TCP/IP Properties')).toBeNull();
+  });
+
   it('opens a professional SSH client from the desktop and prepares a realistic ssh command', () => {
     const term = stubTerm('PC-A$');
     renderPanel({

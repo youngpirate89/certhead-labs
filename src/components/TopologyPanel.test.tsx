@@ -36,6 +36,21 @@ function windowsWorkstation(id = 'PC-A'): DeviceTopologyView {
   };
 }
 
+function wirelessDevice(
+  id: string,
+  deviceClass: 'access-point' | 'wireless-client',
+  platform: string,
+): DeviceTopologyView {
+  return {
+    id,
+    kind: 'pc',
+    hostname: id,
+    platform,
+    deviceClass,
+    interfaces: [{ id: 'Eth0', name: 'Eth0', status: 'up', ip: '10.170.30.60', mask: '255.255.255.0', adminUp: true, protocolUp: true }],
+  };
+}
+
 /** Reusable two-router fixture for link/LED assertions — R1.Gi0/0 starts UP
  *  with an IP, R2.Gi0/0 is admin-down. Flip R2's status to drive LED tests. */
 function twoRoutersWithLink(opts: { r2Up: boolean }) {
@@ -100,6 +115,41 @@ describe('TopologyPanel', () => {
     );
     expect(container.querySelector('[data-device-platform-label="WORKSTATION"]')).not.toBeNull();
     expect(screen.queryByText('WINDOWS WORKSTATION')).not.toBeInTheDocument();
+  });
+
+  it('shows complete compact platform labels without ellipsis', () => {
+    const sw: DeviceTopologyView = {
+      ...deviceR1(),
+      id: 'SW1',
+      hostname: 'SW1',
+      kind: 'switch',
+      platform: 'Catalyst 2960',
+    };
+    const { container } = render(
+      <TopologyPanel
+        devices={[
+          sw,
+          wirelessDevice('AP-1', 'access-point', 'Catalyst 9115AXI Lightweight AP'),
+          wirelessDevice('LAPTOP-SALES', 'wireless-client', 'Wireless Client'),
+        ]}
+        activeDeviceId="SW1"
+      />,
+    );
+
+    expect(container.querySelector('[data-device-platform-label="C2960"]')).not.toBeNull();
+    expect(container.querySelector('[data-device-platform-label="LIGHTWEIGHT AP"]')).not.toBeNull();
+    expect(container.querySelector('[data-device-platform-label="WLAN CLIENT"]')).not.toBeNull();
+    for (const label of container.querySelectorAll('[data-device-platform-label]')) {
+      expect(label).not.toHaveClass('truncate');
+    }
+  });
+
+  it('makes each device node independently draggable', () => {
+    const { container } = render(
+      <TopologyPanel devices={[deviceR1(), deviceR2()]} activeDeviceId="R1" />,
+    );
+
+    expect(container.querySelectorAll('[data-device-draggable="true"]')).toHaveLength(2);
   });
 
   it('renders passive WAN cloud decorations without creating console targets', () => {
