@@ -66,10 +66,14 @@ export function TryMode() {
   const labId = typeof window === 'undefined' ? DEFAULT_FREE_CCNA_STARTER_LAB_ID : resolveTryModeLabId(window.location.search);
   const lab = getFreeCcnaStarterLabById(labId) ?? getFreeCcnaStarterLabById(DEFAULT_FREE_CCNA_STARTER_LAB_ID)!;
   const session = useLabSession(lab);
+  const viewedLabIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     initAnalytics();
-    track('lab_viewed', { labId: lab.id });
+    if (viewedLabIdRef.current !== lab.id) {
+      viewedLabIdRef.current = lab.id;
+      track('lab_viewed', { labId: lab.id });
+    }
   }, [lab.id]);
 
   // Engagement: fire once when the learner runs their first command.

@@ -32,7 +32,31 @@ test('production raw SEO assets have correct content types and public-only conte
   const robots = await request.get('/robots.txt');
   expect(robots.ok()).toBe(true);
   expect(robots.headers()['content-type']).toContain('text/plain');
-  expect(await robots.text()).toContain('Disallow: /embed');
+  const robotsBody = await robots.text();
+  const directives = robotsBody.split('\n').filter((line) => /^(?:Allow|Disallow):/.test(line));
+  const isAllowed = (path: string) => directives
+    .map((line) => {
+      const [kind, rule] = line.split(': ');
+      return { allowed: kind === 'Allow', rule };
+    })
+    .filter(({ rule }) => rule.endsWith('$') ? path === rule.slice(0, -1) : path.startsWith(rule))
+    .sort((left, right) => right.rule.length - left.rule.length)[0]?.allowed ?? true;
+
+  for (const path of ['/', '/unknown', '/embed/private-lab', '/pilot', '/dev/lab']) {
+    expect(isAllowed(path), `${path} should be blocked from crawling`).toBe(false);
+  }
+  for (const path of ['/try', '/assets/index.js']) {
+    expect(isAllowed(path), `${path} should be crawlable`).toBe(true);
+  }
+  expect(isAllowed('/try?lab=ccna-starter-01-interface-ip')).toBe(false);
+
+  const headers = await request.get('/_headers');
+  expect(headers.ok()).toBe(true);
+  const headersBody = await headers.text();
+  expect(headersBody).toContain('/embed/*');
+  expect(headersBody).toContain('/pilot*');
+  expect(headersBody).toContain('/dev/*');
+  expect(headersBody).not.toMatch(/(?:^|\n)\/try(?:\s|\n)/);
 
   const sitemap = await request.get('/sitemap.xml');
   expect(sitemap.ok()).toBe(true);

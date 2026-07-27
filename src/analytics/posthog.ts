@@ -67,6 +67,9 @@ export function createAnalytics(
       return;
     }
     queue.push({ event, props });
+    // A later event is the retry signal after a failed lazy import. init()
+    // reuses an in-flight promise, so bursts cannot start concurrent imports.
+    void init();
   }
 
   return { init, track };

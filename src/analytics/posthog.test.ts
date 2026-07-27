@@ -63,7 +63,7 @@ describe('anonymous PostHog contract', () => {
     });
   });
 
-  it('allows a later initialization retry after a failed lazy load', async () => {
+  it('retries a failed lazy load when a later event is tracked and flushes every queued event once', async () => {
     const posthog = createPostHogMock();
     const load = vi
       .fn<() => Promise<typeof posthog>>()
@@ -71,10 +71,18 @@ describe('anonymous PostHog contract', () => {
       .mockResolvedValueOnce(posthog);
     const analytics = createAnalytics({ key: 'phc_public_test_key' }, load);
 
-    await analytics.init();
-    await analytics.init();
+    const firstInitialization = analytics.init();
+    analytics.track('lab_viewed', { labId: 'ccna-starter-01-interface-ip' });
+    await firstInitialization;
+
+    analytics.track('lab_started', { labId: 'ccna-starter-01-interface-ip' });
+    await vi.waitFor(() => expect(posthog.capture).toHaveBeenCalledTimes(2));
 
     expect(load).toHaveBeenCalledTimes(2);
     expect(posthog.init).toHaveBeenCalledOnce();
+    expect(posthog.capture.mock.calls).toEqual([
+      ['lab_viewed', { labId: 'ccna-starter-01-interface-ip' }],
+      ['lab_started', { labId: 'ccna-starter-01-interface-ip' }],
+    ]);
   });
 });

@@ -10,9 +10,10 @@ The current offer is **10 dedicated public CCNA starter labs** plus **60 separat
 - `wrangler.toml` sets `pages_build_output_dir = "dist"` for Cloudflare Pages.
 - `public/_redirects` ships an SPA fallback (`/* /index.html 200`) so `/try`
   resolves client-side. Vite copies `public/` into `dist/` automatically.
-- `public/robots.txt` and `public/sitemap.xml` are raw SEO assets. The sitemap
-  contains only the canonical `https://labs.certhead.com/try` route and never
-  lists `/embed`, development routes, or paid lab IDs.
+- `public/robots.txt`, `public/_headers`, and `public/sitemap.xml` are raw SEO
+  assets. Crawling is denied by default, with only `/try` and its built assets
+  allowed. Private/development routes receive `X-Robots-Tag: noindex, nofollow`.
+  The sitemap contains only the canonical `https://labs.certhead.com/try` route.
 - `npm run test:e2e:production` builds and serves the production bundle, checks
   all 10 starter URLs, confirms paid and invalid IDs fail safe, and validates
   the raw SEO responses and page metadata.
@@ -75,7 +76,8 @@ or deploy those routes.
 - [ ] A paid catalog ID and an invalid ID both fall back to starter 1.
 - [ ] Starters 1 through 9 continue internally and only starter 10 exits.
 - [ ] The final CTA preserves `source`, originating `lab`, `/upgrade`, and `/labs`.
-- [ ] `robots.txt` is served as text and disallows `/embed`.
+- [ ] `robots.txt` is served as text, denies crawling by default, and allows only `/try` plus its assets.
+- [ ] `_headers` adds `X-Robots-Tag: noindex, nofollow` to private/development routes without matching `/try`.
 - [ ] `sitemap.xml` is served as XML and contains only the canonical `/try` URL.
 - [ ] Raw `index.html` includes the canonical metadata, truthful JSON-LD, and fallback H1.
 - [ ] PostHog receives `lab_viewed`, `lab_started`, `lab_completed`, and

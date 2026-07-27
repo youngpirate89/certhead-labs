@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CompletionBanner, TryMode } from './TryMode';
@@ -59,6 +60,27 @@ describe('TryMode public lab selection', () => {
   it('allows only CCNA starter lab ids on the public try route', () => {
     expect(resolveTryModeLabId('?lab=ccna-starter-06-vlan-access-port')).toBe('ccna-starter-06-vlan-access-port');
     expect(resolveTryModeLabId('?lab=ccna-lab11-nat-pat')).toBe('ccna-starter-01-interface-ip');
+  });
+
+  it('emits one view per lab under StrictMode replay and emits again when the lab id changes', async () => {
+    window.history.replaceState({}, '', '/try?lab=ccna-starter-01-interface-ip');
+    const view = render(<StrictMode><TryMode /></StrictMode>);
+
+    await waitFor(() => {
+      expect(track).toHaveBeenCalledWith('lab_viewed', { labId: 'ccna-starter-01-interface-ip' });
+    });
+    expect(vi.mocked(track).mock.calls.filter(([event]) => event === 'lab_viewed')).toHaveLength(1);
+
+    window.history.replaceState({}, '', '/try?lab=ccna-starter-02-network-discovery');
+    view.rerender(<StrictMode><TryMode /></StrictMode>);
+
+    await waitFor(() => {
+      expect(track).toHaveBeenCalledWith('lab_viewed', { labId: 'ccna-starter-02-network-discovery' });
+    });
+    expect(vi.mocked(track).mock.calls.filter(([event]) => event === 'lab_viewed')).toEqual([
+      ['lab_viewed', { labId: 'ccna-starter-01-interface-ip' }],
+      ['lab_viewed', { labId: 'ccna-starter-02-network-discovery' }],
+    ]);
   });
 });
 

@@ -110,13 +110,40 @@ describe('release readiness: public free-lab surface', () => {
 
   it('publishes crawlable raw SEO assets for only the canonical public try route', () => {
     const robots = readFileSync(`${process.cwd()}/public/robots.txt`, 'utf8');
+    const headers = readFileSync(`${process.cwd()}/public/_headers`, 'utf8');
     const sitemap = readFileSync(`${process.cwd()}/public/sitemap.xml`, 'utf8');
     const html = readFileSync(`${process.cwd()}/index.html`, 'utf8');
 
     expect(robots).toContain('User-agent: *');
-    expect(robots).toContain('Allow: /try');
-    expect(robots).toContain('Disallow: /embed');
+    expect(robots).toContain('Allow: /try$');
+    expect(robots).toContain('Allow: /assets/');
+    expect(robots).toContain('Disallow: /');
     expect(robots).toContain('Sitemap: https://labs.certhead.com/sitemap.xml');
+
+    const directives = robots.split('\n').filter((line) => /^(?:Allow|Disallow):/.test(line));
+    const isAllowed = (path: string) => {
+      const matching = directives
+        .map((line) => {
+          const [kind, rule] = line.split(': ');
+          return { allowed: kind === 'Allow', rule };
+        })
+        .filter(({ rule }) => rule.endsWith('$') ? path === rule.slice(0, -1) : path.startsWith(rule))
+        .sort((left, right) => right.rule.length - left.rule.length);
+      return matching[0]?.allowed ?? true;
+    };
+    expect(isAllowed('/')).toBe(false);
+    expect(isAllowed('/unknown')).toBe(false);
+    expect(isAllowed('/embed/private-lab')).toBe(false);
+    expect(isAllowed('/pilot')).toBe(false);
+    expect(isAllowed('/try')).toBe(true);
+    expect(isAllowed('/try?lab=ccna-starter-01-interface-ip')).toBe(false);
+    expect(isAllowed('/assets/index.js')).toBe(true);
+
+    expect(headers).toContain('/embed/*');
+    expect(headers).toContain('/pilot*');
+    expect(headers).toContain('/dev/*');
+    expect(headers.match(/X-Robots-Tag: noindex, nofollow/g)).toHaveLength(5);
+    expect(headers).not.toMatch(/(?:^|\n)\/try(?:\s|\n)/);
 
     expect(sitemap).toContain('<loc>https://labs.certhead.com/try</loc>');
     expect(sitemap).not.toMatch(/<loc>[^<]*(?:embed|pilot|dev|localhost)[^<]*<\/loc>/i);
@@ -140,6 +167,8 @@ describe('release readiness: public free-lab surface', () => {
       expect(doc).toContain('10 dedicated public CCNA starter labs');
       expect(doc).toContain('60 separate Pro catalog labs');
     }
+    const claude = readFileSync(`${process.cwd()}/CLAUDE.md`, 'utf8');
+    expect(claude).not.toContain('**Catalog (21 labs):**');
   });
 
   it('has a launch checklist for validations that belong outside this repo', () => {
