@@ -31,6 +31,7 @@ Purpose: track validation that must happen in the main CertHead app or API, the 
 - [ ] Point `labs.certhead.com` to the Pages target with a CNAME.
 - [ ] Confirm TLS is active for `https://labs.certhead.com/try`.
 - [ ] Run the free-lab smoke path on the production domain.
-- [ ] Confirm the completion CTA points to `https://certhead.com/register?source=free-lab`.
+- [ ] Confirm starters 1 through 9 continue internally and only starter 10 exits.
+- [ ] Confirm the final completion CTA preserves `source=free-lab`, the originating starter `lab`, a safe `/upgrade` redirect, and the eventual `/labs` return.
 - [ ] Confirm PostHog receives anonymous `lab_viewed`, `lab_started`, `lab_completed`, and `cta_clicked` events.
 - [ ] Confirm no analytics payload includes email, account id, billing data, JWTs, or secrets.

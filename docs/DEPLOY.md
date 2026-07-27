@@ -1,10 +1,7 @@
-# DEPLOY.md: Public Free Lab (`/try`)
+# DEPLOY.md: Public Starter Labs (`/try`)
 
-Ship target: `labs.certhead.com/try` as a static site on Cloudflare Pages.
-Standalone marketing asset. No CertHead code changes are required to ship the free lab.
-
-> Only deploy once CertHead web is live. Never deploy during CertHead launch
-> week, per the sequencing rule in `CLAUDE.md`.
+Ship target: `https://labs.certhead.com/try` as a static site on Cloudflare Pages.
+The current offer is **10 dedicated public CCNA starter labs** plus **60 separate Pro catalog labs**. The public starter IDs are distinct from the Pro catalog IDs.
 
 ## Build output
 
@@ -13,27 +10,30 @@ Standalone marketing asset. No CertHead code changes are required to ship the fr
 - `wrangler.toml` sets `pages_build_output_dir = "dist"` for Cloudflare Pages.
 - `public/_redirects` ships an SPA fallback (`/* /index.html 200`) so `/try`
   resolves client-side. Vite copies `public/` into `dist/` automatically.
+- `public/robots.txt` and `public/sitemap.xml` are raw SEO assets. The sitemap
+  contains only the canonical `https://labs.certhead.com/try` route and never
+  lists `/embed`, development routes, or paid lab IDs.
+- `npm run test:e2e:production` builds and serves the production bundle, checks
+  all 10 starter URLs, confirms paid and invalid IDs fail safe, and validates
+  the raw SEO responses and page metadata.
 
 ## 1. Cloudflare Pages project
 
-1. Cloudflare dashboard: **Workers & Pages**: **Create**: **Pages**:
-   **Connect to Git**.
-2. Authorise GitHub, pick `youngpirate89/certhead-labs`, branch `main`.
-3. Framework preset: **Vite** or **None**. Set:
-   - Build command: `npm run build`
-   - Build output directory: `dist`
-4. Deploy. You get a `https://certhead-labs-xxxx.pages.dev` URL. Smoke-test
-   there before touching DNS.
+1. In Cloudflare Pages, connect the repository and production branch.
+2. Set the build command to `npm run build` and output directory to `dist`.
+3. Deploy to the generated `.pages.dev` URL and smoke-test it before changing DNS.
+4. Do not add server secrets to this static project.
 
-## 2. PostHog key, anonymous analytics
+## 2. PostHog public key and anonymous analytics
 
-1. Create or open a PostHog project, then copy the **public project key**.
-2. In the Pages project: **Settings**: **Environment variables**, add
-   `VITE_POSTHOG_KEY` for Production. Optionally add `VITE_POSTHOG_HOST`.
-3. Redeploy so the build picks it up. Without the key, analytics no-ops and the
-   lab still works.
+1. Copy the PostHog **public project key**.
+2. In the Pages project Production environment, add `VITE_POSTHOG_KEY`.
+   Optionally add `VITE_POSTHOG_HOST` for a non-default ingestion host.
+3. Redeploy because Vite reads these variables at build time. Without the key,
+   analytics is a clean no-op and the labs still work.
 
-Events emitted, anonymous and without user identity:
+The client disables autocapture, automatic pageviews, session recording, and
+anonymous person-profile creation. Explicit events use only non-PII lab context:
 
 - `lab_viewed`
 - `lab_started`
@@ -43,39 +43,40 @@ Events emitted, anonymous and without user identity:
 - `hint_shown`
 - `cta_clicked`
 
-Funnel: viewed, started, completed, CTA.
+Funnel: viewed, started, completed, CTA. Never send email, account IDs, billing
+data, JWTs, credentials, or other user identity in event properties.
 
 ## 3. Custom domain `labs.certhead.com`
 
-`labs` is a subdomain of the `certhead.com` you already own. No purchase is needed.
+1. Add `labs.certhead.com` as a Pages custom domain.
+2. Create the DNS record Cloudflare provides.
+3. Wait for TLS provisioning.
+4. Verify `https://labs.certhead.com/try`, `/robots.txt`, and `/sitemap.xml`.
 
-1. In the Pages project: **Custom domains**: **Set up a domain**:
-   `labs.certhead.com`. Cloudflare shows the CNAME target.
-2. In **Namecheap**, same DNS zone as `certhead.com` and `api.certhead.com`:
-   **Advanced DNS**, add record:
-   - Type: **CNAME**
-   - Host: `labs`
-   - Value: the Pages target, for example `certhead-labs-xxxx.pages.dev`
-   - TTL: Automatic
-3. Wait for propagation. Cloudflare provisions TLS automatically. Verify
-   `https://labs.certhead.com/try` loads and grades end-to-end.
+## 4. Main-app conversion intent
 
-## 4. Link from CertHead, Stage 1 integration in the CertHead repo
+Starters 1 through 9 continue to the next starter on `/try` in the same window.
+Only starter 10 exits to the main app. Its centralized URL builder sends:
 
-Add a link on the CertHead landing or pricing page to `labs.certhead.com/try`,
-for example: "Try a free hands-on lab, no signup required."
+- `source=free-lab`
+- `lab=<originating starter id>`
+- a safe internal `/upgrade?source=free-lab&redirect=/labs` destination in the
+  registration `redirect` parameter
 
-That is the entire Stage 1 integration: one `<a href>`, zero shared code. Keep
-this change in the main CertHead repo, not here.
+The properties remain anonymous and non-PII. The main app owns registration,
+upgrade, and the eventual return to `/labs`; this repository does not implement
+or deploy those routes.
 
 ## Smoke test checklist
 
-- [ ] `/try` loads on the `.pages.dev` URL.
-- [ ] Solution grades green: `en`, `conf t`, `int gi0/0`,
-      `ip address 192.168.1.1 255.255.255.0`, `no shut`, `end`,
-      `sh ip int br`.
-- [ ] Completion card appears with the CTA to
-      `certhead.com/register?source=free-lab`.
-- [ ] Custom domain serves over HTTPS.
+- [ ] `npm test`, `npm run lint`, and `npm run build` pass.
+- [ ] `npm run test:e2e:production` passes against the production bundle.
+- [ ] All 10 dedicated starter URLs open their requested starter.
+- [ ] A paid catalog ID and an invalid ID both fall back to starter 1.
+- [ ] Starters 1 through 9 continue internally and only starter 10 exits.
+- [ ] The final CTA preserves `source`, originating `lab`, `/upgrade`, and `/labs`.
+- [ ] `robots.txt` is served as text and disallows `/embed`.
+- [ ] `sitemap.xml` is served as XML and contains only the canonical `/try` URL.
+- [ ] Raw `index.html` includes the canonical metadata, truthful JSON-LD, and fallback H1.
 - [ ] PostHog receives `lab_viewed`, `lab_started`, `lab_completed`, and
-      `cta_clicked` during a real browser smoke test.
+      `cta_clicked` during a production browser smoke test after the public key is configured.

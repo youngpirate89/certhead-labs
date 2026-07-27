@@ -1,5 +1,15 @@
 # LAB_CATALOG.md — CCNA 200-301 Lab Catalog & Build Order
 
+## Current published offer
+
+The current product has **10 dedicated public CCNA starter labs** with distinct
+`ccna-starter-*` IDs and **60 separate Pro catalog labs**. The starter labs are
+curated adaptations, not paid catalog IDs made public; all 60 catalog entries
+remain Pro-only.
+
+The build-order inventory below is the original planning model. It is retained
+as historical design context and is not the current offer count.
+
 **~55 labs total (1 free + 49 Pro + 5 capstones).** Organized into build phases
 by the *engine capability* each lab needs — that, not single- vs multi-device,
 is the real dependency. Labs are built locally and deployed to CertHead Pro as a

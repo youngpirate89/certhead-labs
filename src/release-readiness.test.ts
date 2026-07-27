@@ -1,18 +1,40 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { FREE_LAB_REGISTER_URL, FREE_LAB_UPSELL_COPY } from '@/modes/TryMode';
+import { buildFreeLabRegisterUrl } from '@/conversion/freeLabIntent';
+import { FREE_CCNA_STARTER_LAB_IDS } from '@/labs/free-starter';
+import { FREE_LAB_UPSELL_COPY } from '@/modes/TryMode';
+import { DEFAULT_FREE_CCNA_STARTER_LAB_ID, resolveTryModeLabId } from '@/routing/tryLabSelection';
 
 const EM_DASH = '\u2014';
 
 describe('release readiness: public free-lab surface', () => {
   it('keeps the public CTA aligned to the Pro bundle and current 60-lab catalog', () => {
-    expect(FREE_LAB_REGISTER_URL).toBe('https://certhead.com/register?source=free-lab');
+    const registerUrl = new URL(buildFreeLabRegisterUrl('ccna-starter-10-default-route'));
+    expect(registerUrl.origin).toBe('https://certhead.com');
+    expect(registerUrl.pathname).toBe('/register');
+    expect(registerUrl.searchParams.get('source')).toBe('free-lab');
+    expect(registerUrl.searchParams.get('lab')).toBe('ccna-starter-10-default-route');
+
+    const upgradeUrl = new URL(registerUrl.searchParams.get('redirect')!, registerUrl.origin);
+    expect(upgradeUrl.pathname).toBe('/upgrade');
+    expect(upgradeUrl.searchParams.get('source')).toBe('free-lab');
+    expect(upgradeUrl.searchParams.get('redirect')).toBe('/labs');
+
     expect(FREE_LAB_UPSELL_COPY.proLibrary).toBe('Pro includes the full 60-lab CCNA library.');
     expect(FREE_LAB_UPSELL_COPY.cta).toBe('Unlock with CertHead Pro');
     expect(FREE_LAB_UPSELL_COPY.proLibrary).not.toMatch(/20\+|25\+|30\+|40\+/);
     expect(FREE_LAB_UPSELL_COPY.proLibrary).not.toMatch(/\$4\.99|question-only|exam-only/i);
     expect(FREE_LAB_UPSELL_COPY.proLibrary).not.toContain(EM_DASH);
     expect(FREE_LAB_UPSELL_COPY.cta).not.toContain(EM_DASH);
+  });
+
+  it('keeps all ten starter URLs public while paid and invalid ids fail safe', () => {
+    expect(FREE_CCNA_STARTER_LAB_IDS).toHaveLength(10);
+    for (const labId of FREE_CCNA_STARTER_LAB_IDS) {
+      expect(resolveTryModeLabId(`?lab=${encodeURIComponent(labId)}`)).toBe(labId);
+    }
+    expect(resolveTryModeLabId('?lab=ccna-lab11-nat-pat')).toBe(DEFAULT_FREE_CCNA_STARTER_LAB_ID);
+    expect(resolveTryModeLabId('?lab=not-a-real-lab')).toBe(DEFAULT_FREE_CCNA_STARTER_LAB_ID);
   });
 
   it('keeps Pro catalog tooling out of the production App static import graph', () => {
@@ -33,7 +55,6 @@ describe('release readiness: public free-lab surface', () => {
     expect(tryModeSource).not.toContain('getLabById');
     expect(tryModeSource).not.toContain(`Lab complete ${EM_DASH}`);
   });
-
 
   it('documents the Pro embed integration contract without implementing server auth here', () => {
     const contractPath = `${process.cwd()}/docs/pro-embed-integration-contract.md`;
@@ -85,6 +106,40 @@ describe('release readiness: public free-lab surface', () => {
     }
 
     expect(deploy).not.toContain(EM_DASH);
+  });
+
+  it('publishes crawlable raw SEO assets for only the canonical public try route', () => {
+    const robots = readFileSync(`${process.cwd()}/public/robots.txt`, 'utf8');
+    const sitemap = readFileSync(`${process.cwd()}/public/sitemap.xml`, 'utf8');
+    const html = readFileSync(`${process.cwd()}/index.html`, 'utf8');
+
+    expect(robots).toContain('User-agent: *');
+    expect(robots).toContain('Allow: /try');
+    expect(robots).toContain('Disallow: /embed');
+    expect(robots).toContain('Sitemap: https://labs.certhead.com/sitemap.xml');
+
+    expect(sitemap).toContain('<loc>https://labs.certhead.com/try</loc>');
+    expect(sitemap).not.toMatch(/<loc>[^<]*(?:embed|pilot|dev|localhost)[^<]*<\/loc>/i);
+    expect((sitemap.match(/<url>/g) ?? [])).toHaveLength(1);
+
+    expect(html).toContain('<title>10 Free CCNA Labs | CertHead Labs</title>');
+    expect(html).toContain('Practice 10 free, hands-on CCNA starter labs');
+    expect(html).toContain('<link rel="canonical" href="https://labs.certhead.com/try" />');
+    expect(html).toContain('<meta name="robots" content="index, follow" />');
+    expect(html).toContain('property="og:title"');
+    expect(html).toContain('property="og:url" content="https://labs.certhead.com/try"');
+    expect(html).toContain('name="twitter:card" content="summary"');
+    expect(html).toContain('"@type": ["EducationalApplication", "WebApplication"]');
+    expect(html).not.toMatch(/aggregateRating|reviewCount|ratingValue/);
+    expect(html).toMatch(/<div id="root">[\s\S]*<h1>10 Free Hands-On CCNA Starter Labs<\/h1>/);
+  });
+
+  it('documents the current offer as 10 dedicated public starters plus 60 separate Pro labs', () => {
+    for (const path of ['README.md', 'docs/DEPLOY.md', 'CLAUDE.md', 'LAB_CATALOG.md']) {
+      const doc = readFileSync(`${process.cwd()}/${path}`, 'utf8');
+      expect(doc).toContain('10 dedicated public CCNA starter labs');
+      expect(doc).toContain('60 separate Pro catalog labs');
+    }
   });
 
   it('has a launch checklist for validations that belong outside this repo', () => {

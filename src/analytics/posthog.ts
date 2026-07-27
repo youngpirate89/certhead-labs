@@ -1,21 +1,20 @@
 /**
  * Anonymous analytics for the public free lab.
  *
- * CLAUDE.md: "/try" runs with no user identity — PostHog ANONYMOUS events only.
- * Autocapture, pageviews, session recording, and person profiles are all off;
- * we emit only an explicit funnel.
- *
- * posthog-js is heavy, so it is lazy-loaded via dynamic import to keep it out of
- * the initial bundle (this is a marketing surface — first paint matters). Events
- * fired before the import resolves are queued and flushed. If VITE_POSTHOG_KEY
- * is unset (local dev), everything here is a clean no-op and nothing loads.
+ * `/try` runs with no user identity. Autocapture, automatic pageviews, session
+ * recording, and anonymous person profiles are disabled; only explicit funnel
+ * events are emitted. PostHog is lazy-loaded only when a public project key is
+ * configured, and events emitted during that load are queued.
  */
 import type posthogType from 'posthog-js';
 
-type PostHog = typeof posthogType;
+type PostHog = Pick<typeof posthogType, 'init' | 'capture'>;
+type PostHogLoader = () => Promise<PostHog>;
 
-let ph: PostHog | null = null;
-let loading = false;
+interface AnalyticsConfig {
+  readonly key?: string;
+  readonly host?: string;
+}
 
 export type LabEvent =
   | 'lab_viewed'
@@ -25,38 +24,63 @@ export type LabEvent =
   | 'lab_reset'
   | 'hint_shown'
   | 'cta_clicked';
-const queue: { event: LabEvent; props?: Record<string, unknown> }[] = [];
+
+export function createAnalytics(
+  config: AnalyticsConfig,
+  loadPostHog: PostHogLoader = () => import('posthog-js').then(({ default: posthog }) => posthog),
+) {
+  let client: PostHog | null = null;
+  let loading: Promise<void> | null = null;
+  const queue: { event: LabEvent; props?: Record<string, unknown> }[] = [];
+
+  function init(): Promise<void> {
+    if (loading) return loading;
+    if (client || typeof window === 'undefined' || !config.key) return Promise.resolve();
+
+    loading = loadPostHog()
+      .then((posthog) => {
+        posthog.init(config.key!, {
+          api_host: config.host ?? 'https://us.i.posthog.com',
+          person_profiles: 'identified_only',
+          autocapture: false,
+          capture_pageview: false,
+          disable_session_recording: true,
+        });
+        client = posthog;
+        for (const queued of queue) client.capture(queued.event, queued.props);
+        queue.length = 0;
+      })
+      .catch(() => {
+        // Analytics must never block the lab. Keep queued events for a retry.
+      })
+      .finally(() => {
+        loading = null;
+      });
+
+    return loading;
+  }
+
+  function track(event: LabEvent, props?: Record<string, unknown>): void {
+    if (typeof window === 'undefined' || !config.key) return;
+    if (client) {
+      client.capture(event, props);
+      return;
+    }
+    queue.push({ event, props });
+  }
+
+  return { init, track };
+}
+
+const analytics = createAnalytics({
+  key: import.meta.env.VITE_POSTHOG_KEY,
+  host: import.meta.env.VITE_POSTHOG_HOST,
+});
 
 export function initAnalytics(): void {
-  if (loading || ph || typeof window === 'undefined') return;
-  const key = import.meta.env.VITE_POSTHOG_KEY;
-  if (!key) return; // unconfigured -> no-op, nothing loads
-
-  loading = true;
-  import('posthog-js')
-    .then(({ default: posthog }) => {
-      posthog.init(key, {
-        api_host: import.meta.env.VITE_POSTHOG_HOST ?? 'https://us.i.posthog.com',
-        person_profiles: 'identified_only', // never create profiles -> anonymous
-        autocapture: false,
-        capture_pageview: false,
-        disable_session_recording: true,
-      });
-      ph = posthog;
-      for (const e of queue) ph.capture(e.event, e.props);
-      queue.length = 0;
-    })
-    .catch(() => {
-      loading = false;
-    });
+  void analytics.init();
 }
 
 export function track(event: LabEvent, props?: Record<string, unknown>): void {
-  if (typeof window === 'undefined') return;
-  if (ph) {
-    ph.capture(event, props);
-    return;
-  }
-  // Queue early events (e.g. lab_viewed on mount) only if we intend to load.
-  if (import.meta.env.VITE_POSTHOG_KEY) queue.push({ event, props });
+  analytics.track(event, props);
 }

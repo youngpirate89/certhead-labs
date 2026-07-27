@@ -12,7 +12,7 @@
 
 **CertHead Labs is a browser-based, scenario-scoped CLI simulation engine for IT certification prep.** It serves two roles:
 
-1. **Marketing surface (public free lab)** — A single, polished lab at `labs.certhead.com/try` accessible with zero auth. Top-of-funnel asset that converts curiosity into signups by letting prospects experience the product before paying.
+1. **Marketing surface (public starter path)** — 10 dedicated public CCNA starter labs at `labs.certhead.com/try`, accessible with zero auth. They are separate from the 60 Pro catalog labs and let prospects experience the product before paying.
 2. **Pro subscriber feature** — Full lab library at `labs.certhead.com/embed?token=...` available to CertHead Pro subscribers, gated by JWT minted from CertHead's existing entitlement check.
 
 **It is not a general-purpose network simulator.** It is not competing with Packet Tracer, GNS3, or Boson NetSim on simulator breadth or fidelity. It competes by being scenario-scoped, auto-graded, embedded in cert-prep study flows, and unified across multiple technology stacks (networking + Linux + cloud + databases).
@@ -51,7 +51,9 @@ This project is **explicitly subordinate to CertHead's launch sequence.** Work o
 
 ---
 
-## 🎯 CURRENT FOCUS — CATALOG AT 21 LABS, ALL COMMITTED
+## 🎯 CURRENT FOCUS — 10 PUBLIC STARTERS + 60 PRO CATALOG LABS
+
+Current offer truth: **10 dedicated public CCNA starter labs** plus **60 separate Pro catalog labs**. Public starters use dedicated `ccna-starter-*` IDs; the source catalog remains Pro-only.
 
 Status: Engine has generalized well past the original troubleshooting-pilot scope. Switch + VLAN + trunking landed; on-demand hint reveal landed; DHCP server landed; "See Solution" disclosure landed across the entire catalog; NAT/PAT landed; named extended ACLs landed (grammar hardened with explicit coverage for the 4 src/dst×any/host/bare combinations + `eq` port forms); Lab 13 (OSPF tshoot — mismatched area) signed off via tests + cold-run; Lab 14 (DHCP relay via `ip helper-address`) added relay-path allocator + PC `lastIpconfig` verify gate; Lab 15 (default static route — `ip route 0.0.0.0 0.0.0.0 <nh>`) needed a one-shim engine fix — split `isValidRouteMask` off `isValidMask` so the route grammar accepts the /0 default mask while interface-IP validation still rejects `ip address X 0.0.0.0` as nonsense; Lab 16 (floating static route — `ip route <net> <mask> <nh> <ad>`) extended the `ip route` grammar with an optional trailing AD slot (validated 1..255), wired AD through `addStaticRoute` with idempotent same-target replacement, and RIB-filtered `show ip route` so per (prefix, mask) only the lowest-AD entry renders while losers remain in the routing table for LPM to promote on withdrawal; Lab 17 (OSPF passive-interface) added `[no] passive-interface <iface>` in config-router, an `OspfState.passive: Set<string>` of canonical iface ids (cleared on process-id change), neighbor-formation suppression in `recomputeOspf` when either endpoint is on its router's passive set (route advertisement path untouched — prefixes still advertised, matching IOS), a `Passive Interface(s):` section in `show ip ospf`, and first-time emission of the `router ospf <pid>` block in `show running-config` (network + passive-interface lines); Lab 18 (OSPF tshoot — passive-interface on the transit link) needed ZERO engine work — it reuses Lab 17's passive grammar/set/suppression and exercises the `no passive-interface` removal path plus the cross-device re-form on refresh (removing the WAN mark re-runs `recomputeOspf` and the R1↔R2 adjacency comes back); Lab 19 (OSPF tshoot — hello/dead timer mismatch) needed real engine work — `InterfaceState` gained `ospfHelloInterval`/`ospfDeadInterval` overrides (unset = `OSPF_DEFAULT_HELLO_INTERVAL`/`_DEAD_INTERVAL` = 10/40), `[no] ip ospf hello-interval|dead-interval <1-65535>` grammar + handlers in config-if, a timer-match gate in `recomputeOspf` (effective hello AND dead must agree on both ends or no neighbor forms — compared as static config, not simulated timers; this is a deliberate, documented departure from ospf.ts's original "timers intentionally omitted" stance), a new `show ip ospf interface [<iface>]` renderer (the `Timer intervals configured` line is the diagnostic; reuses an exported `matchingNetwork` from ospf.ts to pick OSPF-enabled interfaces + their area), and non-default `ip ospf hello-interval`/`dead-interval` lines in `show running-config`; Lab 20 (OSPF tshoot — MD5 auth mismatch) added `InterfaceState.ospfAuthMessageDigest`/`ospfMd5KeyId`/`ospfMd5Key`, `[no] ip ospf authentication message-digest` + `[no] ip ospf message-digest-key <id> md5 <key>` grammar/handlers in config-if, an auth-match gate in `recomputeOspf` (both ends must agree on auth-enabled, and when enabled share key-id + key string, else no neighbor — RFC 2328 App. D), and auth lines in `show running-config`/`show ip ospf interface`; Lab 21 (OSPF default-information originate) added `OspfState.defaultInfoOriginate`/`defaultInfoAlways` (both cleared on process-id change), `[no] default-information originate [always]` grammar + handler in config-router, a `Route.ospfExternal` flag, default-route injection in `recomputeOspf` (a FULL neighbor of a router that has `default-information originate` set AND a 0.0.0.0/0 in its RIB — or `always` — installs an `O*E2 0.0.0.0/0` at AD 110/metric 1; the originator keeps only its own static default, never a self-learned copy), and `show ip route` rendering of the `O*E2` code + "Gateway of last resort" header (scoped to the OSPF-external-default path so static-default labs 15/16 keep their existing simpler header verbatim), an ASBR/"Originate Default Route" line in `show ip ospf`, and a `default-information originate` line in `show running-config`. Catalog is at 21 labs, all committed (solution field standard across every catalog lab).
 
@@ -242,8 +244,8 @@ The engine runs in two modes that share 100% of the underlying code. The differe
 **Mode 1: `/try` (public free lab)**
 
 - No authentication
-- Hardcoded to load the single free lab definition
-- On completion, shows upgrade CTA linking to `certhead.com/register?source=free-lab`
+- Loads only the allowlisted set of 10 dedicated public CCNA starter labs
+- Starters 1 through 9 continue internally; starter 10 links to registration with anonymous source and originating-lab intent plus a safe `/upgrade` redirect that returns to `/labs`
 - No analytics tied to user identity (PostHog anonymous events only)
 - Hosted as a static page; no API calls
 
@@ -418,7 +420,7 @@ Each item is a discrete weekend's work. Don't start item N+1 until N is done and
 - Soft-launch to existing Pro subscribers
 - ~25 CCNA labs total in the catalog
 
-**Current product split: separate public starter labs drive top-of-funnel; the private catalog remains Pro-only.**
+**Current product split: 10 dedicated public CCNA starter labs drive top-of-funnel; 60 separate Pro catalog labs remain Pro-only.**
 
 ---
 
@@ -475,7 +477,7 @@ export const lab01: Lab = {
 - Not a Packet Tracer clone
 - Not a network engineer's daily-driver simulator
 - Not a CCIE-level fidelity environment
-- Not a free product overall (one free lab as marketing surface, rest is Pro)
+- Not a free product overall (10 dedicated public starter labs are the marketing surface; 60 separate catalog labs are Pro)
 - Not in CertHead's monorepo
 - Not allowed to delay CertHead's launch sequence by a single day
 - Not a standalone subscription — Pro labs unlock through existing CertHead Pro tier
@@ -488,7 +490,7 @@ export const lab01: Lab = {
 
 The only "integration" needed is a hyperlink. CertHead's landing page and pricing page link to `labs.certhead.com/try` with copy like "Try a free hands-on lab — no signup required." Zero code changes in CertHead.
 
-Completion CTA on the free lab links back to `certhead.com/register?source=free-lab` so the funnel is tracked.
+The final starter completion CTA links to `certhead.com/register` with `source=free-lab`, the originating starter `lab`, and a safe internal `/upgrade` redirect that eventually returns to `/labs`.
 
 ### Stage 2: Embedded Pro integration (ship target: +6-9 months)
 

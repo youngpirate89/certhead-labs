@@ -9,8 +9,7 @@ import type { Lab } from '@/engine/types';
 import { FREE_CCNA_STARTER_LAB_IDS, getFreeCcnaStarterLabById, getFreeCcnaStarterLabs } from '@/labs/free-starter';
 import { DEFAULT_FREE_CCNA_STARTER_LAB_ID, resolveTryModeLabId } from '@/routing/tryLabSelection';
 import { initAnalytics, track } from '@/analytics/posthog';
-
-export const FREE_LAB_REGISTER_URL = 'https://certhead.com/register?source=free-lab';
+import { buildFreeLabRegisterUrl } from '@/conversion/freeLabIntent';
 
 interface CompletionCta {
   readonly href: string;
@@ -39,7 +38,7 @@ function getCompletionCta(labId: string): CompletionCta {
   }
 
   return {
-    href: FREE_LAB_REGISTER_URL,
+    href: buildFreeLabRegisterUrl(labId),
     label: FREE_LAB_UPSELL_COPY.cta,
     target: '_blank',
     rel: 'noopener noreferrer',
