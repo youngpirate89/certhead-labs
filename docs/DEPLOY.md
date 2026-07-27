@@ -8,15 +8,18 @@ The current offer is **10 dedicated public CCNA starter labs** plus **60 separat
 - Build command: `npm run build`
 - Output directory: `dist`
 - `wrangler.toml` sets `pages_build_output_dir = "dist"` for Cloudflare Pages.
-- `public/_redirects` ships an SPA fallback (`/* /index.html 200`) so `/try`
-  resolves client-side. Vite copies `public/` into `dist/` automatically.
+- Cloudflare Pages native SPA fallback serves `/try` from the app shell because
+  the build has no top-level `404.html`. Do not add a redundant catch-all
+  `_redirects` rewrite; it can shadow path-specific `_headers` rules.
 - `public/robots.txt`, `public/_headers`, and `public/sitemap.xml` are raw SEO
   assets. Crawling is denied by default, with only `/try` and its built assets
   allowed. Private/development routes receive `X-Robots-Tag: noindex, nofollow`.
   The sitemap contains only the canonical `https://labs.certhead.com/try` route.
 - `npm run test:e2e:production` builds and serves the production bundle, checks
   all 10 starter URLs, confirms paid and invalid IDs fail safe, and validates
-  the raw SEO responses and page metadata.
+  the raw SEO responses and page metadata. The test reads `dist/_headers`
+  directly because Cloudflare consumes that file as deployment configuration,
+  not as a public asset.
 
 ## 1. Cloudflare Pages project
 
@@ -43,6 +46,10 @@ anonymous person-profile creation. Explicit events use only non-PII lab context:
 - `lab_reset`
 - `hint_shown`
 - `cta_clicked`
+
+Lazy-load failures retain at most 100 events, dropping the oldest when full.
+Imports retry with exponential backoff for three attempts, then pause for a
+60-second cooldown before a later event can start a new bounded retry cycle.
 
 Funnel: viewed, started, completed, CTA. Never send email, account IDs, billing
 data, JWTs, credentials, or other user identity in event properties.
@@ -78,6 +85,7 @@ or deploy those routes.
 - [ ] The final CTA preserves `source`, originating `lab`, `/upgrade`, and `/labs`.
 - [ ] `robots.txt` is served as text, denies crawling by default, and allows only `/try` plus its assets.
 - [ ] `_headers` adds `X-Robots-Tag: noindex, nofollow` to private/development routes without matching `/try`.
+- [ ] Verify those effective response headers on the live Cloudflare deployment; local preview only proves the built `_headers` artifact.
 - [ ] `sitemap.xml` is served as XML and contains only the canonical `/try` URL.
 - [ ] Raw `index.html` includes the canonical metadata, truthful JSON-LD, and fallback H1.
 - [ ] PostHog receives `lab_viewed`, `lab_started`, `lab_completed`, and

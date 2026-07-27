@@ -93,9 +93,9 @@ Status: Engine has generalized well past the original troubleshooting-pilot scop
 - **Solution disclosure:** every catalog lab ships a `solution: LabSolution` block. `LabSolution = { steps: SolutionStep[] }`, step = `{ device, commands, note? }`. Collapsible "See Solution" panel under the hints — closed by default, muted text + chevron, no warning copy. **Solution field is now standard on the Lab type — every new lab requires a solution block, authored at the same time as the lab (not added retroactively).** The type stays optional so pilot/throwaway labs in `_pilots/` can omit it; catalog membership implies a solution. Command block renders one `<div>` per command (no `.join('\n')` into a single string) with `whitespace-pre` to preserve leading indents — learners can read the block top to bottom and type each line exactly as shown.
 - **Extended ACL grammar:** hardened across the 4 src×dst combinations (`any|host <ip>|<ip> <wc>` for both source and destination) plus optional `eq <port|name>`. `show running-config interface <iface>` now mirrors the full `show running-config` and includes `ip access-group ... in|out` lines so the single-iface form doesn't silently drop bindings.
 
-924 tests passing, tsc clean. Free lab unchanged and live.
+Current public surface: 10 dedicated starter labs on `/try`, with anonymous PostHog funnel analytics enabled only when a public project key is configured.
 
-**CertHead state (drives the next move):** Live exams: CCNA, N10-009, SY0-701. Paid subscribers: 0 — pre-launch, building catalog depth in private is the +4–12 week phase, fully in-bounds. Nothing deployed beyond the free lab; catalog registry, `/embed`, custom domain, and the landing-page link to `/try` all still gated on the ≥300-paid bar.
+**CertHead state (current product truth):** The Labs offer is 10 public CCNA starters plus 60 Pro catalog labs. `/try` is the public conversion surface and emits bounded, anonymous analytics when configured; `/embed` remains the authenticated Pro integration surface. Treat deployment status as something to verify live rather than infer from this document.
 
 **Next — Lab 22 candidate selection: check CLAUDE.md strategic sequencing rules before starting. Authoring checklist for every new lab: starting state + objectives + hints + `solution: LabSolution` block — all authored together in the same PR, never as a follow-up.**
 
@@ -119,7 +119,7 @@ Status: Engine has generalized well past the original troubleshooting-pilot scop
 
 ---
 
-## 🆓 THE PUBLIC FREE LAB — TOP-OF-FUNNEL ASSET
+## 🧾 HISTORICAL DESIGN RECORD — ORIGINAL SINGLE FREE LAB
 
 **One lab. Permanently free. No auth. Maximum quality.**
 
@@ -196,7 +196,7 @@ certhead-labs/
 │   │   ├── linux-plus/            # Future
 │   │   └── ...
 │   ├── modes/
-│   │   ├── TryMode.tsx            # Public /try route — no auth, hardcoded free lab
+│   │   ├── TryMode.tsx            # Public /try route — no auth, 10-starter allowlist
 │   │   └── EmbedMode.tsx          # /embed route — JWT auth, lab from URL param
 │   ├── components/                # Topology, panels, layout
 │   └── App.tsx

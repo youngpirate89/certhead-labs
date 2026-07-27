@@ -91,9 +91,8 @@ describe('release readiness: public free-lab surface', () => {
     expect(contract).not.toContain(EM_DASH);
   });
 
-  it('keeps deployment docs aligned with static build output, redirects, and analytics events', () => {
+  it('keeps deployment docs aligned with Cloudflare Pages native SPA routing and analytics events', () => {
     const deploy = readFileSync(`${process.cwd()}/docs/DEPLOY.md`, 'utf8');
-    const redirects = readFileSync(`${process.cwd()}/public/_redirects`, 'utf8');
     const wrangler = readFileSync(`${process.cwd()}/wrangler.toml`, 'utf8');
     const packageJson = JSON.parse(readFileSync(`${process.cwd()}/package.json`, 'utf8')) as {
       scripts: Record<string, string>;
@@ -101,10 +100,11 @@ describe('release readiness: public free-lab surface', () => {
 
     expect(packageJson.scripts.build).toBe('tsc -b && vite build');
     expect(wrangler).toContain('pages_build_output_dir = "dist"');
-    expect(redirects.trim()).toBe('/*    /index.html   200');
+    expect(existsSync(`${process.cwd()}/public/_redirects`)).toBe(false);
     expect(deploy).toContain('Build command: `npm run build`');
     expect(deploy).toContain('Output directory: `dist`');
-    expect(deploy).toContain('`public/_redirects` ships an SPA fallback (`/* /index.html 200`)');
+    expect(deploy).toContain('Cloudflare Pages native SPA fallback');
+    expect(deploy).toContain('no top-level `404.html`');
 
     for (const event of [
       'lab_viewed',

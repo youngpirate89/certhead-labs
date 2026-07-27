@@ -21,7 +21,7 @@ Purpose: track validation that must happen in the main CertHead app or API, the 
 
 - [ ] Configure Cloudflare Pages or the selected static host with build command `npm run build`.
 - [ ] Configure build output directory `dist`.
-- [ ] Confirm the deployed artifact includes `_redirects` with `/* /index.html 200` so `/try` serves the app shell.
+- [ ] Confirm the deployed artifact has no top-level `404.html` or catch-all `_redirects`; Cloudflare Pages then applies its native SPA fallback for `/try` without shadowing `_headers`.
 - [ ] Configure `VITE_POSTHOG_KEY` as a production environment variable if analytics should run.
 - [ ] Configure `VITE_POSTHOG_HOST` only if CertHead needs a non-default PostHog host.
 - [ ] Do not configure JWT secrets, API tokens, billing secrets, or user credentials in this static Labs repo.
@@ -31,6 +31,7 @@ Purpose: track validation that must happen in the main CertHead app or API, the 
 - [ ] Point `labs.certhead.com` to the Pages target with a CNAME.
 - [ ] Confirm TLS is active for `https://labs.certhead.com/try`.
 - [ ] Run the free-lab smoke path on the production domain.
+- [ ] Verify effective `X-Robots-Tag: noindex, nofollow` responses on root and private/development routes, and its absence on `/try`; local preview cannot prove Cloudflare-applied headers.
 - [ ] Confirm starters 1 through 9 continue internally and only starter 10 exits.
 - [ ] Confirm the final completion CTA preserves `source=free-lab`, the originating starter `lab`, a safe `/upgrade` redirect, and the eventual `/labs` return.
 - [ ] Confirm PostHog receives anonymous `lab_viewed`, `lab_started`, `lab_completed`, and `cta_clicked` events.

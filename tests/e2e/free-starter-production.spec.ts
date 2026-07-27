@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 
 const STARTER_IDS = [
   'ccna-starter-01-interface-ip',
@@ -63,9 +64,9 @@ test('production raw SEO assets have correct content types and public-only conte
   }
   expect(isAllowed('/try?lab=ccna-starter-01-interface-ip')).toBe(false);
 
-  const headers = await request.get('/_headers');
-  expect(headers.ok()).toBe(true);
-  const headersBody = await headers.text();
+  // Cloudflare parses _headers as deployment configuration; it is not a
+  // production asset. Validate the built artifact directly instead of GETting it.
+  const headersBody = readFileSync(`${process.cwd()}/dist/_headers`, 'utf8');
   expect(headersBody).toContain('/embed/*');
   expect(headersBody).toContain('/pilot*');
   expect(headersBody).toMatch(/(?:^|\n)\/dev\n/);
