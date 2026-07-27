@@ -1,62 +1,190 @@
 /**
  * Anonymous analytics for the public free lab.
  *
- * CLAUDE.md: "/try" runs with no user identity — PostHog ANONYMOUS events only.
- * Autocapture, pageviews, session recording, and person profiles are all off;
- * we emit only an explicit funnel.
- *
- * posthog-js is heavy, so it is lazy-loaded via dynamic import to keep it out of
- * the initial bundle (this is a marketing surface — first paint matters). Events
- * fired before the import resolves are queued and flushed. If VITE_POSTHOG_KEY
- * is unset (local dev), everything here is a clean no-op and nothing loads.
+ * `/try` runs with no user identity. Autocapture, automatic pageviews, session
+ * recording, and anonymous person profiles are disabled; only explicit funnel
+ * events are emitted. PostHog is lazy-loaded only when a public project key is
+ * configured, and events emitted during that load are queued.
  */
 import type posthogType from 'posthog-js';
 
-type PostHog = typeof posthogType;
+type PostHog = Pick<typeof posthogType, 'init' | 'capture'>;
+type PostHogLoader = () => Promise<PostHog>;
 
-let ph: PostHog | null = null;
-let loading = false;
-
-export type LabEvent =
-  | 'lab_viewed'
-  | 'lab_started'
-  | 'lab_brief_dismissed'
-  | 'lab_completed'
-  | 'lab_reset'
-  | 'hint_shown'
-  | 'cta_clicked';
-const queue: { event: LabEvent; props?: Record<string, unknown> }[] = [];
-
-export function initAnalytics(): void {
-  if (loading || ph || typeof window === 'undefined') return;
-  const key = import.meta.env.VITE_POSTHOG_KEY;
-  if (!key) return; // unconfigured -> no-op, nothing loads
-
-  loading = true;
-  import('posthog-js')
-    .then(({ default: posthog }) => {
-      posthog.init(key, {
-        api_host: import.meta.env.VITE_POSTHOG_HOST ?? 'https://us.i.posthog.com',
-        person_profiles: 'identified_only', // never create profiles -> anonymous
-        autocapture: false,
-        capture_pageview: false,
-        disable_session_recording: true,
-      });
-      ph = posthog;
-      for (const e of queue) ph.capture(e.event, e.props);
-      queue.length = 0;
-    })
-    .catch(() => {
-      loading = false;
-    });
+interface AnalyticsConfig {
+  readonly key?: string;
+  readonly host?: string;
 }
 
-export function track(event: LabEvent, props?: Record<string, unknown>): void {
-  if (typeof window === 'undefined') return;
-  if (ph) {
-    ph.capture(event, props);
-    return;
+interface AnalyticsRetryOptions {
+  readonly maxQueueSize?: number;
+  readonly maxAttempts?: number;
+  readonly retryBaseMs?: number;
+  readonly cooldownMs?: number;
+  readonly now?: () => number;
+}
+
+const DEFAULT_MAX_QUEUE_SIZE = 100;
+const DEFAULT_MAX_ATTEMPTS = 3;
+const DEFAULT_RETRY_BASE_MS = 1_000;
+const DEFAULT_COOLDOWN_MS = 60_000;
+const MAX_LAB_ID_LENGTH = 96;
+const MAX_COMMAND_COUNT = 100_000;
+const MAX_HINT_INDEX = 1_000;
+const SAFE_LAB_ID = /^ccna-(?:starter-\d{2}|lab\d+)-[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+interface LabIdProperties {
+  readonly labId: string;
+}
+
+export interface LabEventProperties {
+  readonly lab_viewed: LabIdProperties;
+  readonly lab_started: LabIdProperties;
+  readonly lab_brief_dismissed: LabIdProperties;
+  readonly lab_completed: LabIdProperties & { readonly commandCount: number };
+  readonly lab_reset: LabIdProperties;
+  readonly hint_shown: LabIdProperties & { readonly hintIndex: number };
+  readonly cta_clicked: LabIdProperties;
+}
+
+export type LabEvent = keyof LabEventProperties;
+
+type SanitizedEvent = {
+  [Event in LabEvent]: {
+    readonly event: Event;
+    readonly props: LabEventProperties[Event];
+  };
+}[LabEvent];
+
+function isPropertyObject(value: unknown): value is { readonly [key: string]: unknown } {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isSafeLabId(value: unknown): value is string {
+  return typeof value === 'string'
+    && value.length <= MAX_LAB_ID_LENGTH
+    && SAFE_LAB_ID.test(value);
+}
+
+function isBoundedNonnegativeInteger(value: unknown, maximum: number): value is number {
+  return typeof value === 'number'
+    && Number.isFinite(value)
+    && Number.isInteger(value)
+    && value >= 0
+    && value <= maximum;
+}
+
+/**
+ * Runtime privacy boundary. Unknown properties are discarded. If an approved
+ * property is missing or malformed, the whole event is rejected rather than
+ * emitting ambiguous analytics without its required lab context.
+ */
+function sanitizeEvent(event: unknown, props: unknown): SanitizedEvent | null {
+  if (!isPropertyObject(props) || !isSafeLabId(props.labId)) return null;
+  const labId = props.labId;
+
+  switch (event) {
+    case 'lab_viewed':
+    case 'lab_started':
+    case 'lab_brief_dismissed':
+    case 'lab_reset':
+    case 'cta_clicked':
+      return { event, props: { labId } };
+    case 'lab_completed':
+      if (!isBoundedNonnegativeInteger(props.commandCount, MAX_COMMAND_COUNT)) return null;
+      return { event, props: { labId, commandCount: props.commandCount } };
+    case 'hint_shown':
+      if (!isBoundedNonnegativeInteger(props.hintIndex, MAX_HINT_INDEX)) return null;
+      return { event, props: { labId, hintIndex: props.hintIndex } };
+    default:
+      return null;
   }
-  // Queue early events (e.g. lab_viewed on mount) only if we intend to load.
-  if (import.meta.env.VITE_POSTHOG_KEY) queue.push({ event, props });
+}
+
+export function createAnalytics(
+  config: AnalyticsConfig,
+  loadPostHog: PostHogLoader = () => import('posthog-js').then(({ default: posthog }) => posthog),
+  retryOptions: AnalyticsRetryOptions = {},
+) {
+  const maxQueueSize = retryOptions.maxQueueSize ?? DEFAULT_MAX_QUEUE_SIZE;
+  const maxAttempts = retryOptions.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+  const retryBaseMs = retryOptions.retryBaseMs ?? DEFAULT_RETRY_BASE_MS;
+  const cooldownMs = retryOptions.cooldownMs ?? DEFAULT_COOLDOWN_MS;
+  const now = retryOptions.now ?? Date.now;
+  let client: PostHog | null = null;
+  let loading: Promise<void> | null = null;
+  let failedAttempts = 0;
+  let retryAfter = 0;
+  const queue: SanitizedEvent[] = [];
+
+  function init(): Promise<void> {
+    if (loading) return loading;
+    if (client || typeof window === 'undefined' || !config.key) return Promise.resolve();
+    const currentTime = now();
+    if (currentTime < retryAfter) return Promise.resolve();
+    if (failedAttempts >= maxAttempts) {
+      failedAttempts = 0;
+    }
+
+    loading = loadPostHog()
+      .then((posthog) => {
+        posthog.init(config.key!, {
+          api_host: config.host ?? 'https://us.i.posthog.com',
+          person_profiles: 'identified_only',
+          autocapture: false,
+          capture_pageview: false,
+          disable_session_recording: true,
+        });
+        client = posthog;
+        failedAttempts = 0;
+        retryAfter = 0;
+        for (const queued of queue) client.capture(queued.event, queued.props);
+        queue.length = 0;
+      })
+      .catch(() => {
+        // Analytics must never block the lab. Retry only after backoff, and
+        // enter a longer cooldown after the bounded attempt budget is spent.
+        failedAttempts += 1;
+        retryAfter = now() + (failedAttempts >= maxAttempts
+          ? cooldownMs
+          : retryBaseMs * 2 ** (failedAttempts - 1));
+      })
+      .finally(() => {
+        loading = null;
+      });
+
+    return loading;
+  }
+
+  function track<Event extends LabEvent>(event: Event, props: LabEventProperties[Event]): void {
+    if (typeof window === 'undefined' || !config.key) return;
+    const sanitized = sanitizeEvent(event, props);
+    if (!sanitized) return;
+    if (client) {
+      client.capture(sanitized.event, sanitized.props);
+      return;
+    }
+    // Retain the newest funnel context when blocked; discard the oldest event
+    // once the fixed-size queue reaches its cap.
+    if (queue.length >= maxQueueSize) queue.shift();
+    queue.push(sanitized);
+    // A later event is the retry signal after a failed lazy import. init()
+    // reuses an in-flight promise, so bursts cannot start concurrent imports.
+    void init();
+  }
+
+  return { init, track };
+}
+
+const analytics = createAnalytics({
+  key: import.meta.env.VITE_POSTHOG_KEY,
+  host: import.meta.env.VITE_POSTHOG_HOST,
+});
+
+export function initAnalytics(): void {
+  void analytics.init();
+}
+
+export function track<Event extends LabEvent>(event: Event, props: LabEventProperties[Event]): void {
+  analytics.track(event, props);
 }

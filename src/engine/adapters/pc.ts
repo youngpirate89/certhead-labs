@@ -368,6 +368,13 @@ export const pcAdapter: DeviceAdapter<PcSession> = {
     const { tokens } = tokenize(raw);
     if (tokens.length === 0) return { session: prev, output: [] };
 
+    // Lightweight/controller-managed APs have an appliance CLI, not a
+    // Windows shell and not a switch IOS configuration surface. Keep this
+    // narrow and diagnostic: WLAN/VLAN policy belongs on the WLC in this lab.
+    if (isLightweightAccessPoint(prev)) {
+      return applyLightweightAccessPointCommand(prev, raw, tokens, ctx, opts);
+    }
+
     // First token is the command name; lookup is exact (no prefix matching
     // for PC commands — Windows shell convention is full names). Aliases
     // (e.g., 'traceroute' → tracert) resolve through the same map.
@@ -399,7 +406,9 @@ export const pcAdapter: DeviceAdapter<PcSession> = {
   },
 
   prompt(session) {
-    return `${session.hostname}$`;
+    return isLightweightAccessPoint(session)
+      ? `${session.hostname}#`
+      : `${session.hostname}$`;
   },
 
   grammarFor() {
@@ -631,6 +640,75 @@ function deviceInterfaces(device: DeviceSession): Record<string, unknown>[] {
 
 function isWirelessControllerPlatform(platform: string): boolean {
   return /wireless\s+lan\s+controller|\bwlc\b/i.test(platform);
+}
+
+function isLightweightAccessPoint(session: PcSession): boolean {
+  return session.deviceClass === 'access-point' || /lightweight\s+ap/i.test(session.platform);
+}
+
+function applyLightweightAccessPointCommand(
+  prev: PcSession,
+  raw: string,
+  tokens: readonly string[],
+  ctx: AdapterContext | undefined,
+  opts: ApplyOptions | undefined,
+): ApplyResult<PcSession> {
+  const s = structuredClone(prev) as PcSession;
+  const normalized = tokens.map((token) => token.toLowerCase()).join(' ');
+  if (opts?.record !== false) {
+    s.history.push(raw.trim());
+    s.resolvedHistory.push(normalized);
+  }
+
+  if (normalized === 'show version') {
+    return {
+      session: s,
+      output: [
+        { kind: 'output', text: `Cisco ${s.platform}` },
+        { kind: 'output', text: 'Operating mode       : CAPWAP lightweight access point' },
+        { kind: 'output', text: 'Management interface : GigabitEthernet0' },
+        { kind: 'output', text: 'Configuration owner  : Wireless LAN Controller' },
+      ],
+    };
+  }
+
+  if (normalized === 'show capwap client config' || normalized === 'show capwap client rcb') {
+    const controller = Object.values(ctx?.lab.devices ?? {}).find(
+      (device) => device.kind === 'pc' && device.wirelessController,
+    );
+    const controllerIp = controller?.kind === 'pc' ? controller.ip : null;
+    return {
+      session: s,
+      output: [
+        { kind: 'output', text: `AP Name                    : ${s.hostname}` },
+        { kind: 'output', text: `AP IP Address              : ${s.ip ?? 'Unassigned'}` },
+        { kind: 'output', text: `Primary Controller Address : ${controllerIp ?? 'Not discovered'}` },
+        { kind: 'output', text: `CAPWAP State               : ${controllerIp ? 'Joined' : 'Discovery'}` },
+        { kind: 'output', text: 'AP Mode                    : Local' },
+      ],
+    };
+  }
+
+  if (
+    normalized === 'show interfaces wired' ||
+    normalized === 'show interfaces gigabitethernet0' ||
+    normalized === 'show interfaces'
+  ) {
+    return {
+      session: s,
+      output: [
+        { kind: 'output', text: `GigabitEthernet0 is ${s.nicUp ? 'up' : 'down'}, line protocol is ${s.nicUp ? 'up' : 'down'}` },
+        { kind: 'output', text: `  Internet address is ${s.ip ?? 'unassigned'}` },
+        { kind: 'output', text: `  Subnet mask is ${s.mask ?? 'unassigned'}` },
+        { kind: 'output', text: '  Hardware is Gigabit Ethernet, CAPWAP uplink' },
+      ],
+    };
+  }
+
+  return {
+    session: s,
+    output: errLine(`% Unrecognized command: ${tokens.join(' ')}`),
+  };
 }
 
 function normalizeDnsRecords(records: Readonly<Record<string, string>>): Record<string, string> {

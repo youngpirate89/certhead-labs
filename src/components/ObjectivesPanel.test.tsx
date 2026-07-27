@@ -20,6 +20,95 @@ const HINTS: HintView[] = [
   { index: 1, text: 'Second hint body', afterSeconds: 120 },
 ];
 
+const PROGRESS_OBJECTIVES: ObjectiveView[] = [
+  { id: 'o1', text: 'Inspect the current configuration', met: true },
+  { id: 'o2', text: 'Configure the required interface', met: false },
+  { id: 'o3', text: 'Verify end-to-end connectivity', met: false },
+];
+
+describe('ObjectivesPanel — guided objective status', () => {
+  it('announces progress and exposes a semantic progressbar', () => {
+    render(<ObjectivesPanel title="Objectives" objectives={PROGRESS_OBJECTIVES} />);
+
+    expect(screen.getByText('1 of 3 objectives complete')).toHaveAttribute('aria-live', 'polite');
+    const progress = screen.getByRole('progressbar', { name: /objective progress/i });
+    expect(progress).toHaveAttribute('aria-valuemin', '0');
+    expect(progress).toHaveAttribute('aria-valuemax', '3');
+    expect(progress).toHaveAttribute('aria-valuenow', '1');
+  });
+
+  it('renders numbered objective rows with explicit completed and pending labels', () => {
+    render(<ObjectivesPanel title="Objectives" objectives={PROGRESS_OBJECTIVES} />);
+
+    const rows = screen.getAllByRole('listitem');
+    expect(rows).toHaveLength(3);
+    expect(within(rows[0]).getByText('1')).toBeInTheDocument();
+    expect(within(rows[0]).getByText('Completed')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('2')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('Pending')).toBeInTheDocument();
+    expect(within(rows[2]).getByText('3')).toBeInTheDocument();
+    expect(within(rows[2]).getByText('Pending')).toBeInTheDocument();
+    for (const objective of PROGRESS_OBJECTIVES) {
+      expect(screen.getByText(objective.text)).toBeInTheDocument();
+    }
+  });
+
+  it('exposes semantic hooks for accessible light-theme progress and completed states', () => {
+    render(<ObjectivesPanel title="Objectives" objectives={PROGRESS_OBJECTIVES} />);
+
+    expect(screen.getByText('1 of 3 objectives complete')).toHaveClass('objective-progress-summary');
+    const completedRow = screen.getAllByRole('listitem')[0];
+    expect(within(completedRow).getByText('Inspect the current configuration')).toHaveClass(
+      'objective-text',
+    );
+    expect(within(completedRow).getByText('Completed')).toHaveClass('objective-state-label');
+    expect(completedRow.querySelector('.objective-status-icon')).not.toBeNull();
+  });
+
+  it('exposes semantic hooks for accessible light-theme completion feedback', () => {
+    render(
+      <ObjectivesPanel
+        title="Objectives"
+        objectives={PROGRESS_OBJECTIVES.map((objective) => ({ ...objective, met: true }))}
+      />,
+    );
+
+    const banner = screen.getByText('Lab complete').closest('.completion-banner');
+    expect(banner).not.toBeNull();
+    expect(within(banner as HTMLElement).getByText('Lab complete')).toHaveClass('completion-title');
+    expect(banner?.querySelector('.completion-status-icon')).not.toBeNull();
+  });
+
+  it('keeps reset, solution disclosure, and completion behavior intact', () => {
+    const onReset = vi.fn();
+    const { rerender } = render(
+      <ObjectivesPanel
+        title="Objectives"
+        objectives={PROGRESS_OBJECTIVES}
+        onReset={onReset}
+        solution={{ steps: [{ device: 'R1', commands: ['show running-config'] }] }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset lab' }));
+    expect(onReset).toHaveBeenCalledTimes(1);
+    const solution = screen.getByRole('button', { name: /see solution/i });
+    expect(solution).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(solution);
+    expect(screen.getByText('show running-config')).toBeInTheDocument();
+
+    rerender(
+      <ObjectivesPanel
+        title="Objectives"
+        objectives={PROGRESS_OBJECTIVES.map((objective) => ({ ...objective, met: true }))}
+        onReset={onReset}
+      />,
+    );
+    expect(screen.getByText('Lab Complete')).toBeInTheDocument();
+    expect(screen.getByText('Lab complete')).toBeInTheDocument();
+  });
+});
+
 describe('ObjectivesPanel — hints surface', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -53,6 +142,7 @@ describe('ObjectivesPanel — hints surface', () => {
       />,
     );
     expect(screen.getByText('Hints')).toBeInTheDocument();
+    expect(screen.getByText('Need help?')).toBeInTheDocument();
     // Hint 1 countdown 30s → '0:30'
     expect(screen.getByRole('button', { name: /Hint 1.*30 seconds remaining/i })).toBeDisabled();
     expect(screen.getByText(/available in 0:30/)).toBeInTheDocument();

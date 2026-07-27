@@ -100,3 +100,41 @@ describe('pcAdapter — scoped wireless controller commands', () => {
     expect(out[0].text).toMatch(/wireless controller command/);
   });
 });
+
+describe('pcAdapter — lightweight access-point console', () => {
+  function ap() {
+    return pcAdapter.buildDevice({
+      id: 'AP-1',
+      kind: 'pc',
+      deviceClass: 'access-point',
+      platform: 'Catalyst 9115AXI Lightweight AP',
+      interfaces: ['GigabitEthernet0'],
+      pc: { ip: '10.170.30.60', mask: '255.255.255.0', gateway: '10.170.30.1' },
+    });
+  }
+
+  it('uses an appliance prompt rather than a workstation shell prompt', () => {
+    expect(pcAdapter.prompt(ap())).toBe('AP-1#');
+  });
+
+  it('renders AP-specific version and CAPWAP controller evidence', () => {
+    const version = pcAdapter.applyCommand(ap(), 'show version').output.map((line) => line.text).join('\n');
+    const capwap = pcAdapter.applyCommand(ap(), 'show capwap client config').output.map((line) => line.text).join('\n');
+
+    expect(version).toMatch(/Catalyst 9115AXI/i);
+    expect(version).toMatch(/CAPWAP/i);
+    expect(capwap).toMatch(/Primary Controller Address/i);
+    expect(capwap).toMatch(/Discovery/i);
+  });
+
+  it('supports the AP wired-uplink diagnostic surface', () => {
+    const wired = pcAdapter.applyCommand(ap(), 'show interfaces wired').output.map((line) => line.text).join('\n');
+    expect(wired).toMatch(/GigabitEthernet0/i);
+    expect(wired).toMatch(/CAPWAP uplink/i);
+  });
+
+  it('does not pretend that switch configuration commands work on a lightweight AP', () => {
+    const result = pcAdapter.applyCommand(ap(), 'interface gigabitethernet0');
+    expect(result.output.map((line) => line.text).join('\n')).toMatch(/Unrecognized command/i);
+  });
+});

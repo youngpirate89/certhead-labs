@@ -1,11 +1,9 @@
 import type { Lab } from '@/engine/types';
 
 /**
- * The public free lab — top-of-funnel marketing asset (CLAUDE.md).
- *
- * "Configure GigabitEthernet0/0 with IP 192.168.1.1/24 and bring the interface
- * up, then verify with `show ip interface brief`." Foundational, ~5 minutes,
- * single device. This is the ONE lab with isFree: true.
+ * Paid CCNA source lab. The public `/try` starter path uses a separate
+ * `ccna-starter-*` wrapper so free labs have distinct public ids/copy while
+ * the full catalog remains Pro-only.
  */
 export const lab01InterfaceIp: Lab = {
   id: 'ccna-l01-interface-ip',
@@ -13,7 +11,7 @@ export const lab01InterfaceIp: Lab = {
   exam: 'CCNA 200-301',
   difficulty: 1,
   estimatedMinutes: 5,
-  isFree: true,
+  isFree: false,
   scenario:
     "You've just unboxed an ISR4321 router for a new branch office. The chassis is racked and powered, but every interface is administratively down - a fresh-from-the-box state. The network team has assigned 192.168.1.1/24 to GigabitEthernet0/0, the uplink into the branch access switch (SW1), and they're waiting on you to bring the link up.\n\nConfigure the interface, bring it up, and verify it with show ip interface brief. The terminal behaves like a real Cisco router - abbreviations work, ? shows context help, and Tab completes unique prefixes.",
   topology: {

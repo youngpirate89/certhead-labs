@@ -36,6 +36,18 @@ describe('Ticket 15 — wireless client in wrong VLAN', () => {
     expect(grade(lab, ls).allMet).toBe(false);
   });
 
+  it('models the AP as a controller-managed Catalyst appliance with CAPWAP evidence', () => {
+    const ls = initLabSession(lab);
+    const version = applyToDevice(ls, 'AP-1', 'show version');
+    const capwap = applyToDevice(version.session, 'AP-1', 'show capwap client config');
+    const text = [...version.output, ...capwap.output].map((line) => line.text).join('\n');
+
+    expect(text).toMatch(/Catalyst 9115AXI/i);
+    expect(text).toMatch(/CAPWAP lightweight access point/i);
+    expect(text).toMatch(/Primary Controller Address\s+: 10\.170\.30\.50/i);
+    expect(text).toMatch(/CAPWAP State\s+: Joined/i);
+  });
+
   it('requires client subnet evidence before the WLAN mapping is changed', () => {
     let ls = initLabSession(lab);
     ls = run(ls, 'WLC', ['config wlan interface 1 SALES-USERS', 'show wlan summary']);

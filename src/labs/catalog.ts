@@ -2,11 +2,10 @@
  * Lab catalog — the source of truth for every deployed lab and the lookup
  * the `/embed` Pro route uses to resolve a token's `labId` claim.
  *
- * The catalog includes the free lab AND every Pro-tier lab. The split between
- * `/try` (free, public) and `/embed` (Pro, JWT-gated) is enforced at the
- * route entry points, not by partitioning the catalog: `TryMode` imports the
- * free lab directly so the `/try` bundle stays free-lab-only, while `/embed`
- * (Phase A2 of the Pro-labs integration) will route through `getLabById`.
+ * The catalog is the Pro-tier source catalog. Public `/try` starter labs use
+ * separate `ccna-starter-*` ids and import a curated starter list directly, so
+ * the free funnel stays separate from paid catalog ids while `/embed`
+ * (Phase A2 of the Pro-labs integration) routes through `getLabById`.
  *
  * Because nothing on the `/try` code path imports this module today, the
  * catalog and every Pro-tier lab it transitively pulls in are tree-shaken

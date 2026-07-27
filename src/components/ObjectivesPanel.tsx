@@ -92,44 +92,35 @@ export function ObjectivesPanel({
   const allMet = metCount === objectives.length && objectives.length > 0;
 
   return (
-    <div className="flex h-full flex-col bg-panel-bg">
-      <div className="flex items-center justify-between gap-3 border-b border-panel-border px-4 py-3">
-        <h2
-          className={`flex items-center gap-2 font-sans text-sm font-semibold transition-colors duration-300 ${
-            allMet ? 'text-terminal-prompt' : 'text-terminal-fg'
-          }`}
-        >
-          {allMet && (
-            <span
-              aria-hidden
-              className="grid h-4 w-4 place-items-center rounded-full border border-terminal-prompt bg-terminal-prompt/15 text-[10px] font-bold text-terminal-prompt"
+    <div className="objectives-panel flex h-full min-w-0 flex-col overflow-x-hidden bg-panel-bg">
+      <div className="objectives-header border-b border-panel-border px-4 pb-3 pt-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="font-sans text-[10px] font-bold uppercase tracking-[0.14em] text-terminal-dim">
+              Lab checklist
+            </p>
+            <h2
+              data-objective-complete={allMet ? 'true' : 'false'}
+              className={`objective-heading mt-0.5 flex items-center gap-2 font-sans text-base font-semibold transition-colors duration-300 ${
+                allMet ? 'text-terminal-prompt' : 'text-terminal-fg'
+              }`}
             >
-              ✓
-            </span>
-          )}
-          {allMet ? 'Lab Complete' : title}
-        </h2>
-        <div className="flex items-center gap-3">
-          <span
-            className={`font-mono text-xs tabular-nums transition-colors duration-300 ${
-              allMet ? 'text-terminal-prompt' : 'text-terminal-dim'
-            }`}
-            aria-live="polite"
-          >
-            {metCount}/{objectives.length}
-          </span>
+              {allMet && <CheckIcon className="h-4 w-4" />}
+              {allMet ? 'Lab Complete' : title}
+            </h2>
+          </div>
           {onReset && (
             <button
               type="button"
               onClick={onReset}
               title="Reset lab"
               aria-label="Reset lab"
-              className="grid h-6 w-6 place-items-center rounded text-terminal-dim transition-colors hover:bg-panel-border hover:text-terminal-fg focus:outline-none focus:ring-1 focus:ring-terminal-prompt"
+              className="reset-control flex shrink-0 items-center gap-1.5 rounded-md border border-panel-border px-2 py-1.5 font-sans text-xs font-semibold text-terminal-dim transition-colors hover:bg-panel-border/60 hover:text-terminal-fg focus:outline-none focus:ring-2 focus:ring-terminal-prompt"
             >
               <svg
                 viewBox="0 0 24 24"
-                width="14"
-                height="14"
+                width="13"
+                height="13"
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="2"
@@ -140,39 +131,92 @@ export function ObjectivesPanel({
                 <path d="M3 12a9 9 0 1 0 3-6.7" />
                 <path d="M3 4v5h5" />
               </svg>
+              Reset
             </button>
           )}
         </div>
+        <div className="objective-progress mt-3">
+          <div className="flex items-center justify-between gap-3">
+            <span
+              className={`objective-progress-summary font-sans text-xs font-semibold tabular-nums ${
+                allMet ? 'text-terminal-prompt' : 'text-terminal-fg'
+              }`}
+              aria-live="polite"
+            >
+              {metCount} of {objectives.length} objectives complete
+            </span>
+            <span aria-hidden className="font-mono text-[10px] tabular-nums text-terminal-dim">
+              {objectives.length > 0 ? Math.round((metCount / objectives.length) * 100) : 0}%
+            </span>
+          </div>
+          <div
+            role="progressbar"
+            aria-label="Objective progress"
+            aria-valuemin={0}
+            aria-valuemax={objectives.length}
+            aria-valuenow={metCount}
+            aria-valuetext={`${metCount} of ${objectives.length} objectives complete`}
+            className="objective-progress-track mt-2 h-1.5 overflow-hidden rounded-full bg-panel-border"
+          >
+            <div
+              className="objective-progress-fill h-full rounded-full bg-terminal-prompt transition-[width] duration-500"
+              style={{ width: `${objectives.length > 0 ? (metCount / objectives.length) * 100 : 0}%` }}
+            />
+          </div>
+        </div>
       </div>
-      <div className="flex flex-1 flex-col overflow-y-auto">
-        <ul className="space-y-1 p-2">
-          {objectives.map((o) => {
+      <div className="flex min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
+        <ul className="objective-list space-y-2 p-3">
+          {objectives.map((o, index) => {
             const flashing = justMet.has(o.id);
             return (
               <li
                 key={o.id}
-                className={`flex items-start gap-3 rounded-md px-2 py-2 text-sm transition-colors ${
-                  flashing ? 'animate-objective-flash' : ''
-                }`}
+                data-objective-state={o.met ? 'completed' : 'pending'}
+                className={`objective-card flex min-w-0 items-start gap-2.5 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                  o.met
+                    ? 'border-terminal-prompt/30 bg-terminal-prompt/5'
+                    : 'border-panel-border bg-panel-header/40'
+                } ${flashing ? 'animate-objective-flash' : ''}`}
               >
                 <span
-                  className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border text-[10px] font-bold transition-colors duration-300 ${
+                  className={`objective-number mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-md border font-mono text-[10px] font-bold tabular-nums ${
                     o.met
-                      ? 'border-terminal-prompt bg-terminal-prompt/15 text-terminal-prompt'
-                      : 'border-panel-border text-transparent'
+                      ? 'border-terminal-prompt/50 bg-terminal-prompt/10 text-terminal-prompt'
+                      : 'border-terminal-dim/60 bg-panel-bg text-terminal-fg'
                   }`}
-                  aria-hidden
                 >
-                  <span className={flashing ? 'animate-check-pop' : ''}>
-                    {o.met ? '✓' : ''}
-                  </span>
+                  {index + 1}
                 </span>
+                <div className="min-w-0 flex-1">
+                  <span
+                    className={`objective-text block break-words font-sans text-xs leading-5 transition-colors duration-300 ${
+                      o.met ? 'text-terminal-dim' : 'text-terminal-fg'
+                    }`}
+                  >
+                    {o.text}
+                  </span>
+                  <span
+                    className={`objective-state-label mt-1 block font-sans text-[10px] font-bold uppercase tracking-[0.1em] ${
+                      o.met ? 'text-terminal-prompt' : 'text-terminal-dim'
+                    }`}
+                  >
+                    {o.met ? 'Completed' : 'Pending'}
+                  </span>
+                </div>
                 <span
-                  className={`transition-colors duration-300 ${
-                    o.met ? 'text-terminal-dim line-through' : 'text-terminal-fg'
+                  aria-hidden
+                  className={`objective-status-icon mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border ${
+                    o.met
+                      ? 'border-terminal-prompt/60 bg-terminal-prompt/15 text-terminal-prompt'
+                      : 'border-terminal-dim/50 text-terminal-dim'
                   }`}
                 >
-                  {o.text}
+                  {o.met ? (
+                    <CheckIcon className={flashing ? 'h-3 w-3 animate-check-pop' : 'h-3 w-3'} />
+                  ) : (
+                    <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                  )}
                 </span>
               </li>
             );
@@ -191,26 +235,16 @@ export function ObjectivesPanel({
         )}
       </div>
       {allMet && (
-        // Shared completion moment — lifts every lab (free /try AND Pro
-        // catalog) above the bare header flip + reset button. A success card
-        // with affirming, deterministic copy: a genuine payoff, not a status
-        // change. Deliberately carries NO upgrade CTA and NO next-lab link:
-        //  - the /try funnel CTA ("Unlock with CertHead Pro") lives solely in
-        //    TryMode's CompletionBanner; duplicating it here would double the
-        //    funnel and would wrongly appear on Pro labs too.
-        //  - there is no wired in-app next-lab navigation (the catalog
-        //    registry is gated/unbuilt per CLAUDE.md), so we use static copy
-        //    rather than fabricate a link to nowhere.
-        <div className="animate-slide-up border-t border-terminal-prompt/40 bg-terminal-prompt/5 p-4">
+        <div className="completion-banner animate-slide-up border-t border-terminal-prompt/40 bg-terminal-prompt/5 p-4">
           <div className="flex items-start gap-3">
             <div
               aria-hidden
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-terminal-prompt/70 bg-terminal-prompt/20 text-terminal-prompt"
+              className="completion-status-icon grid h-8 w-8 shrink-0 place-items-center rounded-full border border-terminal-prompt/70 bg-terminal-prompt/20 text-terminal-prompt"
             >
-              <span className="animate-check-pop text-sm font-bold">✓</span>
+              <CheckIcon className="h-4 w-4 animate-check-pop" />
             </div>
             <div className="flex-1">
-              <p className="font-sans text-sm font-semibold text-terminal-prompt">
+              <p className="completion-title font-sans text-sm font-semibold text-terminal-prompt">
                 Lab complete
               </p>
               <p className="mt-0.5 font-sans text-xs leading-relaxed text-terminal-fg/80">
@@ -232,6 +266,23 @@ export function ObjectivesPanel({
         </div>
       )}
     </div>
+  );
+}
+
+function CheckIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.25"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="m4.5 10.5 3.25 3.25 7.75-8" />
+    </svg>
   );
 }
 
@@ -300,10 +351,18 @@ function HintsList({ hints, labStartedAt, resetToken, onRevealHint }: HintsListP
   }
 
   return (
-    <div className="border-t border-panel-border px-2 py-2">
-      <h3 className="px-2 pb-1 font-sans text-[11px] font-semibold uppercase tracking-wider text-terminal-dim">
+    <section className="help-section mx-3 mb-3 rounded-lg border border-panel-border bg-panel-header/40 p-3" aria-label="Need help">
+      <div className="mb-2">
+        <h3 className="font-sans text-sm font-semibold text-terminal-fg">
+          Need help?
+        </h3>
+        <p className="mt-0.5 font-sans text-[11px] leading-4 text-terminal-dim">
+          Reveal a hint when its timer is ready.
+        </p>
+      </div>
+      <h4 className="pb-1 font-sans text-[10px] font-bold uppercase tracking-[0.12em] text-terminal-dim">
         Hints
-      </h3>
+      </h4>
       <ul className="space-y-1">
         {hints.map((h, i) => (
           <HintRow
@@ -318,7 +377,7 @@ function HintsList({ hints, labStartedAt, resetToken, onRevealHint }: HintsListP
           />
         ))}
       </ul>
-    </div>
+    </section>
   );
 }
 

@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /try$
+Allow: /assets/
+Disallow: /
+
+Sitemap: https://labs.certhead.com/sitemap.xml

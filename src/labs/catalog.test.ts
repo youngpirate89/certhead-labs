@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { grade } from '@/engine/grading';
 import { applyToActive, initLabSession, type DeviceSession, type LabSession } from '@/engine/lab-session';
 import { getCatalogLabs, getLabById } from './catalog';
-import { lab01InterfaceIp } from './ccna/lab-01-interface-ip';
 
 // Stable, permanent ids the embed/JWT contract will encode. Adding a lab to
 // the catalog requires adding its id here — that's the point: the test is the
@@ -110,32 +109,18 @@ describe('lab catalog — getLabById', () => {
     expect(getLabById('')).toBeNull();
   });
 
-  it('still resolves the free lab — same object, isFree intact, id unchanged', () => {
-    const lab = getLabById('ccna-l01-interface-ip');
-    expect(lab).toBe(lab01InterfaceIp);
-    expect(lab?.isFree).toBe(true);
-    expect(lab?.id).toBe('ccna-l01-interface-ip');
-  });
-
-  it('the free lab is the only catalog member with isFree: true', () => {
-    const free = CATALOG_IDS.map((id) => getLabById(id)).filter((l) => l?.isFree === true);
-    expect(free).toHaveLength(1);
-    expect(free[0]?.id).toBe('ccna-l01-interface-ip');
-  });
-
-  it('keeps the private catalog contract at 60 total labs with one free public lab', () => {
+  it('keeps every private catalog lab Pro-only; public starters live outside the paid catalog', () => {
     const labs = CATALOG_IDS.map((id) => getLabById(id));
     expect(CATALOG_IDS).toHaveLength(60);
-    expect(labs.filter((lab) => lab?.isFree === true)).toHaveLength(1);
-    expect(labs.filter((lab) => lab?.isFree !== true)).toHaveLength(59);
+    expect(labs.filter((lab) => lab?.isFree === true)).toHaveLength(0);
+    expect(labs.filter((lab) => lab?.isFree !== true)).toHaveLength(60);
   });
 
-  it('keeps the private source catalog at exactly 60 labs with one public free lab', () => {
+  it('keeps the private source catalog at exactly 60 Pro labs', () => {
     const labs = getCatalogLabs();
     expect(labs).toHaveLength(60);
-    expect(labs.filter((lab) => lab.isFree === true)).toHaveLength(1);
-    expect(labs.filter((lab) => lab.isFree !== true)).toHaveLength(59);
-    expect(labs.find((lab) => lab.isFree === true)?.id).toBe('ccna-l01-interface-ip');
+    expect(labs.filter((lab) => lab.isFree === true)).toHaveLength(0);
+    expect(labs.filter((lab) => lab.isFree !== true)).toHaveLength(60);
   });
 
   it.each(CATALOG_IDS)('published solution for %s completes all objectives', (id) => {

@@ -5,19 +5,55 @@ import { TopologyPanel } from '@/components/TopologyPanel';
 import { ObjectivesPanel } from '@/components/ObjectivesPanel';
 import { FloatingTerminalPanel } from '@/components/terminal/FloatingTerminalPanel';
 import { useLabSession } from '@/engine/terminal/useLabSession';
-import { lab01InterfaceIp } from '@/labs/ccna/lab-01-interface-ip';
+import type { Lab } from '@/engine/types';
+import { FREE_CCNA_STARTER_LAB_IDS, getFreeCcnaStarterLabById, getFreeCcnaStarterLabs } from '@/labs/free-starter';
+import { DEFAULT_FREE_CCNA_STARTER_LAB_ID, resolveTryModeLabId } from '@/routing/tryLabSelection';
 import { initAnalytics, track } from '@/analytics/posthog';
+import { buildFreeLabRegisterUrl } from '@/conversion/freeLabIntent';
 
-export const FREE_LAB_REGISTER_URL = 'https://certhead.com/register?source=free-lab';
+interface CompletionCta {
+  readonly href: string;
+  readonly label: string;
+  readonly target?: '_blank';
+  readonly rel?: 'noopener noreferrer';
+  readonly nextCopy: string;
+  readonly proCopy?: string;
+}
+
+function starterTitleWithoutPrefix(title: string): string {
+  return title.replace(/^Starter\s+\d+:\s*/, '');
+}
+
+function getCompletionCta(labId: string): CompletionCta {
+  const currentIndex = FREE_CCNA_STARTER_LAB_IDS.findIndex((id) => id === labId);
+  const nextId = currentIndex >= 0 ? FREE_CCNA_STARTER_LAB_IDS[currentIndex + 1] : undefined;
+  const nextLab = nextId ? getFreeCcnaStarterLabById(nextId) : null;
+
+  if (nextLab) {
+    return {
+      href: `/try?lab=${encodeURIComponent(nextLab.id)}`,
+      label: 'Continue to next free lab',
+      nextCopy: `Starter ${currentIndex + 2}, ${starterTitleWithoutPrefix(nextLab.title)}.`,
+    };
+  }
+
+  return {
+    href: buildFreeLabRegisterUrl(labId),
+    label: FREE_LAB_UPSELL_COPY.cta,
+    target: '_blank',
+    rel: 'noopener noreferrer',
+    nextCopy: 'full CCNA lab track (Pro).',
+    proCopy: FREE_LAB_UPSELL_COPY.proLibrary,
+  };
+}
 
 export const FREE_LAB_UPSELL_COPY = {
-  nextLab: 'Lab 04: Static Routing',
-  proLibrary: 'Pro includes the full 50-lab CCNA library.',
+  proLibrary: 'Pro includes the full 60-lab CCNA library.',
   cta: 'Unlock with CertHead Pro',
 } as const;
 
 /**
- * Public free-lab route (`/try`). No auth, hardcoded to the single free lab.
+ * Public free-lab route (`/try`). No auth, scoped to the free CCNA starter labs.
  * On completion, shows the upgrade CTA — AFTER completion, never during
  * (CLAUDE.md free-lab design principle). No CertHead API calls. Anonymous
  * PostHog funnel events only: viewed -> started -> completed -> cta_clicked.
@@ -27,12 +63,17 @@ export const FREE_LAB_UPSELL_COPY = {
  * shared FloatingTerminalPanel — one window, one tab per open device.
  */
 export function TryMode() {
-  const lab = lab01InterfaceIp;
+  const labId = typeof window === 'undefined' ? DEFAULT_FREE_CCNA_STARTER_LAB_ID : resolveTryModeLabId(window.location.search);
+  const lab = getFreeCcnaStarterLabById(labId) ?? getFreeCcnaStarterLabById(DEFAULT_FREE_CCNA_STARTER_LAB_ID)!;
   const session = useLabSession(lab);
+  const viewedLabIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     initAnalytics();
-    track('lab_viewed', { labId: lab.id });
+    if (viewedLabIdRef.current !== lab.id) {
+      viewedLabIdRef.current = lab.id;
+      track('lab_viewed', { labId: lab.id });
+    }
   }, [lab.id]);
 
   // Engagement: fire once when the learner runs their first command.
@@ -96,6 +137,26 @@ export function TryMode() {
     return m;
   }, [lab]);
   const platformLabel = useCallback((id: string) => platformById.get(id), [platformById]);
+  const deviceClassById = useMemo(() => {
+    const m = new Map<string, Lab['topology']['devices'][number]['deviceClass']>();
+    for (const d of lab.topology.devices) m.set(d.id, d.deviceClass);
+    return m;
+  }, [lab]);
+  const deviceClass = useCallback((id: string) => deviceClassById.get(id), [deviceClassById]);
+
+  const starterLabLinks = useMemo(
+    () =>
+      getFreeCcnaStarterLabs().map((starterLab, index) => ({
+        id: starterLab.id,
+        title: starterLab.title,
+        estimatedMinutes: starterLab.estimatedMinutes,
+        difficulty: starterLab.difficulty,
+        href: `/try?lab=${encodeURIComponent(starterLab.id)}`,
+        isActive: starterLab.id === lab.id,
+        sequenceNumber: index + 1,
+      })),
+    [lab.id],
+  );
 
   return (
     <>
@@ -150,6 +211,7 @@ export function TryMode() {
               forDevice={session.forDevice}
               platformLabel={platformLabel}
               deviceKind={session.deviceKind}
+              deviceClass={deviceClass}
               pcNetwork={session.pcNetwork}
               onPcNetworkApply={session.updatePcNetwork}
               onSelectDevice={session.setActiveDevice}
@@ -169,6 +231,7 @@ export function TryMode() {
             estimatedMinutes={lab.estimatedMinutes}
             scenario={lab.scenario}
             objectives={lab.objectives.map((o) => ({ id: o.id, text: o.text }))}
+            starterLabs={starterLabLinks}
             onStart={startLab}
           />
         </div>
@@ -205,6 +268,8 @@ export function MobileHintsPanel({ hints }: { hints: readonly string[] }) {
  *  Renders as a fixed-position strip at the bottom of the viewport so it works
  *  regardless of which (or how many) floating panels are open. */
 export function CompletionBanner({ labId }: { labId: string }) {
+  const cta = getCompletionCta(labId);
+
   return (
     <div className="animate-slide-up fixed inset-x-0 bottom-0 z-30 border-t border-terminal-prompt/40 bg-panel-header/95 p-5 backdrop-blur">
       <div className="animate-celebrate mx-auto flex max-w-2xl items-center gap-4 rounded-md p-1 sm:flex-row">
@@ -213,21 +278,21 @@ export function CompletionBanner({ labId }: { labId: string }) {
         </div>
         <div className="flex-1">
           <p className="font-sans text-sm font-semibold text-terminal-prompt">
-            Lab complete: interface is up.
+            Starter lab complete.
           </p>
           <p className="mt-0.5 font-sans text-sm text-terminal-fg/80">
-            Next: <span className="text-terminal-fg">{FREE_LAB_UPSELL_COPY.nextLab}</span>{' '}
-            <span className="text-terminal-dim">(Pro)</span>. {FREE_LAB_UPSELL_COPY.proLibrary}
+            Next: <span className="text-terminal-fg">{cta.nextCopy}</span>{' '}
+            {cta.proCopy && <span className="text-terminal-dim">{cta.proCopy}</span>}
           </p>
         </div>
         <a
-          href={FREE_LAB_REGISTER_URL}
-          target="_blank"
-          rel="noopener noreferrer"
+          href={cta.href}
+          target={cta.target}
+          rel={cta.rel}
           onClick={() => track('cta_clicked', { labId })}
           className="shrink-0 rounded-md bg-terminal-prompt px-4 py-2 text-center font-sans text-sm font-semibold text-[#06231d] transition hover:brightness-110"
         >
-          {FREE_LAB_UPSELL_COPY.cta}
+          {cta.label}
         </a>
       </div>
     </div>

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { Layout } from './Layout';
 
 /**
@@ -31,10 +31,44 @@ describe('Layout', () => {
     expect(screen.getByText('Sample lab')).toBeInTheDocument();
   });
 
+  it('exposes a branded product header and concise lab context', () => {
+    renderSample();
+
+    expect(screen.getByRole('banner', { name: /certhead labs workspace/i })).toHaveAttribute(
+      'data-region',
+      'product-header',
+    );
+    const context = screen.getByRole('group', { name: /current lab/i });
+    expect(within(context).getByText('CCNA 200-301')).toBeInTheDocument();
+    expect(within(context).getByText('Sample lab')).toBeInTheDocument();
+  });
+
+  it('keeps long lab titles truncation-safe inside the header context', () => {
+    renderSample();
+
+    const title = screen.getByText('Sample lab');
+    expect(title).toHaveAttribute('data-lab-title');
+    expect(title).toHaveClass('min-w-0', 'truncate');
+    expect(title).toHaveAttribute('title', 'Sample lab');
+  });
+
   it('renders the topology and objectives regions', () => {
     renderSample();
     expect(screen.getByTestId('topology-content')).toBeInTheDocument();
     expect(screen.getByTestId('objectives-content')).toBeInTheDocument();
+  });
+
+  it('labels the topology workspace and presents objectives as a distinct rail', () => {
+    const { container } = renderSample();
+
+    expect(screen.getByRole('region', { name: /network topology workspace/i })).toHaveAttribute(
+      'data-region',
+      'topology',
+    );
+    const objectives = screen.getByRole('complementary', { name: /lab objectives/i });
+    expect(objectives).toHaveAttribute('data-region', 'objectives');
+    expect(container.querySelector('[data-region="workspace-row"]')).toHaveClass('workspace-surface');
+    expect(objectives).toHaveClass('objectives-rail');
   });
 
   it('places the topology region to the LEFT of the objectives sidebar', () => {
@@ -110,6 +144,15 @@ describe('Layout', () => {
     expect(terminal.style.height).toBe('34%');
   });
 
+  it('exposes a dedicated terminal-theme isolation hook on the entire dock', () => {
+    const { container } = renderSample();
+    const terminal = container.querySelector('[data-region="terminal-dock"]');
+
+    expect(terminal).toHaveAttribute('data-terminal-theme-isolation');
+    expect(terminal).toHaveClass('terminal-theme-isolation');
+    expect(within(terminal as HTMLElement).getByTestId('terminal-content')).toBeInTheDocument();
+  });
+
   it('defaults to dark mode and exposes a learner-facing light theme toggle', () => {
     const { container } = renderSample();
     const shell = container.querySelector('[data-lab-theme]');
@@ -147,6 +190,40 @@ describe('Layout', () => {
     expect(container.querySelector('[data-mobile-panel="terminal"]')).not.toBeNull();
     expect(container.querySelector('[data-mobile-panel="objectives"]')).not.toBeNull();
     expect(container.querySelector('[data-mobile-panel="hints"]')).not.toBeNull();
+  });
+
+  it('conditionally mounts each non-scenario mobile panel only while that panel is active', () => {
+    const { container } = render(
+      <Layout
+        examLabel="CCNA 200-301"
+        labTitle="Sample lab"
+        scenario={<div data-testid="mobile-scenario-content">scenario here</div>}
+        topology={<div data-testid="mobile-topology-content">topology here</div>}
+        objectives={<div data-testid="mobile-objectives-content">objectives here</div>}
+        terminal={<div data-testid="mobile-terminal-content">terminal here</div>}
+        hints={<div data-testid="mobile-hints-content">hints here</div>}
+        hasHints
+      />,
+    );
+
+    const panel = (name: string) =>
+      container.querySelector(`[data-mobile-panel="${name}"]`) as HTMLElement;
+
+    expect(within(panel('scenario')).getByTestId('mobile-scenario-content')).toBeInTheDocument();
+    for (const name of ['topology', 'terminal', 'objectives', 'hints']) {
+      expect(within(panel(name)).queryByTestId(`mobile-${name}-content`)).toBeNull();
+    }
+
+    for (const name of ['Topology', 'Terminal', 'Objectives', 'Hints']) {
+      fireEvent.click(screen.getByRole('tab', { name }));
+      const key = name.toLowerCase();
+      expect(within(panel(key)).getByTestId(`mobile-${key}-content`)).toBeInTheDocument();
+      for (const other of ['topology', 'terminal', 'objectives', 'hints']) {
+        if (other !== key) {
+          expect(within(panel(other)).queryByTestId(`mobile-${other}-content`)).toBeNull();
+        }
+      }
+    }
   });
 
   it('keeps mobile verify, reset, and hint actions sticky and wired to the mobile panels', () => {

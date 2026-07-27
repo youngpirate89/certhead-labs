@@ -92,29 +92,65 @@ export function Layout({
       }`}
     >
       <header
-        className={`flex shrink-0 items-center justify-between border-b px-5 py-3 transition-colors ${
+        aria-label="CertHead Labs workspace"
+        data-region="product-header"
+        className={`product-header flex shrink-0 items-center gap-3 border-b px-4 py-3 transition-colors md:px-5 ${
           isLight ? 'border-[#cbd5e1] bg-white' : 'border-panel-border bg-panel-header'
         }`}
       >
-        <div className="flex items-baseline gap-3">
-          <span className={`font-sans text-sm font-bold tracking-tight ${isLight ? 'text-[#172033]' : 'text-terminal-fg'}`}>
+        <div className="flex shrink-0 items-center gap-2.5">
+          <span
+            aria-hidden
+            className="grid h-7 w-7 place-items-center rounded-md border border-terminal-prompt/40 bg-terminal-prompt/10 font-sans text-xs font-extrabold text-terminal-prompt"
+          >
+            CH
+          </span>
+          <span className={`hidden font-sans text-sm font-bold tracking-tight sm:inline ${isLight ? 'text-[#172033]' : 'text-terminal-fg'}`}>
             CertHead<span className="text-terminal-prompt"> Labs</span>
           </span>
-          <span className={`font-mono text-xs ${isLight ? 'text-[#64748b]' : 'text-terminal-dim'}`}>{examLabel}</span>
         </div>
-        <div className="flex items-center gap-3">
-          <span className={`font-sans text-sm ${isLight ? 'text-[#334155]' : 'text-terminal-fg/80'}`}>{labTitle}</span>
+        <div
+          role="group"
+          aria-label="Current lab"
+          className={`flex min-w-0 flex-1 items-center gap-2.5 border-l pl-3 md:pl-4 ${
+            isLight ? 'border-[#dbe3ee]' : 'border-panel-border'
+          }`}
+        >
+          <span className="exam-badge shrink-0 rounded border border-terminal-prompt/40 bg-terminal-prompt/10 px-2 py-1 font-sans text-[10px] font-bold uppercase tracking-[0.08em] text-terminal-prompt">
+            {examLabel}
+          </span>
+          <span
+            data-lab-title
+            className={`min-w-0 truncate font-sans text-sm font-semibold ${
+              isLight ? 'text-[#1e293b]' : 'text-terminal-fg'
+            }`}
+            title={labTitle}
+          >
+            {labTitle}
+          </span>
+        </div>
+        <div className="flex shrink-0 items-center">
           <button
             type="button"
             aria-label={isLight ? 'Switch to dark theme' : 'Switch to light theme'}
             onClick={() => setTheme((cur) => (cur === 'dark' ? 'light' : 'dark'))}
-            className={`rounded-full border px-3 py-1 font-sans text-xs font-semibold transition ${
+            className={`theme-control flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 font-sans text-xs font-semibold transition ${
               isLight
                 ? 'border-[#cbd5e1] bg-[#f8fafc] text-[#334155] hover:bg-[#e2e8f0]'
                 : 'border-panel-border bg-[#0d1117] text-terminal-fg hover:bg-panel-border'
             }`}
           >
-            {isLight ? 'Dark' : 'Light'} mode
+            {isLight ? (
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                <circle cx="12" cy="12" r="4" />
+                <path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41" />
+              </svg>
+            )}
+            <span className="hidden sm:inline">{isLight ? 'Dark' : 'Light'} mode</span>
           </button>
         </div>
       </header>
@@ -188,7 +224,8 @@ export function Layout({
             role="tabpanel"
             data-mobile-panel="terminal"
             hidden={activeMobileTab !== 'terminal'}
-            className="min-h-0 flex-1 overflow-hidden bg-[#0d1117]"
+            data-terminal-theme-isolation
+            className="terminal-theme-isolation min-h-0 flex-1 overflow-hidden bg-[#0d1117]"
           >
             {activeMobileTab === 'terminal' ? (
               terminal ?? (
@@ -258,14 +295,15 @@ export function Layout({
           </div>
         </div>
 
-        <div data-region="workspace-row" className="hidden min-h-0 flex-1 overflow-hidden md:flex">
+        <div data-region="workspace-row" className="workspace-surface hidden min-h-0 flex-1 overflow-hidden md:flex">
           {/* Topology canvas — fills remaining viewport width. `min-w-0` is
               mandatory: without it, the inner React Flow container can refuse
               to shrink below its content's natural size and push the sidebar
               off-screen on narrow viewports. */}
           <section
             data-region="topology"
-            className={`min-h-0 min-w-0 flex-1 overflow-hidden ${isLight ? 'bg-[#eef3f8]' : 'bg-panel-bg'}`}
+            aria-label="Network topology workspace"
+            className={`topology-surface min-h-0 min-w-0 flex-1 overflow-hidden ${isLight ? 'bg-[#eef3f8]' : 'bg-panel-bg'}`}
           >
             {topology}
           </section>
@@ -274,7 +312,8 @@ export function Layout({
               separator between the canvas and the sidebar. */}
           <aside
             data-region="objectives"
-            className={`h-full min-w-0 shrink-0 overflow-hidden border-l ${
+            aria-label="Lab objectives"
+            className={`objectives-rail h-full min-w-0 shrink-0 overflow-hidden border-l ${
               isLight ? 'border-[#cbd5e1] bg-white' : 'border-panel-border bg-panel-bg'
             }`}
             style={{ width: SIDEBAR_WIDTH }}
@@ -285,7 +324,9 @@ export function Layout({
         {terminal && (
           <section
             data-region="terminal-dock"
-            className={`hidden shrink-0 overflow-hidden border-t md:block ${
+            data-terminal-theme-isolation
+            aria-label="Terminal workspace"
+            className={`terminal-dock-surface terminal-theme-isolation hidden shrink-0 overflow-hidden border-t md:block ${
               isLight ? 'border-[#cbd5e1] bg-[#0d1117]' : 'border-panel-border bg-[#0d1117]'
             }`}
             style={{ height: '34%' }}

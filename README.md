@@ -6,11 +6,16 @@ See `CLAUDE.md` for the product thesis, architecture decisions, and build order.
 
 ## Status
 
-**Ship Milestone 1 — public free lab.** Cisco IOS adapter (mode stack,
-interface state machine, ~30 commands), declarative grading, and the free
-interface-IP lab at the `/try` route, with anonymous PostHog funnel analytics.
-Deploy-ready for Cloudflare Pages — see `docs/DEPLOY.md`. The `/embed` Pro route
-(JWT) is Milestone 2, gated on 300+ CertHead subscribers.
+The current offer has **10 dedicated public CCNA starter labs** at `/try` and
+**60 separate Pro catalog labs**. The starter path requires no login, uses
+anonymous PostHog funnel analytics when a public project key is configured, and
+keeps all source catalog labs Pro-only. Starters 1 through 9 continue inside the
+free path; starter 10 preserves the originating lab intent through main-app
+registration and upgrade before returning the learner to `/labs`.
+
+The static Cloudflare Pages build is production-ready; see `docs/DEPLOY.md`.
+The `/embed` route remains the authenticated Pro surface and is not exposed by
+the public sitemap.
 
 ## Develop
 

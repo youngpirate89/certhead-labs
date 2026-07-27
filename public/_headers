@@ -1,0 +1,17 @@
+/
+  X-Robots-Tag: noindex, nofollow
+
+/embed/*
+  X-Robots-Tag: noindex, nofollow
+
+/embed
+  X-Robots-Tag: noindex, nofollow
+
+/pilot*
+  X-Robots-Tag: noindex, nofollow
+
+/dev
+  X-Robots-Tag: noindex, nofollow
+
+/dev/*
+  X-Robots-Tag: noindex, nofollow

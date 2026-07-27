@@ -13,6 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:e2e:production": "npm run build && playwright test --config=playwright.production.config.ts",
     "qa:labs": "node tests/e2e/run-lab-smoke.mjs"
   },
   "dependencies": {

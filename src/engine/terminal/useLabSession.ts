@@ -65,10 +65,22 @@ function routerBootBanner(platform: string): OutputLine[] {
 }
 
 /** PCs get a one-line shell-style header — no IOS boot. */
-function pcBootBanner(hostname: string, platform: string): OutputLine[] {
+function pcBootBanner(
+  hostname: string,
+  platform: string,
+  deviceClass?: LabDevice['deviceClass'],
+): OutputLine[] {
   if (/wireless lan controller/i.test(platform)) {
     return [
       { kind: 'system', text: `${hostname} — wireless LAN controller. Try \`show wlan summary\` or \`config wlan ...\`.` },
+      { kind: 'system', text: '' },
+    ];
+  }
+
+  if (deviceClass === 'access-point') {
+    return [
+      { kind: 'system', text: `${hostname} — ${platform}. Controller-managed AP console.` },
+      { kind: 'system', text: 'Try `show version` or `show capwap client config`. WLAN/VLAN policy is configured on the WLC.' },
       { kind: 'system', text: '' },
     ];
   }
@@ -85,7 +97,7 @@ function bannerForDevice(d: LabDevice): OutputLine[] {
     case 'switch':
       return routerBootBanner(d.platform);
     case 'pc':
-      return pcBootBanner(d.id, d.platform);
+      return pcBootBanner(d.id, d.platform, d.deviceClass);
   }
 }
 
