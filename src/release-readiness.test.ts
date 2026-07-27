@@ -186,6 +186,9 @@ describe('release readiness: public free-lab surface', () => {
     }
     const claude = readFileSync(`${process.cwd()}/CLAUDE.md`, 'utf8');
     expect(claude).not.toContain('**Catalog (21 labs):**');
+    expect(claude).toContain('Public 10-starter path live at `https://labs.certhead.com/try`');
+    expect(claude).not.toContain('Live at `https://main.certhead-labs.pages.dev/`');
+    expect(claude).not.toContain('CNAME + landing-page link still gated');
   });
 
   it('has a launch checklist for validations that belong outside this repo', () => {

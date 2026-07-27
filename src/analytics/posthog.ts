@@ -28,15 +28,78 @@ const DEFAULT_MAX_QUEUE_SIZE = 100;
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_RETRY_BASE_MS = 1_000;
 const DEFAULT_COOLDOWN_MS = 60_000;
+const MAX_LAB_ID_LENGTH = 96;
+const MAX_COMMAND_COUNT = 100_000;
+const MAX_HINT_INDEX = 1_000;
+const SAFE_LAB_ID = /^ccna-(?:starter-\d{2}|lab\d+)-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-export type LabEvent =
-  | 'lab_viewed'
-  | 'lab_started'
-  | 'lab_brief_dismissed'
-  | 'lab_completed'
-  | 'lab_reset'
-  | 'hint_shown'
-  | 'cta_clicked';
+interface LabIdProperties {
+  readonly labId: string;
+}
+
+export interface LabEventProperties {
+  readonly lab_viewed: LabIdProperties;
+  readonly lab_started: LabIdProperties;
+  readonly lab_brief_dismissed: LabIdProperties;
+  readonly lab_completed: LabIdProperties & { readonly commandCount: number };
+  readonly lab_reset: LabIdProperties;
+  readonly hint_shown: LabIdProperties & { readonly hintIndex: number };
+  readonly cta_clicked: LabIdProperties;
+}
+
+export type LabEvent = keyof LabEventProperties;
+
+type SanitizedEvent = {
+  [Event in LabEvent]: {
+    readonly event: Event;
+    readonly props: LabEventProperties[Event];
+  };
+}[LabEvent];
+
+function isPropertyObject(value: unknown): value is { readonly [key: string]: unknown } {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isSafeLabId(value: unknown): value is string {
+  return typeof value === 'string'
+    && value.length <= MAX_LAB_ID_LENGTH
+    && SAFE_LAB_ID.test(value);
+}
+
+function isBoundedNonnegativeInteger(value: unknown, maximum: number): value is number {
+  return typeof value === 'number'
+    && Number.isFinite(value)
+    && Number.isInteger(value)
+    && value >= 0
+    && value <= maximum;
+}
+
+/**
+ * Runtime privacy boundary. Unknown properties are discarded. If an approved
+ * property is missing or malformed, the whole event is rejected rather than
+ * emitting ambiguous analytics without its required lab context.
+ */
+function sanitizeEvent(event: unknown, props: unknown): SanitizedEvent | null {
+  if (!isPropertyObject(props) || !isSafeLabId(props.labId)) return null;
+  const labId = props.labId;
+
+  switch (event) {
+    case 'lab_viewed':
+    case 'lab_started':
+    case 'lab_brief_dismissed':
+    case 'lab_reset':
+    case 'cta_clicked':
+      return { event, props: { labId } };
+    case 'lab_completed':
+      if (!isBoundedNonnegativeInteger(props.commandCount, MAX_COMMAND_COUNT)) return null;
+      return { event, props: { labId, commandCount: props.commandCount } };
+    case 'hint_shown':
+      if (!isBoundedNonnegativeInteger(props.hintIndex, MAX_HINT_INDEX)) return null;
+      return { event, props: { labId, hintIndex: props.hintIndex } };
+    default:
+      return null;
+  }
+}
 
 export function createAnalytics(
   config: AnalyticsConfig,
@@ -52,7 +115,7 @@ export function createAnalytics(
   let loading: Promise<void> | null = null;
   let failedAttempts = 0;
   let retryAfter = 0;
-  const queue: { event: LabEvent; props?: Record<string, unknown> }[] = [];
+  const queue: SanitizedEvent[] = [];
 
   function init(): Promise<void> {
     if (loading) return loading;
@@ -93,16 +156,18 @@ export function createAnalytics(
     return loading;
   }
 
-  function track(event: LabEvent, props?: Record<string, unknown>): void {
+  function track<Event extends LabEvent>(event: Event, props: LabEventProperties[Event]): void {
     if (typeof window === 'undefined' || !config.key) return;
+    const sanitized = sanitizeEvent(event, props);
+    if (!sanitized) return;
     if (client) {
-      client.capture(event, props);
+      client.capture(sanitized.event, sanitized.props);
       return;
     }
     // Retain the newest funnel context when blocked; discard the oldest event
     // once the fixed-size queue reaches its cap.
     if (queue.length >= maxQueueSize) queue.shift();
-    queue.push({ event, props });
+    queue.push(sanitized);
     // A later event is the retry signal after a failed lazy import. init()
     // reuses an in-flight promise, so bursts cannot start concurrent imports.
     void init();
@@ -120,6 +185,6 @@ export function initAnalytics(): void {
   void analytics.init();
 }
 
-export function track(event: LabEvent, props?: Record<string, unknown>): void {
+export function track<Event extends LabEvent>(event: Event, props: LabEventProperties[Event]): void {
   analytics.track(event, props);
 }

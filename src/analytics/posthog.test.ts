@@ -63,6 +63,74 @@ describe('anonymous PostHog contract', () => {
     });
   });
 
+  it('strips arbitrary and PII properties before a queued event reaches PostHog', async () => {
+    const posthog = createPostHogMock();
+    let resolveLoad!: (client: typeof posthog) => void;
+    const load = vi.fn(
+      () => new Promise<typeof posthog>((resolve) => {
+        resolveLoad = resolve;
+      }),
+    );
+    const analytics = createAnalytics({ key: 'phc_public_test_key' }, load);
+
+    const initialization = analytics.init();
+    analytics.track('lab_completed', {
+      labId: 'ccna-starter-10-default-route',
+      commandCount: 7,
+      email: 'learner@example.com',
+      userId: 'user_123',
+      token: 'secret-jwt',
+      billing: { customerId: 'cus_123' },
+      arbitrary: 'must-not-leave-the-browser',
+    } as never);
+
+    resolveLoad(posthog);
+    await initialization;
+
+    expect(posthog.capture).toHaveBeenCalledOnce();
+    expect(posthog.capture).toHaveBeenCalledWith('lab_completed', {
+      labId: 'ccna-starter-10-default-route',
+      commandCount: 7,
+    });
+  });
+
+  it('sanitizes runtime-cast properties before immediate capture', async () => {
+    const posthog = createPostHogMock();
+    const analytics = createAnalytics({ key: 'phc_public_test_key' }, async () => posthog);
+    await analytics.init();
+
+    analytics.track('hint_shown', {
+      labId: 'ccna-starter-01-interface-ip',
+      hintIndex: 0,
+      email: 'learner@example.com',
+      token: 'secret-jwt',
+    } as never);
+
+    expect(posthog.capture).toHaveBeenCalledWith('hint_shown', {
+      labId: 'ccna-starter-01-interface-ip',
+      hintIndex: 0,
+    });
+  });
+
+  it.each([
+    ['unsafe lab id', 'lab_viewed', { labId: 'learner@example.com' }],
+    ['overlong lab id', 'lab_started', { labId: `ccna-starter-01-${'x'.repeat(100)}` }],
+    ['fractional command count', 'lab_completed', { labId: 'ccna-starter-01-interface-ip', commandCount: 1.5 }],
+    ['negative command count', 'lab_completed', { labId: 'ccna-starter-01-interface-ip', commandCount: -1 }],
+    ['unbounded command count', 'lab_completed', { labId: 'ccna-starter-01-interface-ip', commandCount: 100_001 }],
+    ['non-finite hint index', 'hint_shown', { labId: 'ccna-starter-01-interface-ip', hintIndex: Number.POSITIVE_INFINITY }],
+    ['negative hint index', 'hint_shown', { labId: 'ccna-starter-01-interface-ip', hintIndex: -1 }],
+    ['unbounded hint index', 'hint_shown', { labId: 'ccna-starter-01-interface-ip', hintIndex: 1_001 }],
+  ])('rejects an event with a malformed allowed property: %s', async (_case, event, properties) => {
+    const posthog = createPostHogMock();
+    const analytics = createAnalytics({ key: 'phc_public_test_key' }, async () => posthog);
+    await analytics.init();
+
+    analytics.track(event as never, properties as never);
+
+    expect(posthog.capture).not.toHaveBeenCalled();
+  });
+
   it('retries a failed lazy load when a later event is tracked and flushes every queued event once', async () => {
     const posthog = createPostHogMock();
     const load = vi
@@ -102,14 +170,14 @@ describe('anonymous PostHog contract', () => {
       { maxQueueSize: 3, maxAttempts: 2, retryBaseMs: 10, cooldownMs: 1_000, now: () => now },
     );
 
-    analytics.track('lab_viewed', { sequence: 1 });
+    analytics.track('lab_viewed', { labId: 'ccna-starter-01-queue-1' });
     await analytics.init();
     now = 10;
-    analytics.track('lab_started', { sequence: 2 });
+    analytics.track('lab_started', { labId: 'ccna-starter-01-queue-2' });
     await analytics.init();
 
     for (let sequence = 3; sequence <= 8; sequence += 1) {
-      analytics.track('hint_shown', { sequence });
+      analytics.track('hint_shown', { labId: 'ccna-starter-01-interface-ip', hintIndex: sequence });
       await analytics.init();
     }
 
@@ -117,14 +185,14 @@ describe('anonymous PostHog contract', () => {
 
     load.mockResolvedValueOnce(posthog);
     now = 1_010;
-    analytics.track('lab_completed', { sequence: 9 });
+    analytics.track('lab_completed', { labId: 'ccna-starter-01-interface-ip', commandCount: 9 });
     await vi.waitFor(() => expect(posthog.capture).toHaveBeenCalledTimes(3));
 
     expect(load).toHaveBeenCalledTimes(3);
     expect(posthog.capture.mock.calls).toEqual([
-      ['hint_shown', { sequence: 7 }],
-      ['hint_shown', { sequence: 8 }],
-      ['lab_completed', { sequence: 9 }],
+      ['hint_shown', { labId: 'ccna-starter-01-interface-ip', hintIndex: 7 }],
+      ['hint_shown', { labId: 'ccna-starter-01-interface-ip', hintIndex: 8 }],
+      ['lab_completed', { labId: 'ccna-starter-01-interface-ip', commandCount: 9 }],
     ]);
   });
 
@@ -141,18 +209,18 @@ describe('anonymous PostHog contract', () => {
       { maxQueueSize: 2, maxAttempts: 3, retryBaseMs: 5, now: () => now },
     );
 
-    analytics.track('lab_viewed', { sequence: 1 });
+    analytics.track('lab_viewed', { labId: 'ccna-starter-01-queue-1' });
     await analytics.init();
-    analytics.track('lab_started', { sequence: 2 });
-    analytics.track('hint_shown', { sequence: 3 });
+    analytics.track('lab_started', { labId: 'ccna-starter-01-queue-2' });
+    analytics.track('hint_shown', { labId: 'ccna-starter-01-interface-ip', hintIndex: 3 });
 
     now = 5;
-    analytics.track('lab_completed', { sequence: 4 });
+    analytics.track('lab_completed', { labId: 'ccna-starter-01-interface-ip', commandCount: 4 });
     await vi.waitFor(() => expect(posthog.capture).toHaveBeenCalledTimes(2));
 
     expect(posthog.capture.mock.calls).toEqual([
-      ['hint_shown', { sequence: 3 }],
-      ['lab_completed', { sequence: 4 }],
+      ['hint_shown', { labId: 'ccna-starter-01-interface-ip', hintIndex: 3 }],
+      ['lab_completed', { labId: 'ccna-starter-01-interface-ip', commandCount: 4 }],
     ]);
   });
 });

@@ -54,6 +54,13 @@ Imports retry with exponential backoff for three attempts, then pause for a
 Funnel: viewed, started, completed, CTA. Never send email, account IDs, billing
 data, JWTs, credentials, or other user identity in event properties.
 
+The analytics API and runtime boundary allow only event-specific properties:
+every event requires a safe CCNA `labId`; `lab_completed` also requires a finite
+integer `commandCount` from 0 through 100,000; and `hint_shown` also requires a
+finite integer `hintIndex` from 0 through 1,000. Unknown properties are stripped
+before queueing or capture. If a required allowed property is missing, malformed,
+or out of bounds, the entire event is rejected.
+
 ## 3. Custom domain `labs.certhead.com`
 
 1. Add `labs.certhead.com` as a Pages custom domain.

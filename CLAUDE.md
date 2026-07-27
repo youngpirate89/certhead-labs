@@ -385,8 +385,8 @@ Each item is a discrete weekend's work. Don't start item N+1 until N is done and
 **🚀 SHIP MILESTONE 1: Public free lab at `labs.certhead.com/try`** ✅ HIT
 
 - Cloudflare Pages direct-upload deploy (`npx wrangler pages deploy`)
-- Live at `https://main.certhead-labs.pages.dev/`
-- `labs.certhead.com` CNAME + landing-page link still gated on CertHead launch
+- Public 10-starter path live at `https://labs.certhead.com/try`
+- Historical direct-upload host: `main.certhead-labs.pages.dev` (superseded by the custom domain)
 - PostHog anonymous analytics on engagement + completion + CTA clicks
 - Standalone marketing asset; no CertHead code changes required to ship
 
