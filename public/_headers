@@ -10,5 +10,8 @@
 /pilot*
   X-Robots-Tag: noindex, nofollow
 
+/dev
+  X-Robots-Tag: noindex, nofollow
+
 /dev/*
   X-Robots-Tag: noindex, nofollow

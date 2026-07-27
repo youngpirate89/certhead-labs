@@ -13,6 +13,19 @@ const STARTER_IDS = [
   'ccna-starter-10-default-route',
 ] as const;
 
+function hasNoindexHeader(headers: string, path: string) {
+  return headers
+    .split(/\n(?=\/)/)
+    .filter((block) => block.includes('X-Robots-Tag: noindex, nofollow'))
+    .map((block) => block.split('\n', 1)[0].trim())
+    .some((pattern) => {
+      const expression = pattern
+        .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+        .replace(/\*/g, '.*');
+      return new RegExp(`^${expression}$`).test(path);
+    });
+}
+
 test('production bundle serves every dedicated public starter URL', async ({ page }) => {
   for (let index = 0; index < STARTER_IDS.length; index += 1) {
     await page.goto(`/try?lab=${STARTER_IDS[index]}`);
@@ -55,7 +68,11 @@ test('production raw SEO assets have correct content types and public-only conte
   const headersBody = await headers.text();
   expect(headersBody).toContain('/embed/*');
   expect(headersBody).toContain('/pilot*');
+  expect(headersBody).toMatch(/(?:^|\n)\/dev\n/);
   expect(headersBody).toContain('/dev/*');
+  expect(hasNoindexHeader(headersBody, '/dev')).toBe(true);
+  expect(hasNoindexHeader(headersBody, '/dev/preview')).toBe(true);
+  expect(hasNoindexHeader(headersBody, '/try')).toBe(false);
   expect(headersBody).not.toMatch(/(?:^|\n)\/try(?:\s|\n)/);
 
   const sitemap = await request.get('/sitemap.xml');

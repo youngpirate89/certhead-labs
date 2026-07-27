@@ -7,6 +7,19 @@ import { DEFAULT_FREE_CCNA_STARTER_LAB_ID, resolveTryModeLabId } from '@/routing
 
 const EM_DASH = '\u2014';
 
+function hasNoindexHeader(headers: string, path: string) {
+  return headers
+    .split(/\n(?=\/)/)
+    .filter((block) => block.includes('X-Robots-Tag: noindex, nofollow'))
+    .map((block) => block.split('\n', 1)[0].trim())
+    .some((pattern) => {
+      const expression = pattern
+        .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+        .replace(/\*/g, '.*');
+      return new RegExp(`^${expression}$`).test(path);
+    });
+}
+
 describe('release readiness: public free-lab surface', () => {
   it('keeps the public CTA aligned to the Pro bundle and current 60-lab catalog', () => {
     const registerUrl = new URL(buildFreeLabRegisterUrl('ccna-starter-10-default-route'));
@@ -141,8 +154,12 @@ describe('release readiness: public free-lab surface', () => {
 
     expect(headers).toContain('/embed/*');
     expect(headers).toContain('/pilot*');
+    expect(headers).toMatch(/(?:^|\n)\/dev\n/);
     expect(headers).toContain('/dev/*');
-    expect(headers.match(/X-Robots-Tag: noindex, nofollow/g)).toHaveLength(5);
+    expect(headers.match(/X-Robots-Tag: noindex, nofollow/g)).toHaveLength(6);
+    expect(hasNoindexHeader(headers, '/dev')).toBe(true);
+    expect(hasNoindexHeader(headers, '/dev/preview')).toBe(true);
+    expect(hasNoindexHeader(headers, '/try')).toBe(false);
     expect(headers).not.toMatch(/(?:^|\n)\/try(?:\s|\n)/);
 
     expect(sitemap).toContain('<loc>https://labs.certhead.com/try</loc>');
