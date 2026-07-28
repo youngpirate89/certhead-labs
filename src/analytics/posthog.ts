@@ -7,6 +7,10 @@
  * configured, and events emitted during that load are queued.
  */
 import type posthogType from 'posthog-js';
+import {
+  sanitizeOptionalCampaignAttribution,
+  type CampaignAttribution,
+} from '@/conversion/campaignAttribution';
 
 type PostHog = Pick<typeof posthogType, 'init' | 'capture'>;
 type PostHogLoader = () => Promise<PostHog>;
@@ -33,8 +37,12 @@ const MAX_COMMAND_COUNT = 100_000;
 const MAX_HINT_INDEX = 1_000;
 const SAFE_LAB_ID = /^ccna-(?:starter-\d{2}|lab\d+)-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-interface LabIdProperties {
+interface LabIdProperties extends Partial<CampaignAttribution> {
   readonly labId: string;
+}
+
+interface CanonicalLabIdProperties extends Partial<CampaignAttribution> {
+  readonly lab_id: string;
 }
 
 export interface LabEventProperties {
@@ -45,6 +53,9 @@ export interface LabEventProperties {
   readonly lab_reset: LabIdProperties;
   readonly hint_shown: LabIdProperties & { readonly hintIndex: number };
   readonly cta_clicked: LabIdProperties;
+  readonly free_lab_viewed: CanonicalLabIdProperties;
+  readonly free_lab_started: CanonicalLabIdProperties;
+  readonly free_lab_completed: CanonicalLabIdProperties & { readonly command_count: number };
 }
 
 export type LabEvent = keyof LabEventProperties;
@@ -80,22 +91,47 @@ function isBoundedNonnegativeInteger(value: unknown, maximum: number): value is 
  * emitting ambiguous analytics without its required lab context.
  */
 function sanitizeEvent(event: unknown, props: unknown): SanitizedEvent | null {
-  if (!isPropertyObject(props) || !isSafeLabId(props.labId)) return null;
-  const labId = props.labId;
+  if (!isPropertyObject(props)) return null;
+  const campaign = sanitizeOptionalCampaignAttribution(props);
+  if (campaign === null) return null;
+  const campaignProperties = campaign ?? {};
 
   switch (event) {
+    case 'free_lab_viewed':
+    case 'free_lab_started':
+      if (!isSafeLabId(props.lab_id)) return null;
+      return { event, props: { lab_id: props.lab_id, ...campaignProperties } };
+    case 'free_lab_completed':
+      if (!isSafeLabId(props.lab_id)
+        || !isBoundedNonnegativeInteger(props.command_count, MAX_COMMAND_COUNT)) return null;
+      return {
+        event,
+        props: { lab_id: props.lab_id, command_count: props.command_count, ...campaignProperties },
+      };
     case 'lab_viewed':
     case 'lab_started':
     case 'lab_brief_dismissed':
     case 'lab_reset':
     case 'cta_clicked':
-      return { event, props: { labId } };
+      if (!isSafeLabId(props.labId)) return null;
+      {
+        const labId = props.labId;
+        return { event, props: { labId, ...campaignProperties } };
+      }
     case 'lab_completed':
-      if (!isBoundedNonnegativeInteger(props.commandCount, MAX_COMMAND_COUNT)) return null;
-      return { event, props: { labId, commandCount: props.commandCount } };
+      if (!isSafeLabId(props.labId)
+        || !isBoundedNonnegativeInteger(props.commandCount, MAX_COMMAND_COUNT)) return null;
+      {
+        const labId = props.labId;
+        return { event, props: { labId, commandCount: props.commandCount, ...campaignProperties } };
+      }
     case 'hint_shown':
-      if (!isBoundedNonnegativeInteger(props.hintIndex, MAX_HINT_INDEX)) return null;
-      return { event, props: { labId, hintIndex: props.hintIndex } };
+      if (!isSafeLabId(props.labId)
+        || !isBoundedNonnegativeInteger(props.hintIndex, MAX_HINT_INDEX)) return null;
+      return {
+        event,
+        props: { labId: props.labId, hintIndex: props.hintIndex, ...campaignProperties },
+      };
     default:
       return null;
   }
@@ -134,6 +170,17 @@ export function createAnalytics(
           autocapture: false,
           capture_pageview: false,
           disable_session_recording: true,
+          save_campaign_params: false,
+          save_referrer: false,
+          before_send: (payload) => {
+            if (!payload) return null;
+            const sanitized = sanitizeEvent(payload.event, payload.properties);
+            if (!sanitized) return null;
+            payload.properties = sanitized.props;
+            delete payload.$set;
+            delete payload.$set_once;
+            return payload;
+          },
         });
         client = posthog;
         failedAttempts = 0;

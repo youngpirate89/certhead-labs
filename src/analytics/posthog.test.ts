@@ -32,13 +32,64 @@ describe('anonymous PostHog contract', () => {
 
     await analytics.init();
 
-    expect(posthog.init).toHaveBeenCalledWith('phc_public_test_key', {
+    expect(posthog.init).toHaveBeenCalledWith('phc_public_test_key', expect.objectContaining({
       api_host: 'https://us.i.posthog.com',
       person_profiles: 'identified_only',
       autocapture: false,
       capture_pageview: false,
       disable_session_recording: true,
+      save_campaign_params: false,
+      save_referrer: false,
+      before_send: expect.any(Function),
+    }));
+  });
+
+  it('sanitizes the SDK-enriched final payload before network delivery', async () => {
+    const posthog = createPostHogMock();
+    const analytics = createAnalytics({ key: 'phc_public_test_key' }, async () => posthog);
+    await analytics.init();
+    const config = posthog.init.mock.calls[0]?.[1] as {
+      before_send: (payload: {
+        event: string;
+        properties: Record<string, unknown>;
+        $set?: Record<string, unknown>;
+        $set_once?: Record<string, unknown>;
+      }) => unknown;
+    };
+
+    expect(config.before_send({
+      event: 'free_lab_viewed',
+      properties: {
+        lab_id: 'ccna-starter-01-interface-ip',
+        utm_source: 'x',
+        utm_medium: 'organic-social',
+        utm_campaign: 'ccna-starter-launch',
+        utm_content: 'hero',
+        $current_url: 'https://labs.certhead.com/try?token=secret',
+        $referrer: 'https://example.com/private',
+        email: 'learner@example.com',
+      },
+      $set: { email: 'learner@example.com' },
+      $set_once: { initial_url: 'https://labs.certhead.com/try?token=secret' },
+    })).toEqual({
+      event: 'free_lab_viewed',
+      properties: {
+        lab_id: 'ccna-starter-01-interface-ip',
+        utm_source: 'x',
+        utm_medium: 'organic-social',
+        utm_campaign: 'ccna-starter-launch',
+        utm_content: 'hero',
+      },
     });
+
+    expect(config.before_send({
+      event: 'lab_viewed',
+      properties: {
+        labId: 'ccna-starter-01-interface-ip',
+        utm_content: 'learner@example.com',
+        $current_url: 'https://labs.certhead.com/try?utm_content=learner%40example.com',
+      },
+    })).toBeNull();
   });
 
   it('flushes events queued while the lazy analytics client loads', async () => {
@@ -77,6 +128,10 @@ describe('anonymous PostHog contract', () => {
     analytics.track('lab_completed', {
       labId: 'ccna-starter-10-default-route',
       commandCount: 7,
+      utm_source: 'youtube',
+      utm_medium: 'organic-social',
+      utm_campaign: 'ccna-starter-launch',
+      utm_content: 'routing-demo',
       email: 'learner@example.com',
       userId: 'user_123',
       token: 'secret-jwt',
@@ -91,6 +146,10 @@ describe('anonymous PostHog contract', () => {
     expect(posthog.capture).toHaveBeenCalledWith('lab_completed', {
       labId: 'ccna-starter-10-default-route',
       commandCount: 7,
+      utm_source: 'youtube',
+      utm_medium: 'organic-social',
+      utm_campaign: 'ccna-starter-launch',
+      utm_content: 'routing-demo',
     });
   });
 
@@ -102,6 +161,10 @@ describe('anonymous PostHog contract', () => {
     analytics.track('hint_shown', {
       labId: 'ccna-starter-01-interface-ip',
       hintIndex: 0,
+      utm_source: 'x',
+      utm_medium: 'cpc',
+      utm_campaign: 'routing-practice',
+      utm_content: 'hint-zero',
       email: 'learner@example.com',
       token: 'secret-jwt',
     } as never);
@@ -109,7 +172,51 @@ describe('anonymous PostHog contract', () => {
     expect(posthog.capture).toHaveBeenCalledWith('hint_shown', {
       labId: 'ccna-starter-01-interface-ip',
       hintIndex: 0,
+      utm_source: 'x',
+      utm_medium: 'cpc',
+      utm_campaign: 'routing-practice',
+      utm_content: 'hint-zero',
     });
+  });
+
+  it('rejects malformed campaign fields with PII before a queued event can reach PostHog', async () => {
+    const posthog = createPostHogMock();
+    let resolveLoad!: (client: typeof posthog) => void;
+    const load = vi.fn(() => new Promise<typeof posthog>((resolve) => {
+      resolveLoad = resolve;
+    }));
+    const analytics = createAnalytics({ key: 'phc_public_test_key' }, load);
+
+    const initialization = analytics.init();
+    analytics.track('lab_viewed', {
+      labId: 'ccna-starter-01-interface-ip',
+      utm_source: 'facebook',
+      utm_medium: 'paid-social',
+      utm_campaign: 'ccna-launch',
+      utm_content: 'hero',
+      email: 'learner@example.com',
+    } as never);
+    resolveLoad(posthog);
+    await initialization;
+
+    expect(posthog.capture).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed campaign fields with PII on the initialized path', async () => {
+    const posthog = createPostHogMock();
+    const analytics = createAnalytics({ key: 'phc_public_test_key' }, async () => posthog);
+    await analytics.init();
+
+    analytics.track('lab_viewed', {
+      labId: 'ccna-starter-01-interface-ip',
+      utm_source: 'x',
+      utm_medium: 'paid-social',
+      utm_campaign: 'Contains-Uppercase',
+      utm_content: 'hero',
+      email: 'learner@example.com',
+    } as never);
+
+    expect(posthog.capture).not.toHaveBeenCalled();
   });
 
   it.each([

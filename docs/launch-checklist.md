@@ -34,5 +34,5 @@ Purpose: track validation that must happen in the main CertHead app or API, the 
 - [ ] Verify effective `X-Robots-Tag: noindex, nofollow` responses on root and private/development routes, and its absence on `/try`; local preview cannot prove Cloudflare-applied headers.
 - [ ] Confirm starters 1 through 9 continue internally and only starter 10 exits.
 - [ ] Confirm the final completion CTA preserves `source=free-lab`, the originating starter `lab`, a safe `/upgrade` redirect, and the eventual `/labs` return.
-- [ ] Confirm PostHog receives anonymous `lab_viewed`, `lab_started`, `lab_completed`, and `cta_clicked` events.
+- [ ] Confirm PostHog receives canonical anonymous `free_lab_viewed`, `free_lab_started`, and `free_lab_completed` events; also confirm temporary legacy `lab_viewed`, `lab_started`, `lab_completed`, and `cta_clicked` events during migration.
 - [ ] Confirm no analytics payload includes email, account id, billing data, JWTs, or secrets.
