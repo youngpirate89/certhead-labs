@@ -10,6 +10,11 @@ import { FREE_CCNA_STARTER_LAB_IDS, getFreeCcnaStarterLabById, getFreeCcnaStarte
 import { DEFAULT_FREE_CCNA_STARTER_LAB_ID, resolveTryModeLabId } from '@/routing/tryLabSelection';
 import { initAnalytics, track } from '@/analytics/posthog';
 import { buildFreeLabRegisterUrl } from '@/conversion/freeLabIntent';
+import {
+  appendCampaignAttribution,
+  parseCampaignAttribution,
+  type CampaignAttribution,
+} from '@/conversion/campaignAttribution';
 
 interface CompletionCta {
   readonly href: string;
@@ -24,21 +29,27 @@ function starterTitleWithoutPrefix(title: string): string {
   return title.replace(/^Starter\s+\d+:\s*/, '');
 }
 
-function getCompletionCta(labId: string): CompletionCta {
+function getCompletionCta(
+  labId: string,
+  campaign: CampaignAttribution | null,
+): CompletionCta {
   const currentIndex = FREE_CCNA_STARTER_LAB_IDS.findIndex((id) => id === labId);
   const nextId = currentIndex >= 0 ? FREE_CCNA_STARTER_LAB_IDS[currentIndex + 1] : undefined;
   const nextLab = nextId ? getFreeCcnaStarterLabById(nextId) : null;
 
   if (nextLab) {
     return {
-      href: `/try?lab=${encodeURIComponent(nextLab.id)}`,
+      href: appendCampaignAttribution(
+        `/try?lab=${encodeURIComponent(nextLab.id)}`,
+        campaign,
+      ),
       label: 'Continue to next free lab',
       nextCopy: `Starter ${currentIndex + 2}, ${starterTitleWithoutPrefix(nextLab.title)}.`,
     };
   }
 
   return {
-    href: buildFreeLabRegisterUrl(labId),
+    href: buildFreeLabRegisterUrl(labId, campaign),
     label: FREE_LAB_UPSELL_COPY.cta,
     target: '_blank',
     rel: 'noopener noreferrer',
@@ -63,7 +74,10 @@ export const FREE_LAB_UPSELL_COPY = {
  * shared FloatingTerminalPanel — one window, one tab per open device.
  */
 export function TryMode() {
-  const labId = typeof window === 'undefined' ? DEFAULT_FREE_CCNA_STARTER_LAB_ID : resolveTryModeLabId(window.location.search);
+  const search = typeof window === 'undefined' ? '' : window.location.search;
+  const labId = resolveTryModeLabId(search);
+  const campaign = useMemo(() => parseCampaignAttribution(search), [search]);
+  const campaignProperties = useMemo(() => campaign ?? {}, [campaign]);
   const lab = getFreeCcnaStarterLabById(labId) ?? getFreeCcnaStarterLabById(DEFAULT_FREE_CCNA_STARTER_LAB_ID)!;
   const session = useLabSession(lab);
   const viewedLabIdRef = useRef<string | null>(null);
@@ -72,27 +86,37 @@ export function TryMode() {
     initAnalytics();
     if (viewedLabIdRef.current !== lab.id) {
       viewedLabIdRef.current = lab.id;
-      track('lab_viewed', { labId: lab.id });
+      track('lab_viewed', { labId: lab.id, ...campaignProperties });
+      track('free_lab_viewed', { lab_id: lab.id, ...campaignProperties });
     }
-  }, [lab.id]);
+  }, [lab.id, campaignProperties]);
 
   // Engagement: fire once when the learner runs their first command.
   const startedRef = useRef(false);
   useEffect(() => {
     if (!startedRef.current && session.commandCount > 0) {
       startedRef.current = true;
-      track('lab_started', { labId: lab.id });
+      track('lab_started', { labId: lab.id, ...campaignProperties });
     }
-  }, [session.commandCount, lab.id]);
+  }, [session.commandCount, lab.id, campaignProperties]);
 
   // Latch completion so the CTA persists even if the learner keeps typing.
   const [completed, setCompleted] = useState(false);
   useEffect(() => {
     if (session.allMet && !completed) {
       setCompleted(true);
-      track('lab_completed', { labId: lab.id, commandCount: session.commandCount });
+      track('lab_completed', {
+        labId: lab.id,
+        commandCount: session.commandCount,
+        ...campaignProperties,
+      });
+      track('free_lab_completed', {
+        lab_id: lab.id,
+        command_count: session.commandCount,
+        ...campaignProperties,
+      });
     }
-  }, [session.allMet, completed, session.commandCount, lab.id]);
+  }, [session.allMet, completed, session.commandCount, lab.id, campaignProperties]);
 
   const [briefDismissed, setBriefDismissed] = useState(false);
   const [labStartedAt, setLabStartedAt] = useState<number | null>(null);
@@ -102,7 +126,8 @@ export function TryMode() {
   function startLab() {
     setBriefDismissed(true);
     setLabStartedAt(Date.now());
-    track('lab_brief_dismissed', { labId: lab.id });
+    track('lab_brief_dismissed', { labId: lab.id, ...campaignProperties });
+    track('free_lab_started', { lab_id: lab.id, ...campaignProperties });
   }
 
   function resetLab() {
@@ -110,11 +135,11 @@ export function TryMode() {
     setLabStartedAt(Date.now());
     setCompleted(false);
     startedRef.current = false;
-    track('lab_reset', { labId: lab.id });
+    track('lab_reset', { labId: lab.id, ...campaignProperties });
   }
 
   function trackHintReveal(index: number) {
-    track('hint_shown', { labId: lab.id, hintIndex: index });
+    track('hint_shown', { labId: lab.id, hintIndex: index, ...campaignProperties });
   }
 
   // Topology click: open the device's tab in the shared terminal panel
@@ -151,11 +176,14 @@ export function TryMode() {
         title: starterLab.title,
         estimatedMinutes: starterLab.estimatedMinutes,
         difficulty: starterLab.difficulty,
-        href: `/try?lab=${encodeURIComponent(starterLab.id)}`,
+        href: appendCampaignAttribution(
+          `/try?lab=${encodeURIComponent(starterLab.id)}`,
+          campaign,
+        ),
         isActive: starterLab.id === lab.id,
         sequenceNumber: index + 1,
       })),
-    [lab.id],
+    [lab.id, campaign],
   );
 
   return (
@@ -236,7 +264,7 @@ export function TryMode() {
           />
         </div>
       )}
-      {completed && <CompletionBanner labId={lab.id} />}
+      {completed && <CompletionBanner labId={lab.id} campaign={campaign} />}
     </>
   );
 }
@@ -267,8 +295,18 @@ export function MobileHintsPanel({ hints }: { hints: readonly string[] }) {
 /** Completion banner — same content as the previous in-terminal CompletionCard.
  *  Renders as a fixed-position strip at the bottom of the viewport so it works
  *  regardless of which (or how many) floating panels are open. */
-export function CompletionBanner({ labId }: { labId: string }) {
-  const cta = getCompletionCta(labId);
+export function CompletionBanner({
+  labId,
+  campaign,
+}: {
+  labId: string;
+  campaign?: CampaignAttribution | null;
+}) {
+  const resolvedCampaign = campaign === undefined
+    ? parseCampaignAttribution(typeof window === 'undefined' ? '' : window.location.search)
+    : campaign;
+  const cta = getCompletionCta(labId, resolvedCampaign);
+  const campaignProperties = resolvedCampaign ?? {};
 
   return (
     <div className="animate-slide-up fixed inset-x-0 bottom-0 z-30 border-t border-terminal-prompt/40 bg-panel-header/95 p-5 backdrop-blur">
@@ -289,7 +327,7 @@ export function CompletionBanner({ labId }: { labId: string }) {
           href={cta.href}
           target={cta.target}
           rel={cta.rel}
-          onClick={() => track('cta_clicked', { labId })}
+          onClick={() => track('cta_clicked', { labId, ...campaignProperties })}
           className="shrink-0 rounded-md bg-terminal-prompt px-4 py-2 text-center font-sans text-sm font-semibold text-[#06231d] transition hover:brightness-110"
         >
           {cta.label}

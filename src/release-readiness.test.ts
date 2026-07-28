@@ -22,11 +22,20 @@ function hasNoindexHeader(headers: string, path: string) {
 
 describe('release readiness: public free-lab surface', () => {
   it('keeps the public CTA aligned to the Pro bundle and current 60-lab catalog', () => {
-    const registerUrl = new URL(buildFreeLabRegisterUrl('ccna-starter-10-default-route'));
+    const registerUrl = new URL(buildFreeLabRegisterUrl('ccna-starter-10-default-route', {
+      utm_source: 'instagram',
+      utm_medium: 'organic-social',
+      utm_campaign: 'ccna-starter-launch',
+      utm_content: 'final-starter',
+    }));
     expect(registerUrl.origin).toBe('https://certhead.com');
     expect(registerUrl.pathname).toBe('/register');
     expect(registerUrl.searchParams.get('source')).toBe('free-lab');
     expect(registerUrl.searchParams.get('lab')).toBe('ccna-starter-10-default-route');
+    expect(registerUrl.searchParams.get('utm_source')).toBe('instagram');
+    expect(registerUrl.searchParams.get('utm_medium')).toBe('organic-social');
+    expect(registerUrl.searchParams.get('utm_campaign')).toBe('ccna-starter-launch');
+    expect(registerUrl.searchParams.get('utm_content')).toBe('final-starter');
 
     const upgradeUrl = new URL(registerUrl.searchParams.get('redirect')!, registerUrl.origin);
     expect(upgradeUrl.pathname).toBe('/upgrade');
@@ -114,6 +123,9 @@ describe('release readiness: public free-lab surface', () => {
       'lab_reset',
       'hint_shown',
       'cta_clicked',
+      'free_lab_viewed',
+      'free_lab_started',
+      'free_lab_completed',
     ]) {
       expect(deploy).toContain(event);
     }
@@ -133,7 +145,7 @@ describe('release readiness: public free-lab surface', () => {
     expect(robots).toContain('Disallow: /');
     expect(robots).toContain('Sitemap: https://labs.certhead.com/sitemap.xml');
 
-    const directives = robots.split('\n').filter((line) => /^(?:Allow|Disallow):/.test(line));
+    const directives = robots.split(/\r?\n/).filter((line) => /^(?:Allow|Disallow):/.test(line));
     const isAllowed = (path: string) => {
       const matching = directives
         .map((line) => {
@@ -154,13 +166,13 @@ describe('release readiness: public free-lab surface', () => {
 
     expect(headers).toContain('/embed/*');
     expect(headers).toContain('/pilot*');
-    expect(headers).toMatch(/(?:^|\n)\/dev\n/);
+    expect(headers).toMatch(/(?:^|\r?\n)\/dev\r?\n/);
     expect(headers).toContain('/dev/*');
     expect(headers.match(/X-Robots-Tag: noindex, nofollow/g)).toHaveLength(6);
     expect(hasNoindexHeader(headers, '/dev')).toBe(true);
     expect(hasNoindexHeader(headers, '/dev/preview')).toBe(true);
     expect(hasNoindexHeader(headers, '/try')).toBe(false);
-    expect(headers).not.toMatch(/(?:^|\n)\/try(?:\s|\n)/);
+    expect(headers).not.toMatch(/(?:^|\r?\n)\/try(?:\s|\r?\n)/);
 
     expect(sitemap).toContain('<loc>https://labs.certhead.com/try</loc>');
     expect(sitemap).not.toMatch(/<loc>[^<]*(?:embed|pilot|dev|localhost)[^<]*<\/loc>/i);
@@ -194,7 +206,6 @@ describe('release readiness: public free-lab surface', () => {
   it('has a launch checklist for validations that belong outside this repo', () => {
     const checklistPath = `${process.cwd()}/docs/launch-checklist.md`;
     expect(existsSync(checklistPath)).toBe(true);
-
     const checklist = readFileSync(checklistPath, 'utf8');
     expect(checklist).toContain('Main CertHead app or API');
     expect(checklist).toContain('Hosting provider');
@@ -202,6 +213,9 @@ describe('release readiness: public free-lab surface', () => {
     expect(checklist).toContain('VITE_POSTHOG_KEY');
     expect(checklist).toContain('10 free CCNA starter labs');
     expect(checklist).toContain('$9.99 CertHead Pro bundle');
+    for (const event of ['free_lab_viewed', 'free_lab_started', 'free_lab_completed']) {
+      expect(checklist).toContain(event);
+    }
     expect(checklist).not.toContain('$4.99');
     expect(checklist).not.toContain(EM_DASH);
   });

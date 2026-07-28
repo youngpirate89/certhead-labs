@@ -47,6 +47,12 @@ anonymous person-profile creation. Explicit events use only non-PII lab context:
 - `hint_shown`
 - `cta_clicked`
 
+Canonical cross-funnel events are emitted alongside the temporary legacy names:
+
+- `free_lab_viewed`
+- `free_lab_started`
+- `free_lab_completed`
+
 Lazy-load failures retain at most 100 events, dropping the oldest when full.
 Imports retry with exponential backoff for three attempts, then pause for a
 60-second cooldown before a later event can start a new bounded retry cycle.
@@ -54,12 +60,13 @@ Imports retry with exponential backoff for three attempts, then pause for a
 Funnel: viewed, started, completed, CTA. Never send email, account IDs, billing
 data, JWTs, credentials, or other user identity in event properties.
 
-The analytics API and runtime boundary allow only event-specific properties:
-every event requires a safe CCNA `labId`; `lab_completed` also requires a finite
-integer `commandCount` from 0 through 100,000; and `hint_shown` also requires a
-finite integer `hintIndex` from 0 through 1,000. Unknown properties are stripped
-before queueing or capture. If a required allowed property is missing, malformed,
-or out of bounds, the entire event is rejected.
+The analytics API and runtime boundary allow only event-specific properties.
+Legacy events require a safe CCNA `labId`; canonical events require `lab_id`.
+Completion events also require a finite integer `commandCount` or
+`command_count` from 0 through 100,000, and `hint_shown` requires a finite
+integer `hintIndex` from 0 through 1,000. Unknown properties are stripped before
+queueing, capture, and final SDK delivery. If a required approved property is
+missing, malformed, or out of bounds, the entire event is rejected.
 
 ## 3. Custom domain `labs.certhead.com`
 
@@ -95,5 +102,7 @@ or deploy those routes.
 - [ ] Verify those effective response headers on the live Cloudflare deployment; local preview only proves the built `_headers` artifact.
 - [ ] `sitemap.xml` is served as XML and contains only the canonical `/try` URL.
 - [ ] Raw `index.html` includes the canonical metadata, truthful JSON-LD, and fallback H1.
-- [ ] PostHog receives `lab_viewed`, `lab_started`, `lab_completed`, and
-      `cta_clicked` during a production browser smoke test after the public key is configured.
+- [ ] PostHog receives canonical `free_lab_viewed`, `free_lab_started`, and
+      `free_lab_completed` events during a production browser smoke test after
+      the public key is configured; legacy `lab_viewed`, `lab_started`,
+      `lab_completed`, and `cta_clicked` remain present during migration.
